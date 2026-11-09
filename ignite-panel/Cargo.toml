@@ -7,7 +7,7 @@ publish = false
 [dependencies]
 ignite-core = { path = "../ignite-core" }
 rocket = { git = "https://github.com/rwf2/Rocket", rev = "3a54d079" }
-propel_rocket = { git = "https://github.com/lajennylove/propel", rev = "1853048" }
+propel_rocket = { git = "https://github.com/lajennylove/propel", rev = "025279f0409efceaf5f8a0309dc31044ad753138" }
 diesel = { version = "2", features = ["mysql", "r2d2", "chrono"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
