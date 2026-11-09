@@ -1,8 +1,10 @@
 //! The `ignite` command line: `ignite user create --email <email> [--name <name>]`.
 //!
-//! The password is read from the terminal without echoing, and asked for
-//! twice. The command runs the panel's migrations first, so the `users` table
-//! exists. Apps call [`main`] from a small binary of their own.
+//! The command checks `DATABASE_URL`, connects, runs the panel's migrations and
+//! checks for an existing user before it asks for a password. The password is
+//! read from the terminal without echoing, and asked for twice. Apps call
+//! [`main`] from a small binary of their own, after loading `.env` the way the
+//! workspace's `ignite` binary does.
 
 use std::process::exit;
 
@@ -56,14 +58,6 @@ fn create_user(args: &[String]) -> i32 {
     };
     let name = name.unwrap_or_default();
 
-    let password = match read_password() {
-        Ok(password) => password,
-        Err(message) => {
-            eprintln!("{message}");
-            return 1;
-        }
-    };
-
     let url = match std::env::var("DATABASE_URL") {
         Ok(url) => url,
         Err(_) => {
@@ -82,6 +76,26 @@ fn create_user(args: &[String]) -> i32 {
         eprintln!("Could not run the panel's migrations: {error}");
         return 1;
     }
+    // Everything that can fail without a password runs before the prompt.
+    match users::find_by_email(&mut conn, &email) {
+        Ok(Some(_)) => {
+            eprintln!("A user with the email {email} already exists.");
+            return 1;
+        }
+        Ok(None) => {}
+        Err(error) => {
+            eprintln!("Could not check for an existing user: {error}");
+            return 1;
+        }
+    }
+
+    let password = match read_password() {
+        Ok(password) => password,
+        Err(message) => {
+            eprintln!("{message}");
+            return 1;
+        }
+    };
 
     match users::create_user(&mut conn, &name, &email, &password) {
         Ok(user) => {

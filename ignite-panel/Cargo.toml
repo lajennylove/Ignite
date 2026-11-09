@@ -20,6 +20,7 @@ hmac = "0.12"
 sha2 = "0.10"
 base64 = "0.22"
 rpassword = "7"
+dotenvy = "0.15"
 
 [[bin]]
 name = "ignite"
