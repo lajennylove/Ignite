@@ -90,13 +90,23 @@ fn a_signed_in_user_reaches_the_panel() {
     let client = client(None);
     assert_eq!(login(&client, EMAIL, PASSWORD), Status::SeeOther);
 
-    let root = client.get("/admin").dispatch();
-    assert_eq!(root.status(), Status::SeeOther);
-    assert_eq!(root.headers().get_one("Location"), Some("/admin/widgets"));
+    let dashboard = client.get("/admin").dispatch();
+    assert_eq!(dashboard.status(), Status::Ok);
+    let body = dashboard.into_string().unwrap();
+    assert!(body.contains("Sign out"));
+    // The Widgets resource provides a card with the number of rows it holds.
+    assert!(body.contains("Widgets"));
+    assert!(body.contains(r#"<p class="card-value">3</p>"#));
+}
 
-    let body = client.get("/admin/widgets").dispatch();
-    assert_eq!(body.status(), Status::Ok);
-    assert!(body.into_string().unwrap().contains("Sign out"));
+#[test]
+fn the_dashboard_needs_a_session() {
+    let _guard = reset();
+    let client = client(None);
+    let response = client.get("/admin").dispatch();
+
+    assert_eq!(response.status(), Status::SeeOther);
+    assert_eq!(response.headers().get_one("Location"), Some("/admin/login"));
 }
 
 #[test]

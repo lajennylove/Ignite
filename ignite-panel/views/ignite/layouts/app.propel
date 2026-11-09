@@ -43,6 +43,10 @@ td form { display: inline; }
 .error { color: var(--danger); margin: 0.3rem 0 0; }
 .form-actions { display: flex; gap: 0.75rem; align-items: center; }
 .muted { color: var(--muted); }
+.cards { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 1rem; }
+.card-label { margin: 0; color: var(--muted); }
+.card-value { margin: 0.25rem 0 0; font-size: 2rem; font-weight: 700; }
 </style>
 </head>
 <body>

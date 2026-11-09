@@ -11,7 +11,7 @@ use diesel::sql_query;
 use diesel::sql_types::BigInt;
 use ignite_core::{
     escape_like, Column, Direction, Field, FieldErrors, FieldKind, FormInput, IgniteResource,
-    ListQuery, Page,
+    ListQuery, Page, StatWidget,
 };
 use ignite_panel::{run_migrations, users, Ignite};
 use rocket::http::{ContentType, Status};
@@ -153,6 +153,14 @@ impl IgniteResource for Widgets {
             return Err(DieselError::NotFound);
         }
         Self::find(conn, id)?.ok_or(DieselError::NotFound)
+    }
+
+    fn widgets(conn: &mut MysqlConnection) -> QueryResult<Vec<StatWidget>> {
+        let value: i64 = widgets::table.count().get_result(conn)?;
+        Ok(vec![StatWidget {
+            label: "Widgets",
+            value,
+        }])
     }
 
     fn delete(conn: &mut MysqlConnection, id: i64) -> QueryResult<usize> {

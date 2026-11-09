@@ -28,14 +28,15 @@ impl Layout {
     /// The layout for a page. Signed-out pages show no navigation.
     pub(crate) fn new(registry: &Registry, signed_in: bool, flash: Option<String>) -> Self {
         let nav = if signed_in {
-            registry
-                .resources
-                .iter()
-                .map(|r| NavLink {
-                    title: r.title(),
-                    url: format!("{}/{}", registry.mount, r.slug()),
-                })
-                .collect()
+            std::iter::once(NavLink {
+                title: "Dashboard",
+                url: registry.mount.clone(),
+            })
+            .chain(registry.resources.iter().map(|r| NavLink {
+                title: r.title(),
+                url: format!("{}/{}", registry.mount, r.slug()),
+            }))
+            .collect()
         } else {
             Vec::new()
         };
@@ -48,6 +49,21 @@ impl Layout {
             flash: flash.unwrap_or_default(),
         }
     }
+}
+
+/// The dashboard: a row of stat cards.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct DashboardPage {
+    #[serde(flatten)]
+    pub(crate) layout: Layout,
+    pub(crate) title: &'static str,
+    pub(crate) cards: Vec<CardView>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct CardView {
+    pub(crate) label: &'static str,
+    pub(crate) value: String,
 }
 
 /// The sign-in page.

@@ -19,8 +19,8 @@ use crate::ignite::Registry;
 use crate::session::{end_session, set_flash, start_session, take_flash, Session};
 use crate::users;
 use crate::views::{
-    cell_text, field_views, record_form, CellView, ColumnHead, FormPage, IndexPage, Layout,
-    LoginPage, RowView,
+    cell_text, field_views, record_form, CardView, CellView, ColumnHead, DashboardPage, FormPage,
+    IndexPage, Layout, LoginPage, RowView,
 };
 
 /// The largest form body the panel reads.
@@ -29,16 +29,7 @@ const MAX_FORM_BYTES: u64 = 64 * 1024;
 /// Every route the panel mounts.
 pub(crate) fn all() -> Vec<Route> {
     routes![
-        dashboard_redirect,
-        login_form,
-        login,
-        logout,
-        index,
-        new_form,
-        create,
-        edit_form,
-        update,
-        destroy
+        dashboard, login_form, login, logout, index, new_form, create, edit_form, update, destroy
     ]
 }
 
@@ -57,11 +48,37 @@ impl<'r> Responder<'r, 'static> for Reply {
     }
 }
 
-/// The panel's root. It goes to the first resource until a dashboard exists.
+/// The dashboard: the stat cards that every resource provides.
 #[get("/")]
-fn dashboard_redirect(_session: Session, registry: &State<Registry>) -> Result<Redirect, Status> {
-    let first = registry.resources.first().ok_or(Status::NotFound)?;
-    Ok(Redirect::to(format!("{}/{}", registry.mount, first.slug())))
+async fn dashboard(
+    _session: Session,
+    cookies: &CookieJar<'_>,
+    registry: &State<Registry>,
+    pool: &State<Pool>,
+) -> Result<PropelView, Status> {
+    let flash = take_flash(cookies, &registry.secret);
+    let resources = registry.resources.clone();
+    let widgets = blocking(pool, move |conn| {
+        let mut widgets = Vec::new();
+        for resource in &resources {
+            widgets.extend(resource.widgets(conn).map_err(db_status)?);
+        }
+        Ok(widgets)
+    })
+    .await?;
+
+    let page = DashboardPage {
+        layout: Layout::new(registry, true, flash),
+        title: "Dashboard",
+        cards: widgets
+            .into_iter()
+            .map(|w| CardView {
+                label: w.label,
+                value: w.value.to_string(),
+            })
+            .collect(),
+    };
+    Ok(PropelView::render("ignite::dashboard", &page))
 }
 
 #[get("/login")]

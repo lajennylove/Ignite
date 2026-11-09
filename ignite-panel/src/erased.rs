@@ -5,7 +5,7 @@ use std::marker::PhantomData;
 
 use diesel::mysql::MysqlConnection;
 use diesel::result::{Error as DieselError, QueryResult};
-use ignite_core::{Column, Field, FieldErrors, FormInput, IgniteResource, ListQuery};
+use ignite_core::{Column, Field, FieldErrors, FormInput, IgniteResource, ListQuery, StatWidget};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -33,6 +33,8 @@ pub(crate) trait Erased: Send + Sync {
         form: &FormInput,
     ) -> QueryResult<Result<Value, FieldErrors>>;
     fn delete(&self, conn: &mut MysqlConnection, id: i64) -> QueryResult<usize>;
+    /// The dashboard cards this resource provides.
+    fn widgets(&self, conn: &mut MysqlConnection) -> QueryResult<Vec<StatWidget>>;
 }
 
 /// Wraps an [`IgniteResource`] type as an [`Erased`] value.
@@ -108,6 +110,10 @@ impl<R: IgniteResource> Erased for Adapter<R> {
 
     fn delete(&self, conn: &mut MysqlConnection, id: i64) -> QueryResult<usize> {
         R::delete(conn, id)
+    }
+
+    fn widgets(&self, conn: &mut MysqlConnection) -> QueryResult<Vec<StatWidget>> {
+        R::widgets(conn)
     }
 }
 

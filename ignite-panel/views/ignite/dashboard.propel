@@ -1,0 +1,20 @@
+@extends('ignite::layouts.app')
+
+@section('title')
+  {{ $title }}
+@endsection
+
+@section('content')
+  <h1>{{ $title }}</h1>
+
+  <div class="cards">
+    @forelse (card in cards)
+      <div class="card">
+        <p class="card-label">{{ $card.label }}</p>
+        <p class="card-value">{{ $card.value }}</p>
+      </div>
+    @empty
+      <p class="muted">No stats yet. A resource shows its cards here by implementing <code>widgets</code>.</p>
+    @endforelse
+  </div>
+@endsection
