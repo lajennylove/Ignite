@@ -164,6 +164,8 @@ fn a_session_from_another_app_instance_is_rejected() {
     // debug builds, so a cookie from one instance must not open the other.
     let _guard = reset();
     let first = signed_in(None);
+    // A second instance with its own key: the cookie of the first must not open it.
+    std::env::set_var("IGNITE_SECRET_KEY", random_key());
     let cookie = first
         .cookies()
         .get(SESSION)

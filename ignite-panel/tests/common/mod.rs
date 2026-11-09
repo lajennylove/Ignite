@@ -247,8 +247,26 @@ pub fn count_widgets() -> i64 {
     widgets::table.count().get_result(&mut conn).unwrap()
 }
 
+/// Sets a random `IGNITE_SECRET_KEY` when none is set. A release build refuses to
+/// start without one, and a debug build would otherwise pick a random key per instance.
+pub fn ensure_secret() {
+    if std::env::var_os("IGNITE_SECRET_KEY").is_none() {
+        std::env::set_var("IGNITE_SECRET_KEY", random_key());
+    }
+}
+
+/// A new random key, base64 encoded, as `openssl rand -base64 32` makes one.
+pub fn random_key() -> String {
+    use base64::engine::general_purpose::STANDARD;
+    use base64::Engine;
+    let mut bytes = [0u8; 32];
+    rand_core::RngCore::fill_bytes(&mut rand_core::OsRng, &mut bytes);
+    STANDARD.encode(bytes)
+}
+
 /// A client for the panel with the `Widgets` resource, not signed in.
 pub fn client(mount: Option<&str>) -> Client {
+    ensure_secret();
     let mut ignite = Ignite::new().resource::<Widgets>();
     if let Some(mount) = mount {
         ignite = ignite.mount(mount);

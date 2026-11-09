@@ -14,6 +14,7 @@ fn app_private(session: AdminUser) -> String {
 }
 
 fn client() -> Client {
+    common::ensure_secret();
     Client::tracked(
         rocket::build()
             .attach(Ignite::new().fairing())

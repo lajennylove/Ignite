@@ -1,9 +1,12 @@
 //! The builder that collects resources and attaches the panel to Rocket.
 
-use std::path::{Path, PathBuf};
+#[cfg(debug_assertions)]
+use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use ignite_core::{build_pool, IgniteResource, Pool};
+#[cfg(debug_assertions)]
 use propel_rocket::{register_namespace, register_namespace_loader};
 
 use crate::embedded::EmbeddedViews;
@@ -63,7 +66,7 @@ impl Ignite {
         let url = std::env::var("DATABASE_URL")
             .expect("DATABASE_URL must be set to a mysql:// URL for the Ignite panel");
         let pool = build_pool(&url).expect("Ignite could not connect to DATABASE_URL");
-        // The views are embedded in this crate unless a directory overrides them.
+        // Debug builds render the embedded views unless a directory overrides them.
         // The override is read here and checked when the fairing is built, so a
         // builder call to `views_dir` can still replace it.
         let views = std::env::var(VIEWS_DIR_ENV).ok().map(PathBuf::from);
@@ -121,10 +124,15 @@ impl Ignite {
             secret,
             views,
         } = self;
+        // A debug build renders with the dev renderer, from the embedded views or from a
+        // directory. A release build renders compiled views only, so a directory is ignored.
+        #[cfg(debug_assertions)]
         match &views {
             Some(dir) => register_views(dir),
             None => register_namespace_loader("ignite", EmbeddedViews),
         }
+        #[cfg(not(debug_assertions))]
+        let _ = (&views, EmbeddedViews);
         AdHoc::on_ignite("Ignite", move |rocket| async move {
             let registry = Registry {
                 mount: mount.clone(),
@@ -143,6 +151,7 @@ impl Ignite {
     }
 }
 
+#[cfg(debug_assertions)]
 /// Registers the panel's views from `dir`. Panics if the directory does not hold them.
 fn register_views(dir: &Path) {
     assert!(

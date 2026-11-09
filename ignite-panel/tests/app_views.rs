@@ -1,3 +1,8 @@
+//! Debug builds only: this test renders an app view through the dev renderer.
+//! A release build has no dev renderer; an app compiles its own views with its
+//! build script (see `propel_compiler::build::Views`).
+#![cfg(debug_assertions)]
+
 //! An app's own view extends the panel layout with only the app's context. The
 //! panel layout must not need any variable the app does not provide.
 

@@ -27,8 +27,9 @@ use crate::sessions;
 use crate::throttle;
 use crate::users;
 use crate::views::{
-    cell_text, field_views, record_form, CardView, CellView, ColumnHead, DashboardPage, FormPage,
-    HeaderView, IndexPage, LatestRow, LatestTable, Layout, LoginPage, RowView,
+    cell_text, compiled, field_views, record_form, render_page, CardView, CellView, ColumnHead,
+    DashboardPage, FormPage, HeaderView, IndexPage, LatestRow, LatestTable, Layout, LoginPage,
+    RowView,
 };
 
 /// The largest form body the panel reads.
@@ -104,8 +105,16 @@ async fn dashboard(
         .map(|(declared, columns, records)| latest_table(&declared, columns, &records))
         .collect();
 
+    let layout = Layout::new(registry, true, flash, token.clone());
     let page = DashboardPage {
-        layout: Layout::new(registry, true, flash, token.clone()),
+        home_url: layout.home_url,
+        signed_in: layout.signed_in,
+        logout_url: layout.logout_url,
+        logout_everywhere_url: layout.logout_everywhere_url,
+        csrf_token: layout.csrf_token,
+        nav: layout.nav,
+        has_flash: layout.has_flash,
+        flash: layout.flash,
         title: "Dashboard",
         cards: widgets
             .into_iter()
@@ -116,13 +125,21 @@ async fn dashboard(
             .collect(),
         tables,
     };
-    Ok(PropelView::render("ignite::dashboard", &page))
+    Ok(render_page(
+        "ignite::dashboard",
+        &page,
+        compiled::dashboard::render,
+    ))
 }
 
 #[get("/login")]
 fn login_form(cookies: &CookieJar<'_>, registry: &State<Registry>) -> PropelView {
     let token = csrf_token(cookies, &registry.secret);
-    PropelView::render("ignite::login", &login_page(registry, "", None, token))
+    render_page(
+        "ignite::login",
+        &login_page(registry, "", None, token),
+        compiled::login::render,
+    )
 }
 
 fn login_page(
@@ -131,8 +148,16 @@ fn login_page(
     error: Option<&str>,
     csrf_token: String,
 ) -> LoginPage {
+    let layout = Layout::new(registry, false, None, csrf_token);
     LoginPage {
-        layout: Layout::new(registry, false, None, csrf_token),
+        home_url: layout.home_url,
+        signed_in: layout.signed_in,
+        logout_url: layout.logout_url,
+        logout_everywhere_url: layout.logout_everywhere_url,
+        csrf_token: layout.csrf_token,
+        nav: layout.nav,
+        has_flash: layout.has_flash,
+        flash: layout.flash,
         title: "Sign in",
         action: format!("{}/login", registry.mount),
         email: email.to_string(),
@@ -168,7 +193,7 @@ async fn login(
     .await?;
     if let Some(seconds) = waiting {
         let message = format!("Too many sign-in attempts. Try again in {seconds} seconds.");
-        let page = PropelView::render(
+        let page = render_page(
             "ignite::login",
             &login_page(
                 registry,
@@ -176,6 +201,7 @@ async fn login(
                 Some(&message),
                 csrf_token(cookies, &registry.secret),
             ),
+            compiled::login::render,
         );
         return Ok(Reply::Throttled(seconds, page));
     }
@@ -215,7 +241,7 @@ async fn login(
         }
         None => Ok(Reply::Page(
             Status::UnprocessableEntity,
-            PropelView::render(
+            render_page(
                 "ignite::login",
                 &login_page(
                     registry,
@@ -223,6 +249,7 @@ async fn login(
                     Some("The email or password is incorrect."),
                     csrf_token(cookies, &registry.secret),
                 ),
+                compiled::login::render,
             ),
         )),
     }
@@ -367,8 +394,16 @@ async fn index(
         Direction::Desc => "desc",
     };
     let sort_pair = sort.as_deref().map(|key| (key, dir_name));
+    let layout = Layout::new(registry, true, flash, token.clone());
     let page_view = IndexPage {
-        layout: Layout::new(registry, true, flash, token.clone()),
+        home_url: layout.home_url,
+        signed_in: layout.signed_in,
+        logout_url: layout.logout_url,
+        logout_everywhere_url: layout.logout_everywhere_url,
+        csrf_token: layout.csrf_token,
+        nav: layout.nav,
+        has_flash: layout.has_flash,
+        flash: layout.flash,
         title: resource.title(),
         singular: resource.singular(),
         new_url: format!("{index_url}/new"),
@@ -385,7 +420,11 @@ async fn index(
         has_next: page_no < last_page,
         next_url: list_url(&index_url, &search, sort_pair, page_no + 1),
     };
-    Ok(PropelView::render("ignite::index", &page_view))
+    Ok(render_page(
+        "ignite::index",
+        &page_view,
+        compiled::index::render,
+    ))
 }
 
 #[get("/<slug>/new")]
@@ -397,13 +436,21 @@ async fn new_form(
 ) -> Result<PropelView, Status> {
     let resource = registry.find(slug).ok_or(Status::NotFound)?;
     let index_url = format!("{}/{}", registry.mount, resource.slug());
+    let layout = Layout::new(
+        registry,
+        true,
+        take_flash(cookies, &registry.secret),
+        csrf_token(cookies, &registry.secret),
+    );
     let page = FormPage {
-        layout: Layout::new(
-            registry,
-            true,
-            take_flash(cookies, &registry.secret),
-            csrf_token(cookies, &registry.secret),
-        ),
+        home_url: layout.home_url,
+        signed_in: layout.signed_in,
+        logout_url: layout.logout_url,
+        logout_everywhere_url: layout.logout_everywhere_url,
+        csrf_token: layout.csrf_token,
+        nav: layout.nav,
+        has_flash: layout.has_flash,
+        flash: layout.flash,
         title: resource.title(),
         singular: resource.singular(),
         heading: format!("New {}", resource.singular()),
@@ -416,7 +463,7 @@ async fn new_form(
             &FieldErrors::new(),
         ),
     };
-    Ok(PropelView::render("ignite::form", &page))
+    Ok(render_page("ignite::form", &page, compiled::form::render))
 }
 
 #[post("/<slug>", data = "<body>")]
@@ -477,13 +524,21 @@ async fn edit_form(
         .ok_or(Status::NotFound)?;
     let form = record_form(resource.fields(), &record);
 
+    let layout = Layout::new(
+        registry,
+        true,
+        take_flash(cookies, &registry.secret),
+        csrf_token(cookies, &registry.secret),
+    );
     let page = FormPage {
-        layout: Layout::new(
-            registry,
-            true,
-            take_flash(cookies, &registry.secret),
-            csrf_token(cookies, &registry.secret),
-        ),
+        home_url: layout.home_url,
+        signed_in: layout.signed_in,
+        logout_url: layout.logout_url,
+        logout_everywhere_url: layout.logout_everywhere_url,
+        csrf_token: layout.csrf_token,
+        nav: layout.nav,
+        has_flash: layout.has_flash,
+        flash: layout.flash,
         title: resource.title(),
         singular: resource.singular(),
         heading: format!("Edit {} #{id}", resource.singular()),
@@ -492,7 +547,7 @@ async fn edit_form(
         back_url: index_url,
         fields: field_views(resource.fields(), &form, &FieldErrors::new()),
     };
-    Ok(PropelView::render("ignite::form", &page))
+    Ok(render_page("ignite::form", &page, compiled::form::render))
 }
 
 #[post("/<slug>/<id>", data = "<body>")]
@@ -574,8 +629,16 @@ fn form_page(
     submit_label: &'static str,
     csrf_token: String,
 ) -> Reply {
+    let layout = Layout::new(registry, true, None, csrf_token);
     let page = FormPage {
-        layout: Layout::new(registry, true, None, csrf_token),
+        home_url: layout.home_url,
+        signed_in: layout.signed_in,
+        logout_url: layout.logout_url,
+        logout_everywhere_url: layout.logout_everywhere_url,
+        csrf_token: layout.csrf_token,
+        nav: layout.nav,
+        has_flash: layout.has_flash,
+        flash: layout.flash,
         title: resource.title(),
         singular: resource.singular(),
         heading,
@@ -586,7 +649,7 @@ fn form_page(
     };
     Reply::Page(
         Status::UnprocessableEntity,
-        PropelView::render("ignite::form", &page),
+        render_page("ignite::form", &page, compiled::form::render),
     )
 }
 

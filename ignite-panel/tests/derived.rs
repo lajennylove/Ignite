@@ -91,6 +91,7 @@ fn setup() -> std::sync::MutexGuard<'static, ()> {
 }
 
 fn signed_in() -> Client {
+    common::ensure_secret();
     let client =
         Client::tracked(rocket::build().attach(Ignite::new().resource::<Gadget>().fairing()))
             .unwrap();
