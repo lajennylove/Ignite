@@ -1,3 +1,9 @@
 [workspace]
 resolver = "2"
 members = ["ignite-core", "ignite-macros", "ignite-panel"]
+
+# Diesel 2.3.14 with one fix in src/mysql/connection/bind.rs: libmariadb 3.4
+# zeroes text column lengths when a result is rebound after a truncated fetch,
+# so the first row of a query came back as "". See vendor/diesel/PATCH.md.
+[patch.crates-io]
+diesel = { path = "vendor/diesel" }
