@@ -1,5 +1,6 @@
 //! The builder that collects resources and attaches the panel to Rocket.
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use ignite_core::{build_pool, IgniteResource, Pool};
@@ -12,7 +13,13 @@ use crate::routes;
 use crate::session;
 
 /// The directory of the `ignite` view namespace, shipped with this crate.
-const VIEWS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/views/ignite");
+///
+/// Used when neither `views_dir` nor `IGNITE_VIEWS_DIR` names a directory. It
+/// exists on the machine that built the crate, not on a deployed server.
+const DEFAULT_VIEWS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/views/ignite");
+
+/// The environment variable that names the panel's view directory at run time.
+pub const VIEWS_DIR_ENV: &str = "IGNITE_VIEWS_DIR";
 
 /// The default URL prefix of the admin panel.
 const DEFAULT_MOUNT: &str = "/admin";
@@ -40,11 +47,12 @@ pub struct Ignite {
     mount: String,
     resources: Vec<Arc<dyn Erased>>,
     secret: Vec<u8>,
+    views: Option<PathBuf>,
 }
 
 impl Ignite {
-    /// Reads `DATABASE_URL` and `IGNITE_SECRET_KEY`, builds the connection pool
-    /// and registers the `ignite` view namespace.
+    /// Reads `DATABASE_URL` and `IGNITE_SECRET_KEY` and builds the connection pool.
+    /// The `ignite` view namespace is registered when the fairing is built.
     ///
     /// # Panics
     ///
@@ -57,13 +65,22 @@ impl Ignite {
         let url = std::env::var("DATABASE_URL")
             .expect("DATABASE_URL must be set to a mysql:// URL for the Ignite panel");
         let pool = build_pool(&url).expect("Ignite could not connect to DATABASE_URL");
-        register_namespace("ignite", VIEWS_DIR);
+        // The views directory is checked when the fairing is built, so a builder
+        // call to `views_dir` can still name it.
+        let views = match std::env::var(VIEWS_DIR_ENV) {
+            Ok(path) => Some(PathBuf::from(path)),
+            Err(_) if Path::new(DEFAULT_VIEWS_DIR).is_dir() => {
+                Some(PathBuf::from(DEFAULT_VIEWS_DIR))
+            }
+            Err(_) => None,
+        };
 
         Ignite {
             pool,
             mount: DEFAULT_MOUNT.to_string(),
             resources: Vec::new(),
             secret: session::secret_from_env(),
+            views,
         }
     }
 
@@ -82,6 +99,18 @@ impl Ignite {
         self
     }
 
+    /// Reads the panel's views from `path` instead of the default. Use it when the
+    /// views are shipped next to a deployed binary. The directory must hold
+    /// `layouts/app.propel`, and an override here wins over `IGNITE_VIEWS_DIR`.
+    ///
+    /// # Panics
+    ///
+    /// The check runs when the fairing is built, so this method does not panic.
+    pub fn views_dir(mut self, path: impl Into<PathBuf>) -> Self {
+        self.views = Some(path.into());
+        self
+    }
+
     /// Changes the URL prefix of the panel. The default is `/admin`.
     pub fn mount(mut self, path: &str) -> Self {
         self.mount = path.trim_end_matches('/').to_string();
@@ -97,7 +126,14 @@ impl Ignite {
             mount,
             resources,
             secret,
+            views,
         } = self;
+        let views = views.unwrap_or_else(|| {
+            panic!(
+                "Ignite could not find its views: ship the views/ignite directory, or set {VIEWS_DIR_ENV}, or call views_dir"
+            )
+        });
+        register_views(&views);
         AdHoc::on_ignite("Ignite", move |rocket| async move {
             let registry = Registry {
                 mount: mount.clone(),
@@ -111,4 +147,14 @@ impl Ignite {
                 .mount(mount, routes::all())
         })
     }
+}
+
+/// Registers the panel's views from `dir`. Panics if the directory does not hold them.
+fn register_views(dir: &Path) {
+    assert!(
+        dir.join("layouts/app.propel").is_file(),
+        "Ignite could not find its views in {}: ship the views/ignite directory, or set {VIEWS_DIR_ENV}",
+        dir.display()
+    );
+    register_namespace("ignite", dir);
 }
