@@ -1,7 +1,6 @@
-//! Sign-in sessions and flash messages. Both live in cookies that are signed
-//! with `IGNITE_SECRET_KEY`, so the server keeps no session state.
-
-use std::time::{SystemTime, UNIX_EPOCH};
+//! Sign-in sessions and flash messages. A sign-in is a row in the `sessions`
+//! table, and its signed cookie holds only the row's id, so the server can end a
+//! session at any time. Flash messages live in their own signed cookie.
 
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use base64::Engine;
@@ -16,6 +15,8 @@ use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 
 use crate::ignite::Registry;
+use crate::sessions;
+use ignite_core::Pool;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -23,15 +24,12 @@ type HmacSha256 = Hmac<Sha256>;
 pub(crate) const SESSION_COOKIE: &str = "ignite_session";
 /// The cookie that holds the flash message until the next page shows it.
 pub(crate) const FLASH_COOKIE: &str = "ignite_flash";
-/// How long a sign-in lasts, in seconds: eight hours.
-const SESSION_SECONDS: u64 = 8 * 60 * 60;
 /// The shortest key the panel accepts, in bytes.
 const MIN_KEY_BYTES: usize = 32;
 
 #[derive(Serialize, Deserialize)]
 struct SessionPayload {
-    uid: i64,
-    exp: u64,
+    sid: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -64,13 +62,6 @@ pub(crate) fn secret_from_env() -> Vec<u8> {
             "IGNITE_SECRET_KEY must be set in a release build (try `openssl rand -base64 32`)"
         ),
     }
-}
-
-fn now() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
 }
 
 fn mac(key: &[u8], kind: &str, body: &str) -> HmacSha256 {
@@ -107,15 +98,21 @@ fn cookie(name: &'static str, value: String) -> Cookie<'static> {
         .build()
 }
 
-/// Starts a sign-in for user `user_id`.
-pub(crate) fn start_session(cookies: &CookieJar<'_>, key: &[u8], user_id: i64) {
+/// Sets the session cookie for session `session_id`, the id of a `sessions` row.
+pub(crate) fn start_session(cookies: &CookieJar<'_>, key: &[u8], session_id: &str) {
     let payload = SessionPayload {
-        uid: user_id,
-        exp: now() + SESSION_SECONDS,
+        sid: session_id.to_string(),
     };
-    let mut session = cookie(SESSION_COOKIE, seal(key, "session", &payload));
-    session.set_max_age(rocket::time::Duration::seconds(SESSION_SECONDS as i64));
-    cookies.add(session);
+    cookies.add(cookie(SESSION_COOKIE, seal(key, "session", &payload)));
+}
+
+/// The session id in the request's cookie, if the cookie is validly signed.
+/// Whether the session is still live is for the database to say.
+pub(crate) fn session_id(cookies: &CookieJar<'_>, key: &[u8]) -> Option<String> {
+    cookies
+        .get(SESSION_COOKIE)
+        .and_then(|c| open::<SessionPayload>(key, "session", c.value()))
+        .map(|p| p.sid)
 }
 
 /// Ends the sign-in.
@@ -144,16 +141,19 @@ pub(crate) fn take_flash(cookies: &CookieJar<'_>, key: &[u8]) -> Option<String> 
 }
 
 /// A request guard that needs a signed-in user. The panel's own routes use it,
-/// and so can an app's route under the panel's mount path (added in v1):
+/// and so can an app's route under the panel's mount path, as Laravel's auth
+/// guard does for package routes:
 ///
 /// ```ignore
 /// #[get("/admin/reports")]
-/// fn reports(session: ignite_panel::AdminUser) -> PropelView { /* session.user_id() */ }
+/// fn reports(user: ignite_panel::AdminUser) -> PropelView { /* user.user_id() */ }
 /// ```
 ///
-/// A request without a valid, unexpired sign-in fails with 401, and the panel's
-/// catcher turns that into a redirect to the login page for paths under the mount.
-#[derive(Debug, Clone, Copy)]
+/// The guard checks the session row, so a session that was ended on the server
+/// is refused even if its cookie is still valid. A request without a live
+/// sign-in fails with 401, and the panel's catcher redirects paths under the
+/// mount to the login page.
+#[derive(Debug, Clone)]
 pub struct AdminUser {
     user_id: i64,
 }
@@ -170,16 +170,27 @@ impl<'r> FromRequest<'r> for AdminUser {
     type Error = ();
 
     async fn from_request(request: &'r Request<'_>) -> Outcome<Self, ()> {
-        let Some(registry) = request.rocket().state::<Registry>() else {
+        let (Some(registry), Some(pool)) = (
+            request.rocket().state::<Registry>(),
+            request.rocket().state::<Pool>(),
+        ) else {
             return Outcome::Error((Status::InternalServerError, ()));
         };
-        let payload = request
-            .cookies()
-            .get(SESSION_COOKIE)
-            .and_then(|c| open::<SessionPayload>(&registry.secret, "session", c.value()));
-        match payload {
-            Some(p) if p.exp > now() => Outcome::Success(AdminUser { user_id: p.uid }),
-            _ => Outcome::Error((Status::Unauthorized, ())),
+        let Some(sid) = session_id(request.cookies(), &registry.secret) else {
+            return Outcome::Error((Status::Unauthorized, ()));
+        };
+        let pool = pool.clone();
+        let lookup = sid.clone();
+        let user = rocket::tokio::task::spawn_blocking(move || {
+            let mut conn = pool.get().ok()?;
+            sessions::user_for(&mut conn, &lookup).ok().flatten()
+        })
+        .await
+        .ok()
+        .flatten();
+        match user {
+            Some(user_id) => Outcome::Success(AdminUser { user_id }),
+            None => Outcome::Error((Status::Unauthorized, ())),
         }
     }
 }
@@ -224,14 +235,7 @@ mod tests {
 
     #[test]
     fn a_payload_does_not_open_under_another_key_or_kind() {
-        let sealed = seal(
-            KEY,
-            "session",
-            &SessionPayload {
-                uid: 7,
-                exp: u64::MAX,
-            },
-        );
+        let sealed = seal(KEY, "session", &SessionPayload { sid: "abc".into() });
 
         assert!(
             open::<SessionPayload>(b"another key of at least 32 bytes!!", "session", &sealed)
@@ -242,16 +246,9 @@ mod tests {
 
     #[test]
     fn a_tampered_payload_does_not_open() {
-        let sealed = seal(
-            KEY,
-            "session",
-            &SessionPayload {
-                uid: 7,
-                exp: u64::MAX,
-            },
-        );
+        let sealed = seal(KEY, "session", &SessionPayload { sid: "abc".into() });
         let (_, tag) = sealed.split_once('.').unwrap();
-        let forged_body = URL_SAFE_NO_PAD.encode(br#"{"uid":8,"exp":18446744073709551615}"#);
+        let forged_body = URL_SAFE_NO_PAD.encode(br#"{"sid":"forged"}"#);
 
         assert!(open::<SessionPayload>(KEY, "session", &format!("{forged_body}.{tag}")).is_none());
     }

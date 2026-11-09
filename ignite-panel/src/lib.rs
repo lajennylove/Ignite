@@ -13,6 +13,7 @@ mod erased;
 mod ignite;
 mod routes;
 mod session;
+mod sessions;
 pub mod users;
 mod views;
 

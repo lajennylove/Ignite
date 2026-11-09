@@ -18,7 +18,8 @@ use serde_json::Value;
 
 use crate::erased::Erased;
 use crate::ignite::Registry;
-use crate::session::{end_session, set_flash, start_session, take_flash, AdminUser};
+use crate::session::{end_session, session_id, set_flash, start_session, take_flash, AdminUser};
+use crate::sessions;
 use crate::users;
 use crate::views::{
     cell_text, field_views, record_form, CardView, CellView, ColumnHead, DashboardPage, FormPage,
@@ -31,7 +32,17 @@ const MAX_FORM_BYTES: u64 = 64 * 1024;
 /// Every route the panel mounts.
 pub(crate) fn all() -> Vec<Route> {
     routes![
-        dashboard, login_form, login, logout, index, new_form, create, edit_form, update, destroy
+        dashboard,
+        login_form,
+        login,
+        logout,
+        logout_everywhere,
+        index,
+        new_form,
+        create,
+        edit_form,
+        update,
+        destroy
     ]
 }
 
@@ -122,7 +133,7 @@ async fn login(
     let password = form.get("password").unwrap_or("").to_string();
 
     let lookup = email.clone();
-    let user_id = blocking(pool, move |conn| {
+    let signed_in = blocking(pool, move |conn| {
         let user = users::find_by_email(conn, &lookup).map_err(db_status)?;
         // Check a password even when there is no such user, so the response time
         // does not show which emails are registered.
@@ -133,13 +144,16 @@ async fn login(
                 false
             }
         };
-        Ok(user.filter(|_| matched).map(|u| u.id))
+        match user.filter(|_| matched) {
+            Some(user) => sessions::create(conn, user.id).map(Some).map_err(db_status),
+            None => Ok(None),
+        }
     })
     .await?;
 
-    match user_id {
-        Some(id) => {
-            start_session(cookies, &registry.secret, id);
+    match signed_in {
+        Some(session_id) => {
+            start_session(cookies, &registry.secret, &session_id);
             Ok(Reply::Redirect(Box::new(Redirect::to(
                 registry.mount.clone(),
             ))))
@@ -165,9 +179,36 @@ fn dummy_hash() -> &'static str {
 }
 
 #[post("/logout")]
-fn logout(cookies: &CookieJar<'_>, registry: &State<Registry>) -> Redirect {
+async fn logout(
+    cookies: &CookieJar<'_>,
+    registry: &State<Registry>,
+    pool: &State<Pool>,
+) -> Redirect {
+    if let Some(session_id) = session_id(cookies, &registry.secret) {
+        // The row goes first: a copied cookie stops working even if the cookie is still in the jar.
+        let _ = blocking(pool, move |conn| {
+            sessions::delete(conn, &session_id).map_err(db_status)
+        })
+        .await;
+    }
     end_session(cookies);
     Redirect::to(format!("{}/login", registry.mount))
+}
+
+/// Ends every session of the signed-in user, on every device.
+#[post("/logout-everywhere")]
+async fn logout_everywhere(
+    user: AdminUser,
+    cookies: &CookieJar<'_>,
+    registry: &State<Registry>,
+    pool: &State<Pool>,
+) -> Result<Redirect, Status> {
+    blocking(pool, move |conn| {
+        sessions::delete_for_user(conn, user.user_id()).map_err(db_status)
+    })
+    .await?;
+    end_session(cookies);
+    Ok(Redirect::to(format!("{}/login", registry.mount)))
 }
 
 // Rocket takes each query parameter as an argument, so the list has many.

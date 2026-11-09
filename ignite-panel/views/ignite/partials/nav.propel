@@ -5,4 +5,7 @@
   <form method="post" action="{{ $logout_url }}">
     <button type="submit" class="secondary">Sign out</button>
   </form>
+  <form method="post" action="{{ $logout_everywhere_url }}">
+    <button type="submit" class="secondary">Sign out everywhere</button>
+  </form>
 @endif

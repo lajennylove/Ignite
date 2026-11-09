@@ -233,3 +233,67 @@ fn the_redirect_follows_the_mount_path() {
     assert_eq!(response.status(), Status::SeeOther);
     assert_eq!(response.headers().get_one("Location"), Some("/panel/login"));
 }
+
+fn session_value(client: &rocket::local::blocking::Client) -> String {
+    client
+        .cookies()
+        .get(SESSION)
+        .expect("session cookie")
+        .value()
+        .to_string()
+}
+
+#[test]
+fn a_copied_cookie_stops_working_after_logout() {
+    let _guard = reset();
+    let signed = signed_in(None);
+    let copied = session_value(&signed);
+    assert_eq!(
+        signed.post("/admin/logout").dispatch().status(),
+        Status::SeeOther
+    );
+
+    // The server ended the session, so the copied cookie no longer opens the panel.
+    let replay = client(None);
+    replay.cookies().add(Cookie::new(SESSION, copied));
+    let response = replay.get("/admin/widgets").dispatch();
+    assert_eq!(response.status(), Status::SeeOther);
+    assert_eq!(response.headers().get_one("Location"), Some("/admin/login"));
+}
+
+#[test]
+fn sign_out_everywhere_ends_every_session_of_the_user() {
+    let _guard = reset();
+    let phone = signed_in(None);
+    let laptop = signed_in(None);
+    assert_eq!(laptop.get("/admin/widgets").dispatch().status(), Status::Ok);
+
+    let response = phone.post("/admin/logout-everywhere").dispatch();
+    assert_eq!(response.status(), Status::SeeOther);
+
+    assert_eq!(
+        laptop.get("/admin/widgets").dispatch().status(),
+        Status::SeeOther
+    );
+    assert_eq!(
+        phone.get("/admin/widgets").dispatch().status(),
+        Status::SeeOther
+    );
+}
+
+#[test]
+fn an_expired_session_row_is_refused() {
+    let _guard = reset();
+    let client = signed_in(None);
+    assert_eq!(client.get("/admin/widgets").dispatch().status(), Status::Ok);
+
+    let mut conn = MysqlConnection::establish(&database_url()).unwrap();
+    diesel::sql_query("UPDATE sessions SET expires_at = '2000-01-01 00:00:00'")
+        .execute(&mut conn)
+        .unwrap();
+
+    assert_eq!(
+        client.get("/admin/widgets").dispatch().status(),
+        Status::SeeOther
+    );
+}
