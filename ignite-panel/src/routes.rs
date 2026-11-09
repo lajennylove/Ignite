@@ -5,7 +5,9 @@
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 
-use ignite_core::{Conn, Direction, FieldErrors, FormInput, ListQuery, Pool};
+use ignite_core::{
+    Column, Conn, Direction, FieldErrors, FormInput, LatestRecords, ListQuery, Pool,
+};
 use propel_rocket::PropelView;
 use rocket::data::{Data, ToByteUnit};
 use rocket::http::{CookieJar, Status};
@@ -20,7 +22,7 @@ use crate::session::{end_session, set_flash, start_session, take_flash, AdminUse
 use crate::users;
 use crate::views::{
     cell_text, field_views, record_form, CardView, CellView, ColumnHead, DashboardPage, FormPage,
-    IndexPage, Layout, LoginPage, RowView,
+    HeaderView, IndexPage, LatestRow, LatestTable, Layout, LoginPage, RowView,
 };
 
 /// The largest form body the panel reads.
@@ -58,14 +60,24 @@ async fn dashboard(
 ) -> Result<PropelView, Status> {
     let flash = take_flash(cookies, &registry.secret);
     let resources = registry.resources.clone();
-    let widgets = blocking(pool, move |conn| {
+    let (widgets, tables) = blocking(pool, move |conn| {
         let mut widgets = Vec::new();
+        let mut tables = Vec::new();
         for resource in &resources {
             widgets.extend(resource.widgets(conn).map_err(db_status)?);
+            if let Some(declared) = resource.latest_records() {
+                let limit = declared.limit.max(1);
+                let records = resource.latest(conn, limit).map_err(db_status)?;
+                tables.push((declared, resource.columns(), records));
+            }
         }
-        Ok(widgets)
+        Ok((widgets, tables))
     })
     .await?;
+    let tables = tables
+        .into_iter()
+        .map(|(declared, columns, records)| latest_table(&declared, columns, &records))
+        .collect();
 
     let page = DashboardPage {
         layout: Layout::new(registry, true, flash),
@@ -77,6 +89,7 @@ async fn dashboard(
                 value: w.value.to_string(),
             })
             .collect(),
+        tables,
     };
     Ok(PropelView::render("ignite::dashboard", &page))
 }
@@ -518,4 +531,37 @@ async fn read_form(data: Data<'_>) -> Result<FormInput, Status> {
         .into_owned()
         .collect();
     Ok(FormInput::new(values))
+}
+
+/// Builds a dashboard table from a resource's declaration and its newest records.
+/// A declared key that is not a column shows its key as the heading.
+fn latest_table(declared: &LatestRecords, columns: &[Column], records: &[Value]) -> LatestTable {
+    let headers = declared
+        .columns
+        .iter()
+        .map(|key| HeaderView {
+            label: columns
+                .iter()
+                .find(|c| c.key == *key)
+                .map(|c| c.label)
+                .unwrap_or(key),
+        })
+        .collect();
+    let rows = records
+        .iter()
+        .map(|record| LatestRow {
+            cells: declared
+                .columns
+                .iter()
+                .map(|key| CellView {
+                    text: cell_text(record.get(*key)),
+                })
+                .collect(),
+        })
+        .collect();
+    LatestTable {
+        title: declared.title,
+        headers,
+        rows,
+    }
 }

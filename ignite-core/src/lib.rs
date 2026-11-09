@@ -21,4 +21,4 @@ pub use ignite_macros::IgniteResource;
 pub use password::{hash_password, verify_password};
 pub use query::{escape_like, Direction, ListQuery, Page};
 pub use resource::IgniteResource;
-pub use widget::StatWidget;
+pub use widget::{LatestRecords, StatWidget};

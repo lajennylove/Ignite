@@ -12,7 +12,7 @@ use diesel::sql_query;
 use diesel::sql_types::BigInt;
 use ignite_core::{
     escape_like, Column, Direction, Field, FieldErrors, FieldKind, FormInput, IgniteResource,
-    ListQuery, Page, StatWidget,
+    LatestRecords, ListQuery, Page, StatWidget,
 };
 use ignite_panel::{run_migrations, users, Ignite};
 use rocket::http::{ContentType, Status};
@@ -154,6 +154,22 @@ impl IgniteResource for Widgets {
             return Err(DieselError::NotFound);
         }
         Self::find(conn, id)?.ok_or(DieselError::NotFound)
+    }
+
+    fn latest_records() -> Option<LatestRecords> {
+        Some(LatestRecords {
+            title: "Latest widgets",
+            columns: &["name", "price"],
+            limit: 2,
+        })
+    }
+
+    fn latest(conn: &mut MysqlConnection, limit: i64) -> QueryResult<Vec<WidgetRow>> {
+        widgets::table
+            .order(widgets::id.desc())
+            .limit(limit)
+            .select(WidgetRow::as_select())
+            .load(conn)
     }
 
     fn widgets(conn: &mut MysqlConnection) -> QueryResult<Vec<StatWidget>> {

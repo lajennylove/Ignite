@@ -59,6 +59,25 @@ pub(crate) struct DashboardPage {
     pub(crate) layout: Layout,
     pub(crate) title: &'static str,
     pub(crate) cards: Vec<CardView>,
+    pub(crate) tables: Vec<LatestTable>,
+}
+
+/// A dashboard table of a resource's newest records.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct LatestTable {
+    pub(crate) title: &'static str,
+    pub(crate) headers: Vec<HeaderView>,
+    pub(crate) rows: Vec<LatestRow>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct HeaderView {
+    pub(crate) label: &'static str,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct LatestRow {
+    pub(crate) cells: Vec<CellView>,
 }
 
 #[derive(Debug, Clone, Serialize)]

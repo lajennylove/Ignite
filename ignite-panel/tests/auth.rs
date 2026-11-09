@@ -97,6 +97,13 @@ fn a_signed_in_user_reaches_the_panel() {
     // The Widgets resource provides a card with the number of rows it holds.
     assert!(body.contains("Widgets"));
     assert!(body.contains(r#"<p class="card-value">3</p>"#));
+    // The declared table shows its title, its headers, and the two newest rows, newest first.
+    assert!(body.contains("Latest widgets"));
+    assert!(body.contains("<th>Name</th>") && body.contains("<th>Price</th>"));
+    let cherry = body.find("Cherry").expect("newest row shown");
+    let banana = body.find("Banana").expect("second row shown");
+    assert!(cherry < banana, "newest first");
+    assert!(!body.contains("Apple"), "only the limit's records show");
 }
 
 #[test]

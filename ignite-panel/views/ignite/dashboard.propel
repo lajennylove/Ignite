@@ -27,4 +27,32 @@
       <p class="muted">No stats yet. A resource shows its cards here by implementing <code>widgets</code>.</p>
     @endforelse
   </div>
+
+  @foreach (table in tables)
+    <section class="latest">
+      <h2>{{ $table.title }}</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              @foreach (head in table.headers)
+                <th>{{ $head.label }}</th>
+              @endforeach
+            </tr>
+          </thead>
+          <tbody>
+            @forelse (row in table.rows)
+              <tr>
+                @foreach (cell in row.cells)
+                  <td>{{ $cell.text }}</td>
+                @endforeach
+              </tr>
+            @empty
+              <tr><td class="muted">No records yet.</td></tr>
+            @endforelse
+          </tbody>
+        </table>
+      </div>
+    </section>
+  @endforeach
 @endsection

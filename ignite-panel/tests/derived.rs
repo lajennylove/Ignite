@@ -374,3 +374,13 @@ fn headings_use_the_singular_name_and_dates_read_readably() {
     );
     assert!(edit.contains("Edit Gadget #2"));
 }
+
+#[test]
+fn the_derived_latest_returns_the_newest_rows_first() {
+    let _guard = setup();
+    let mut conn = MysqlConnection::establish(&database_url()).unwrap();
+    let rows = <Gadget as IgniteResource>::latest(&mut conn, 1).unwrap();
+
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].name, "Beacon", "the highest id is the newest");
+}

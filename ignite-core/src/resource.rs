@@ -7,7 +7,7 @@ use serde::Serialize;
 use crate::field::{Column, Field};
 use crate::form::{FieldErrors, FormInput};
 use crate::query::{ListQuery, Page};
-use crate::widget::StatWidget;
+use crate::widget::{LatestRecords, StatWidget};
 
 /// A table of records the panel can list, create, edit and delete.
 ///
@@ -34,6 +34,18 @@ pub trait IgniteResource: Send + Sync + 'static {
     /// Override it to show counts, such as the total number of rows.
     fn widgets(conn: &mut MysqlConnection) -> QueryResult<Vec<StatWidget>> {
         let _ = conn;
+        Ok(Vec::new())
+    }
+
+    /// The dashboard table of the newest records, or `None` for no table (added in v1).
+    fn latest_records() -> Option<LatestRecords> {
+        None
+    }
+
+    /// Up to `limit` records, newest first (added in v1). The panel calls it with the
+    /// `limit` of [`latest_records`](Self::latest_records). The default is no records.
+    fn latest(conn: &mut MysqlConnection, limit: i64) -> QueryResult<Vec<Self::Record>> {
+        let _ = (conn, limit);
         Ok(Vec::new())
     }
 

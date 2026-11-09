@@ -324,6 +324,22 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
                     .optional()
             }
 
+            fn latest(
+                conn: &mut ::diesel::mysql::MysqlConnection,
+                limit: i64,
+            ) -> ::diesel::result::QueryResult<::std::vec::Vec<#name>> {
+                #[allow(unused_imports)]
+                use ::diesel::prelude::*;
+                #[allow(unused_imports)]
+                use #table_path as __table;
+
+                __table::table
+                    .order(__table::#pk_ident.desc())
+                    .limit(limit)
+                    .select(<#name as ::diesel::SelectableHelper<::diesel::mysql::Mysql>>::as_select())
+                    .load(conn)
+            }
+
             fn create(
                 conn: &mut ::diesel::mysql::MysqlConnection,
                 input: #input_name,

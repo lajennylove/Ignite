@@ -5,7 +5,9 @@ use std::marker::PhantomData;
 
 use diesel::mysql::MysqlConnection;
 use diesel::result::{DatabaseErrorKind, Error as DieselError, QueryResult};
-use ignite_core::{Column, Field, FieldErrors, FormInput, IgniteResource, ListQuery, StatWidget};
+use ignite_core::{
+    Column, Field, FieldErrors, FormInput, IgniteResource, LatestRecords, ListQuery, StatWidget,
+};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -36,6 +38,10 @@ pub(crate) trait Erased: Send + Sync {
     fn delete(&self, conn: &mut MysqlConnection, id: i64) -> QueryResult<usize>;
     /// The dashboard cards this resource provides.
     fn widgets(&self, conn: &mut MysqlConnection) -> QueryResult<Vec<StatWidget>>;
+    /// The dashboard table this resource declares, if any.
+    fn latest_records(&self) -> Option<LatestRecords>;
+    /// The newest records as JSON, up to `limit`.
+    fn latest(&self, conn: &mut MysqlConnection, limit: i64) -> QueryResult<Vec<Value>>;
 }
 
 /// Wraps an [`IgniteResource`] type as an [`Erased`] value.
@@ -125,6 +131,14 @@ impl<R: IgniteResource> Erased for Adapter<R> {
 
     fn widgets(&self, conn: &mut MysqlConnection) -> QueryResult<Vec<StatWidget>> {
         R::widgets(conn)
+    }
+
+    fn latest_records(&self) -> Option<LatestRecords> {
+        R::latest_records()
+    }
+
+    fn latest(&self, conn: &mut MysqlConnection, limit: i64) -> QueryResult<Vec<Value>> {
+        R::latest(conn, limit)?.into_iter().map(to_json).collect()
     }
 }
 
