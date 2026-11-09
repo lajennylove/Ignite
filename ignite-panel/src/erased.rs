@@ -135,10 +135,7 @@ fn unique_violation(error: DieselError, fields: &[Field]) -> QueryResult<FieldEr
     let key = message
         .rfind("for key '")
         .map(|start| &message[start + "for key '".len()..])
-        .map(|rest| {
-            rest.trim_end_matches('\'')
-                .trim_end_matches(|c| c == '\'' || c == '`')
-        })
+        .map(|rest| rest.trim_end_matches('\'').trim_end_matches(['\'', '`']))
         .unwrap_or_default();
     // An exact match wins, then a field whose name appears in the index name.
     let field = fields
