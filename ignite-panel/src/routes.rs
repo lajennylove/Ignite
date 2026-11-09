@@ -707,7 +707,7 @@ fn parse_id(id: &str) -> Result<i64, Status> {
 
 fn record_id(record: &Value) -> Result<i64, Status> {
     record.get("id").and_then(Value::as_i64).ok_or_else(|| {
-        rocket::error!("ignite: a record has no numeric `id` key; see docs/contract.md");
+        rocket::error!("ignite: a record has no numeric `id` key; see https://ignite.rocketboost.rs/docs/resources");
         Status::InternalServerError
     })
 }

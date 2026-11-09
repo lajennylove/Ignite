@@ -1,2 +1,5 @@
 /target
 .env
+
+# Internal notes (kept locally, not in the repository)
+/docs/
