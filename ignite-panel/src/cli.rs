@@ -1,10 +1,12 @@
 //! The `ignite` command line: `ignite user create --email <email> [--name <name>]`.
 //!
 //! The command checks `DATABASE_URL`, connects, runs the panel's migrations and
-//! checks for an existing user before it asks for a password. The password is
-//! read from the terminal without echoing, and asked for twice. Apps call
-//! [`main`] from a small binary of their own, after loading `.env` the way the
-//! workspace's `ignite` binary does.
+//! checks for an existing user before it reads the password. Interactively the
+//! password is read from the terminal without echoing, and asked for twice. When
+//! standard input is not a terminal, or with `--password-stdin`, the password is
+//! the first line of standard input, so a script can pipe it in. There is no
+//! environment variable for the password. Apps call [`main`] from a small binary
+//! of their own, after loading `.env` the way the workspace's `ignite` binary does.
 
 use std::process::exit;
 
@@ -13,9 +15,10 @@ use diesel::prelude::*;
 
 use crate::{run_migrations, users};
 
-const USAGE: &str = "usage: ignite user create --email <email> [--name <name>]
+const USAGE: &str = "usage: ignite user create --email <email> [--name <name>] [--password-stdin]
 
-Reads DATABASE_URL. Asks for the password without echoing it.";
+Reads DATABASE_URL. Asks for the password without echoing it, or reads it from
+standard input when standard input is not a terminal or with --password-stdin.";
 
 /// The shortest password the CLI accepts.
 const MIN_PASSWORD_CHARS: usize = 8;
@@ -37,12 +40,25 @@ pub fn main() {
 fn create_user(args: &[String]) -> i32 {
     let mut email = None;
     let mut name = None;
+    let mut password_stdin = false;
     let mut rest = args.iter();
     while let Some(flag) = rest.next() {
-        let value = rest.next();
-        match (flag.as_str(), value) {
-            ("--email", Some(v)) => email = Some(v.clone()),
-            ("--name", Some(v)) => name = Some(v.clone()),
+        match flag.as_str() {
+            "--email" => match rest.next() {
+                Some(v) => email = Some(v.clone()),
+                None => {
+                    eprintln!("{USAGE}");
+                    return 2;
+                }
+            },
+            "--name" => match rest.next() {
+                Some(v) => name = Some(v.clone()),
+                None => {
+                    eprintln!("{USAGE}");
+                    return 2;
+                }
+            },
+            "--password-stdin" => password_stdin = true,
             _ => {
                 eprintln!("{USAGE}");
                 return 2;
@@ -89,7 +105,7 @@ fn create_user(args: &[String]) -> i32 {
         }
     }
 
-    let password = match read_password() {
+    let password = match read_password(password_stdin) {
         Ok(password) => password,
         Err(message) => {
             eprintln!("{message}");
@@ -116,8 +132,28 @@ fn create_user(args: &[String]) -> i32 {
     }
 }
 
-/// Asks for the password twice, without echoing it.
-fn read_password() -> Result<String, String> {
+/// Reads the password: from standard input when `from_stdin` is set or when standard
+/// input is not a terminal, and otherwise from the terminal, asked for twice.
+fn read_password(from_stdin: bool) -> Result<String, String> {
+    use std::io::{BufRead, IsTerminal};
+
+    let stdin = std::io::stdin();
+    if from_stdin && stdin.is_terminal() {
+        return Err("--password-stdin reads the password from a pipe, not a terminal.".to_string());
+    }
+    if from_stdin || !stdin.is_terminal() {
+        let mut line = String::new();
+        stdin
+            .lock()
+            .read_line(&mut line)
+            .map_err(|e| format!("Could not read the password from standard input: {e}"))?;
+        let password = line.trim_end_matches(['\n', '\r']).to_string();
+        if password.is_empty() {
+            return Err("No password on standard input.".to_string());
+        }
+        return check_length(password);
+    }
+
     let password = rpassword::prompt_password("Password: ")
         .map_err(|e| format!("Could not read the password: {e}"))?;
     let confirm = rpassword::prompt_password("Confirm password: ")
@@ -125,6 +161,10 @@ fn read_password() -> Result<String, String> {
     if password != confirm {
         return Err("The passwords do not match.".to_string());
     }
+    check_length(password)
+}
+
+fn check_length(password: String) -> Result<String, String> {
     if password.chars().count() < MIN_PASSWORD_CHARS {
         return Err(format!(
             "The password must be at least {MIN_PASSWORD_CHARS} characters."

@@ -37,3 +37,128 @@ fn the_cli_requires_an_email_before_anything_else() {
 
     assert_eq!(output.status.code(), Some(2));
 }
+
+/// Runs `ignite` with `stdin` piped in and the test database configured. The
+/// working directory is the temp dir, so no `.env` file is read.
+fn run_piped(args: &[&str], stdin: &str) -> std::process::Output {
+    use std::io::Write;
+    let url = std::env::var("DATABASE_URL").expect("set DATABASE_URL to the test database");
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ignite"))
+        .args(args)
+        .env("DATABASE_URL", url)
+        .current_dir(std::env::temp_dir())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("run the ignite binary");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(stdin.as_bytes())
+        .expect("write the password");
+    child.wait_with_output().expect("wait for ignite")
+}
+
+/// An email that no earlier run used.
+fn fresh_email() -> String {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    format!("stdin-{nanos}@example.test")
+}
+
+#[test]
+fn a_piped_password_creates_the_user_with_an_argon2_hash() {
+    let email = fresh_email();
+    let output = run_piped(
+        &["user", "create", "--email", &email, "--password-stdin"],
+        "piped-password-1\n",
+    );
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("Created user"));
+
+    let url = std::env::var("DATABASE_URL").unwrap();
+    use diesel::Connection;
+    let mut conn = diesel::mysql::MysqlConnection::establish(&url).unwrap();
+    let user = ignite_panel::users::find_by_email(&mut conn, &email)
+        .unwrap()
+        .expect("created");
+    assert!(user.password_hash.starts_with("$argon2id$"));
+    assert!(ignite_panel::users::verify_password(
+        &user.password_hash,
+        "piped-password-1"
+    ));
+}
+
+#[test]
+fn a_non_terminal_standard_input_is_read_as_the_password_without_the_flag() {
+    let email = fresh_email();
+    let output = run_piped(&["user", "create", "--email", &email], "no-flag-password\n");
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn a_short_piped_password_is_refused() {
+    let output = run_piped(
+        &[
+            "user",
+            "create",
+            "--email",
+            &fresh_email(),
+            "--password-stdin",
+        ],
+        "short\n",
+    );
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("at least 8 characters"));
+}
+
+#[test]
+fn an_empty_standard_input_is_refused() {
+    let output = run_piped(
+        &[
+            "user",
+            "create",
+            "--email",
+            &fresh_email(),
+            "--password-stdin",
+        ],
+        "",
+    );
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("No password on standard input"));
+}
+
+#[test]
+fn a_duplicate_email_is_refused_before_the_password_is_read() {
+    let email = fresh_email();
+    let first = run_piped(
+        &["user", "create", "--email", &email, "--password-stdin"],
+        "first-password\n",
+    );
+    assert_eq!(first.status.code(), Some(0));
+
+    let second = run_piped(
+        &["user", "create", "--email", &email, "--password-stdin"],
+        "second-password\n",
+    );
+    assert_eq!(second.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&second.stderr).contains("already exists"));
+}
