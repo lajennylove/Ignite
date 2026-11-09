@@ -104,6 +104,14 @@ fn a_signed_in_user_reaches_the_panel() {
     assert_eq!(dashboard.status(), Status::Ok);
     let body = dashboard.into_string().unwrap();
     assert!(body.contains("Sign out"));
+    assert!(
+        body.contains("/admin/logout-everywhere\""),
+        "the one sign-out button ends every session"
+    );
+    assert!(
+        !body.contains("/admin/logout\""),
+        "there is no separate single-session sign-out"
+    );
     // The Widgets resource provides a card with the number of rows it holds.
     assert!(body.contains("Widgets"));
     assert!(body.contains(">3</p>"), "the widget card shows the count");

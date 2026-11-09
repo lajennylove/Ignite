@@ -2,12 +2,8 @@
   <a class="text-accent no-underline hover:underline" href="{{ $link.url }}">{{ $link.title }}</a>
 @endforeach
 @if (signed_in)
-  <form method="post" action="{{ $logout_url }}">
-    <input type="hidden" name="_token" value="{{ $csrf_token }}">
-    <button type="submit" class="cursor-pointer rounded-md border border-accent bg-white px-3 py-1.5 font-[inherit] text-accent hover:bg-header">Sign out</button>
-  </form>
   <form method="post" action="{{ $logout_everywhere_url }}">
     <input type="hidden" name="_token" value="{{ $csrf_token }}">
-    <button type="submit" class="cursor-pointer rounded-md border border-accent bg-white px-3 py-1.5 font-[inherit] text-accent hover:bg-header">Sign out everywhere</button>
+    <button type="submit" class="cursor-pointer rounded-md border border-accent bg-white px-3 py-1.5 font-[inherit] text-accent hover:bg-header">Sign out</button>
   </form>
 @endif
