@@ -143,14 +143,26 @@ pub(crate) fn take_flash(cookies: &CookieJar<'_>, key: &[u8]) -> Option<String> 
     message
 }
 
-/// A request guard for the admin routes. A request without a valid, unexpired
-/// sign-in fails with 401, and the catcher below turns that into a redirect to
-/// the login page.
+/// A request guard that needs a signed-in user. The panel's own routes use it,
+/// and so can an app's route under the panel's mount path (added in v1):
+///
+/// ```ignore
+/// #[get("/admin/reports")]
+/// fn reports(session: ignite_panel::Session) -> PropelView { /* session.user_id() */ }
+/// ```
+///
+/// A request without a valid, unexpired sign-in fails with 401, and the panel's
+/// catcher turns that into a redirect to the login page for paths under the mount.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Session {
+pub struct Session {
+    user_id: i64,
+}
+
+impl Session {
     /// The signed-in user's id.
-    #[allow(dead_code)]
-    pub(crate) user_id: i64,
+    pub fn user_id(&self) -> i64 {
+        self.user_id
+    }
 }
 
 #[rocket::async_trait]

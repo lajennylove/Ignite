@@ -22,6 +22,7 @@ use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 
 pub use ignite::Ignite;
 pub use ignite_core;
+pub use session::Session;
 
 /// The panel's migrations, embedded in the crate.
 const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations");

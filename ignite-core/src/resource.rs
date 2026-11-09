@@ -11,8 +11,7 @@ use crate::widget::StatWidget;
 
 /// A table of records the panel can list, create, edit and delete.
 ///
-/// Implement it by hand, or with `#[derive(IgniteResource)]` once the derive
-/// macro lands. The panel calls the query methods with a connection borrowed
+/// Implement it by hand, or with `#[derive(IgniteResource)]`. The panel calls the query methods with a connection borrowed
 /// from the pool, and renders the forms from [`fields`](Self::fields) and the
 /// list from [`columns`](Self::columns).
 pub trait IgniteResource: Send + Sync + 'static {
