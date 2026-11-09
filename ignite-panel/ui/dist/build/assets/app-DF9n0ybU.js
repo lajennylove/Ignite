@@ -1,0 +1,1 @@
+document.addEventListener(`submit`,e=>{let t=e.target.dataset?.confirm;t&&!window.confirm(t)&&e.preventDefault()});

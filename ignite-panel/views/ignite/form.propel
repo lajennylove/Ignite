@@ -2,6 +2,8 @@
 
 @section('ignite_home'){{ $home_url }}@endsection
 
+@section('ignite_styles'){!! $styles !!}@endsection
+
 @section('ignite_nav')
   @include('ignite::partials.nav')
 @endsection
@@ -17,38 +19,39 @@
 @section('content')
   <h1>{{ $heading }}</h1>
 
-  <form class="form" method="post" action="{{ $action }}">
+  <form class="grid max-w-xl gap-4 rounded-lg border border-hairline bg-white p-6" method="post" action="{{ $action }}">
     <input type="hidden" name="_token" value="{{ $csrf_token }}">
+
     @foreach (field in fields)
-      <div class="field">
+      <div>
         @if (field.is_checkbox)
-          <label>
+          <label class="flex items-center gap-2 font-semibold text-heading">
             <input type="checkbox" name="{{ $field.name }}" value="on" @if (field.checked)checked@endif>
             {{ $field.label }}
           </label>
         @else
-          <label for="{{ $field.name }}">{{ $field.label }}@if (field.required) *@endif</label>
+          <label class="mb-1 block font-semibold text-heading" for="{{ $field.name }}">{{ $field.label }}@if (field.required) *@endif</label>
           @if (field.is_textarea)
-            <textarea id="{{ $field.name }}" name="{{ $field.name }}">{{ $field.value }}</textarea>
+            <textarea class="min-h-32 w-full rounded-md border border-hairline bg-white px-2.5 py-1.5 font-[inherit] text-text" id="{{ $field.name }}" name="{{ $field.name }}">{{ $field.value }}</textarea>
           @elseif (field.is_select)
-            <select id="{{ $field.name }}" name="{{ $field.name }}">
+            <select class="w-full rounded-md border border-hairline bg-white px-2.5 py-1.5 font-[inherit] text-text" id="{{ $field.name }}" name="{{ $field.name }}">
               @foreach (option in field.options)
                 <option value="{{ $option.value }}" @if (option.selected)selected@endif>{{ $option.label }}</option>
               @endforeach
             </select>
           @else
-            <input id="{{ $field.name }}" name="{{ $field.name }}" type="{{ $field.input_type }}" value="{{ $field.value }}">
+            <input class="w-full rounded-md border border-hairline bg-white px-2.5 py-1.5 font-[inherit] text-text" id="{{ $field.name }}" name="{{ $field.name }}" type="{{ $field.input_type }}" value="{{ $field.value }}">
           @endif
         @endif
         @if (field.has_error)
-          <p class="error">{{ $field.error }}</p>
+          <p class="mt-1 mb-0 text-danger">{{ $field.error }}</p>
         @endif
       </div>
     @endforeach
 
-    <div class="form-actions">
-      <button type="submit">{{ $submit_label }}</button>
-      <a href="{{ $back_url }}">Cancel</a>
+    <div class="flex items-center gap-3">
+      <button type="submit" class="cursor-pointer rounded-md border border-accent bg-accent px-3.5 py-1.5 font-[inherit] text-white no-underline hover:opacity-90">{{ $submit_label }}</button>
+      <a class="text-accent" href="{{ $back_url }}">Cancel</a>
     </div>
   </form>
 @endsection

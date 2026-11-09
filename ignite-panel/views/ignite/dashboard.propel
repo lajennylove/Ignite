@@ -2,6 +2,8 @@
 
 @section('ignite_home'){{ $home_url }}@endsection
 
+@section('ignite_styles'){!! $styles !!}@endsection
+
 @section('ignite_nav')
   @include('ignite::partials.nav')
 @endsection
@@ -17,26 +19,26 @@
 @section('content')
   <h1>{{ $title }}</h1>
 
-  <div class="cards">
+  <div class="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(12rem,1fr))]">
     @forelse (card in cards)
-      <div class="card">
-        <p class="card-label">{{ $card.label }}</p>
-        <p class="card-value">{{ $card.value }}</p>
+      <div class="rounded-lg border border-hairline bg-white p-4">
+        <p class="m-0 text-[#5b6070]">{{ $card.label }}</p>
+        <p class="mt-1 mb-0 text-[2rem] font-bold text-heading">{{ $card.value }}</p>
       </div>
     @empty
-      <p class="muted">No stats yet. A resource shows its cards here by implementing <code>widgets</code>.</p>
+      <p class="text-[#5b6070]">No stats yet. A resource shows its cards here by implementing <code class="rounded bg-code-bg px-1.5 py-0.5 font-mono text-[13px] text-accent">widgets</code>.</p>
     @endforelse
   </div>
 
   @foreach (table in tables)
-    <section class="latest">
-      <h2>{{ $table.title }}</h2>
-      <div class="table-wrap">
-        <table>
+    <section class="mt-10">
+      <h2 class="mb-3">{{ $table.title }}</h2>
+      <div class="overflow-x-auto rounded-lg border border-hairline bg-white">
+        <table class="w-full border-collapse">
           <thead>
             <tr>
               @foreach (head in table.headers)
-                <th>{{ $head.label }}</th>
+                <th class="border-b border-hairline px-3 py-2.5 text-left align-top font-semibold text-heading">{{ $head.label }}</th>
               @endforeach
             </tr>
           </thead>
@@ -44,11 +46,11 @@
             @forelse (row in table.rows)
               <tr>
                 @foreach (cell in row.cells)
-                  <td>{{ $cell.text }}</td>
+                  <td class="border-b border-hairline px-3 py-2.5 text-left align-top">{{ $cell.text }}</td>
                 @endforeach
               </tr>
             @empty
-              <tr><td class="muted">No records yet.</td></tr>
+              <tr><td class="px-3 py-2.5 text-[#5b6070]">No records yet.</td></tr>
             @endforelse
           </tbody>
         </table>

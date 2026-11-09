@@ -16,11 +16,18 @@ use serde::Serialize;
 #[derive(Serialize)]
 struct AppContext {
     name: &'static str,
+    ignite_styles: String,
 }
 
 #[get("/app-page")]
-fn app_page() -> PropelView {
-    PropelView::render("appviews::hello", &AppContext { name: "Ada" })
+fn app_page(styles: ignite_panel::PanelStyles) -> PropelView {
+    PropelView::render(
+        "appviews::hello",
+        &AppContext {
+            name: "Ada",
+            ignite_styles: styles.html().to_string(),
+        },
+    )
 }
 
 #[test]

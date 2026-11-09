@@ -139,3 +139,37 @@ mod tests {
         assert!(!path_matches("/hooks/*", "/hooksuffix"));
     }
 }
+
+/// The panel's stylesheet and script tags, for an app's view that extends the panel
+/// layout. The app writes them into the `ignite_styles` section, so the layout looks
+/// like the panel. Put `html()` in the view's context as `ignite_styles`:
+///
+/// ```ignore
+/// #[get("/")]
+/// fn home(styles: PanelStyles) -> PropelView { /* context: ignite_styles: styles.html() */ }
+/// ```
+///
+/// ```text
+/// @section('ignite_styles'){!! $ignite_styles !!}@endsection
+/// ```
+#[derive(Debug, Clone)]
+pub struct PanelStyles(String);
+
+impl PanelStyles {
+    /// The `<link>` and `<script>` tags of the panel's build.
+    pub fn html(&self) -> &str {
+        &self.0
+    }
+}
+
+#[rocket::async_trait]
+impl<'r> FromRequest<'r> for PanelStyles {
+    type Error = ();
+
+    async fn from_request(request: &'r Request<'_>) -> Outcome<Self, ()> {
+        let Some(registry) = request.rocket().state::<Registry>() else {
+            return Outcome::Error((Status::InternalServerError, ()));
+        };
+        Outcome::Success(PanelStyles(registry.styles()))
+    }
+}

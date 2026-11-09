@@ -24,6 +24,7 @@ sha2 = "0.10"
 base64 = "0.22"
 rpassword = "7"
 dotenvy = "0.15"
+include_dir = "0.7"
 
 [build-dependencies]
 propel_compiler = { git = "https://github.com/lajennylove/propel", rev = "f9e8da51d5d0853fb34bb535c65cf4f335435ed6" }

@@ -2,6 +2,8 @@
 //! a template interpreter. The generated module is included in `views.rs`.
 
 fn main() {
+    // The panel's built CSS and JS are embedded, so a change to them rebuilds the crate.
+    println!("cargo:rerun-if-changed=ui/dist/build");
     // An app that renders a view which extends the panel layout compiles it against
     // these views. Cargo passes the directory to dependents as DEP_IGNITE_PANEL_VIEWS_DIR.
     let views = format!(

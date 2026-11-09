@@ -2,6 +2,8 @@
 
 @section('ignite_home'){{ $home_url }}@endsection
 
+@section('ignite_styles'){!! $styles !!}@endsection
+
 @section('ignite_nav')
   @include('ignite::partials.nav')
 @endsection
@@ -17,24 +19,25 @@
 @section('content')
   <h1>{{ $title }}</h1>
 
-  <form class="form" method="post" action="{{ $action }}">
+  <form class="mx-auto grid max-w-md gap-4 rounded-lg border border-hairline bg-white p-6" method="post" action="{{ $action }}">
     <input type="hidden" name="_token" value="{{ $csrf_token }}">
+
     @if (has_error)
-      <p class="error" role="alert">{{ $error }}</p>
+      <p class="rounded-md border border-danger bg-white px-3 py-2 text-danger" role="alert">{{ $error }}</p>
     @endif
 
-    <div class="field">
-      <label for="email">Email</label>
-      <input id="email" name="email" type="email" value="{{ $email }}" autocomplete="username">
+    <div>
+      <label class="mb-1 block font-semibold text-heading" for="email">Email</label>
+      <input class="w-full rounded-md border border-hairline bg-white px-2.5 py-1.5 font-[inherit] text-text" id="email" name="email" type="email" value="{{ $email }}" autocomplete="username">
     </div>
 
-    <div class="field">
-      <label for="password">Password</label>
-      <input id="password" name="password" type="password" autocomplete="current-password">
+    <div>
+      <label class="mb-1 block font-semibold text-heading" for="password">Password</label>
+      <input class="w-full rounded-md border border-hairline bg-white px-2.5 py-1.5 font-[inherit] text-text" id="password" name="password" type="password" autocomplete="current-password">
     </div>
 
-    <div class="form-actions">
-      <button type="submit">Sign in</button>
+    <div class="flex items-center gap-3">
+      <button type="submit" class="cursor-pointer rounded-md border border-accent bg-accent px-3.5 py-1.5 font-[inherit] text-white hover:opacity-90">Sign in</button>
     </div>
   </form>
 @endsection

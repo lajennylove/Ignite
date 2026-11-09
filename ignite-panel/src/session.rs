@@ -9,6 +9,7 @@ use rand_core::{OsRng, RngCore};
 use rocket::catch;
 use rocket::http::{Cookie, CookieJar, SameSite, Status};
 use rocket::request::{FromRequest, Outcome, Request};
+use rocket::response::content::RawHtml;
 use rocket::response::Redirect;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -253,15 +254,31 @@ impl<'r> FromRequest<'r> for AdminUser {
 }
 
 /// Answers a request that failed the CSRF check: the form expired or its token did not match.
+/// The page loads the panel's stylesheet, so it looks like the rest of the panel.
 #[catch(419)]
-pub(crate) fn csrf_mismatch() -> rocket::response::content::RawHtml<&'static str> {
-    rocket::response::content::RawHtml(
-        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>Page Expired</title></head>\
-<body style=\"font-family: system-ui, sans-serif; max-width: 40rem; margin: 3rem auto; padding: 0 1rem;\">\
-<h1>Page Expired</h1>\
-<p>This form expired, or its security token did not match. Go back, reload the page and try again.</p>\
-</body></html>",
-    )
+pub(crate) fn csrf_mismatch(request: &Request<'_>) -> RawHtml<String> {
+    let styles = request
+        .rocket()
+        .state::<Registry>()
+        .map(|registry| registry.styles())
+        .unwrap_or_default();
+    RawHtml(format!(
+        r#"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Page Expired · Ignite</title>
+{styles}
+</head>
+<body class="min-h-screen bg-white font-sans text-text antialiased">
+<main class="mx-auto max-w-xl px-4 py-12">
+<h1 class="text-2xl font-semibold text-heading">Page Expired</h1>
+<p class="text-[#5b6070]">This form expired, or its security token did not match. Go back, reload the page and try again.</p>
+</main>
+</body>
+</html>"#
+    ))
 }
 
 /// Sends a request for a page under the panel that has no sign-in to the login page.

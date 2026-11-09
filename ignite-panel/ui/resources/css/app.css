@@ -1,0 +1,39 @@
+@import "tailwindcss";
+
+/* The panel's views, which carry the classes. Tailwind scans them for utilities. */
+@source "../../../views";
+
+/* Design tokens, measured from the Astro docs (docs.astro.build), light theme. These
+   are the same tokens as Propel's docs, so the panel matches the RocketBooster family.
+   Borders and spacing are close approximations. */
+@theme {
+    --font-sans: -apple-system, "system-ui", "Segoe UI", Roboto, "Helvetica Neue", "Noto Sans", Arial, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    --color-text: #353841;
+    --color-heading: #17181c;
+    --color-accent: #3d50f5;
+    --color-header: #f6f7f9;
+    --color-code-bg: #edeef3;
+    --color-code-text: #403f53;
+    --color-hairline: #e1e4ea;
+    /* The danger colour for destructive actions and errors. */
+    --color-danger: #b42318;
+}
+
+@layer base {
+    body {
+        @apply bg-white font-sans text-[16px] leading-7 text-text antialiased;
+    }
+
+    h1 {
+        @apply text-[32px] leading-tight font-semibold text-heading;
+    }
+
+    h2 {
+        @apply text-2xl font-semibold text-heading;
+    }
+
+    a {
+        @apply text-accent underline-offset-2 hover:underline;
+    }
+}

@@ -34,6 +34,27 @@ pub(crate) struct Registry {
     pub(crate) secret: Vec<u8>,
     /// Paths that the app's CSRF guard does not check (see `Ignite::csrf_exempt`).
     pub(crate) csrf_exempt: Vec<String>,
+    /// The panel's own build: its stylesheet and script.
+    pub(crate) assets: propel_runtime::Assets,
+}
+
+impl Registry {
+    /// The tags that load the panel's stylesheet and script. The URLs are under the
+    /// panel's mount, where the `build` route serves the files. In a debug build the
+    /// Vite dev server's tags replace them while `npm run dev` runs.
+    pub(crate) fn styles(&self) -> String {
+        let entries: Vec<String> = crate::assets::ENTRIES
+            .iter()
+            .map(|e| e.to_string())
+            .collect();
+        match self.assets.tags(&entries) {
+            Some(tags) => tags.replace("\"/build/", &format!("\"{}/build/", self.mount)),
+            None => {
+                rocket::warn!("the panel's build is missing: its styles are not loaded");
+                String::new()
+            }
+        }
+    }
 }
 
 impl Registry {
@@ -147,11 +168,15 @@ impl Ignite {
         #[cfg(not(debug_assertions))]
         let _ = (&views, EmbeddedViews);
         AdHoc::on_ignite("Ignite", move |rocket| async move {
+            let assets = crate::assets::panel_assets().unwrap_or_else(|error| {
+                panic!("Ignite could not prepare its built assets: {error}")
+            });
             let registry = Registry {
                 mount: mount.clone(),
                 resources,
                 secret,
                 csrf_exempt,
+                assets,
             };
             rocket
                 .manage(pool)

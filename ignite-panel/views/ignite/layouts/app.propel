@@ -4,57 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>@yield('title') · Ignite</title>
-<style>
-:root { --ink: #17181c; --muted: #5b6070; --line: #d9dce3; --panel: #ffffff; --page: #f5f6f8; --accent: #2f5bd3; --danger: #b42318; }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) { --ink: #eceef3; --muted: #a2a8b8; --line: #343846; --panel: #1b1d24; --page: #121319; --accent: #7f9cf0; --danger: #f97066; }
-}
-:root[data-theme="dark"] { --ink: #eceef3; --muted: #a2a8b8; --line: #343846; --panel: #1b1d24; --page: #121319; --accent: #7f9cf0; --danger: #f97066; }
-* { box-sizing: border-box; }
-body { margin: 0; font-family: system-ui, sans-serif; background: var(--page); color: var(--ink); line-height: 1.5; }
-header.topbar { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; justify-content: space-between; padding: 0.75rem 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
-header.topbar a { color: var(--ink); text-decoration: none; }
-header.topbar .brand { font-weight: 700; }
-nav a { margin-right: 1rem; color: var(--accent); }
-main { max-width: 64rem; margin: 0 auto; padding: 1.5rem 16px; }
-h1 { font-size: 1.6rem; margin: 0 0 1rem; }
-a { color: var(--accent); }
-.page-head { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; justify-content: space-between; }
-.button, button { display: inline-block; padding: 0.45rem 0.9rem; border: 1px solid var(--accent); background: var(--accent); color: #fff; border-radius: 6px; font: inherit; cursor: pointer; text-decoration: none; }
-.button.secondary, button.secondary { background: transparent; color: var(--accent); }
-button.danger { background: var(--danger); border-color: var(--danger); }
-.flash { padding: 0.75rem 1rem; border-radius: 6px; background: var(--panel); border: 1px solid var(--accent); margin-bottom: 1rem; }
-.search { display: flex; gap: 0.5rem; margin: 1rem 0; flex-wrap: wrap; }
-.search input { flex: 1 1 14rem; }
-input, textarea, select { font: inherit; padding: 0.45rem 0.6rem; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink); max-width: 100%; }
-.table-wrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
-table { width: 100%; border-collapse: collapse; }
-th, td { text-align: left; padding: 0.6rem 0.75rem; border-bottom: 1px solid var(--line); vertical-align: top; }
-th a { color: var(--ink); text-decoration: none; white-space: nowrap; }
-td form { display: inline; }
-.actions { white-space: nowrap; }
-.actions form { margin-left: 0.5rem; }
-.pager { display: flex; gap: 1rem; align-items: center; margin-top: 1rem; color: var(--muted); }
-.form { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 1rem; display: grid; gap: 1rem; max-width: 40rem; }
-.field label { display: block; font-weight: 600; margin-bottom: 0.25rem; }
-.field input[type="checkbox"] { margin-right: 0.4rem; }
-.field textarea { width: 100%; min-height: 8rem; }
-.field select, .field input:not([type="checkbox"]) { width: 100%; }
-.error { color: var(--danger); margin: 0.3rem 0 0; }
-.form-actions { display: flex; gap: 0.75rem; align-items: center; }
-.muted { color: var(--muted); }
-.cards { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); }
-.card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 1rem; }
-.card-label { margin: 0; color: var(--muted); }
-.card-value { margin: 0.25rem 0 0; font-size: 2rem; font-weight: 700; }
-</style>
+@yield('ignite_styles')
 </head>
-<body>
-<header class="topbar">
-  <a class="brand" href="@yield('ignite_home', '/admin')">Ignite</a>
-  <nav>@yield('ignite_nav')</nav>
+<body class="min-h-screen bg-white font-sans text-text antialiased">
+<header class="flex flex-wrap items-center justify-between gap-4 border-b border-hairline bg-header px-4 py-3">
+  <a class="font-semibold text-heading no-underline" href="@yield('ignite_home', '/admin')">Ignite</a>
+  <nav class="flex flex-wrap items-center gap-4">@yield('ignite_nav')</nav>
 </header>
-<main>
+<main class="mx-auto max-w-5xl px-4 py-6">
   @yield('ignite_flash')
   @yield('content')
 </main>

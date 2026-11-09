@@ -2,6 +2,8 @@
 
 @section('ignite_home'){{ $home_url }}@endsection
 
+@section('ignite_styles'){!! $styles !!}@endsection
+
 @section('ignite_nav')
   @include('ignite::partials.nav')
 @endsection
@@ -15,62 +17,62 @@
 @endsection
 
 @section('content')
-  <div class="page-head">
-    <h1>{{ $title }}</h1>
-    <a class="button" href="{{ $new_url }}">New {{ $singular }}</a>
+  <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+    <h1 class="mb-0">{{ $title }}</h1>
+    <a class="cursor-pointer rounded-md border border-accent bg-accent px-3.5 py-1.5 font-[inherit] text-white no-underline hover:opacity-90" href="{{ $new_url }}">New {{ $singular }}</a>
   </div>
 
-  <form class="search" method="get" action="{{ $index_url }}">
-    <input type="search" name="q" value="{{ $search }}" placeholder="Search">
-    <button type="submit" class="secondary">Search</button>
+  <form class="my-4 flex flex-wrap gap-2" method="get" action="{{ $index_url }}">
+    <input class="max-w-full flex-[1_1_14rem] rounded-md border border-hairline bg-white px-2.5 py-1.5 font-[inherit] text-text" type="search" name="q" value="{{ $search }}" placeholder="Search">
+    <button type="submit" class="cursor-pointer rounded-md border border-accent bg-white px-3.5 py-1.5 font-[inherit] text-accent no-underline hover:bg-header">Search</button>
   </form>
 
-  <div class="table-wrap">
-    <table>
+  <div class="overflow-x-auto rounded-lg border border-hairline bg-white">
+    <table class="w-full border-collapse">
       <thead>
         <tr>
           @foreach (column in columns)
-            <th>
+            <th class="border-b border-hairline px-3 py-2.5 text-left align-top font-semibold text-heading">
               @if (column.sortable)
-                <a href="{{ $column.sort_url }}">{{ $column.label }} {{ $column.indicator }}</a>
+                <a class="whitespace-nowrap text-heading no-underline hover:underline" href="{{ $column.sort_url }}">{{ $column.label }} {{ $column.indicator }}</a>
               @else
                 {{ $column.label }}
               @endif
             </th>
           @endforeach
-          <th></th>
+          <th class="border-b border-hairline px-3 py-2.5"></th>
         </tr>
       </thead>
       <tbody>
         @forelse (row in rows)
           <tr>
             @foreach (cell in row.cells)
-              <td>{{ $cell.text }}</td>
+              <td class="border-b border-hairline px-3 py-2.5 text-left align-top">{{ $cell.text }}</td>
             @endforeach
-            <td class="actions">
-              <a href="{{ $row.edit_url }}">Edit</a>
-              <form method="post" action="{{ $row.delete_url }}" onsubmit="return confirm('Delete this record? This cannot be undone.');">
+            <td class="whitespace-nowrap border-b border-hairline px-3 py-2.5 text-left align-top">
+              <a class="text-accent" href="{{ $row.edit_url }}">Edit</a>
+              <form class="ml-2 inline" method="post" action="{{ $row.delete_url }}" data-confirm="Delete this record? This cannot be undone.">
                 <input type="hidden" name="_token" value="{{ $csrf_token }}">
-                <button type="submit" class="danger">Delete</button>
+                <button type="submit" class="cursor-pointer rounded-md border border-danger bg-danger px-3 py-1 font-[inherit] text-white hover:opacity-90">Delete</button>
               </form>
             </td>
           </tr>
         @empty
           <tr>
-            <td colspan="{{ $colspan }}" class="muted">No records found.</td>
+            <td colspan="{{ $colspan }}" class="px-3 py-2.5 text-[#5b6070]">No records found.</td>
           </tr>
         @endforelse
       </tbody>
     </table>
   </div>
 
-  <div class="pager">
+  <div class="mt-4 flex items-center gap-4 text-[#5b6070]">
     @if (has_prev)
-      <a href="{{ $prev_url }}">Previous</a>
+      <a class="text-accent" href="{{ $prev_url }}">Previous</a>
     @endif
     <span>Page {{ $page }} of {{ $last_page }} · {{ $total }} in total</span>
     @if (has_next)
-      <a href="{{ $next_url }}">Next</a>
+      <a class="text-accent" href="{{ $next_url }}">Next</a>
     @endif
   </div>
 @endsection

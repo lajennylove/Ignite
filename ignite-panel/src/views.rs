@@ -49,6 +49,7 @@ pub(crate) struct Layout {
     pub(crate) nav: Vec<NavLink>,
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
+    pub(crate) styles: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -87,6 +88,7 @@ impl Layout {
             csrf_token,
             has_flash: flash.is_some(),
             flash: flash.unwrap_or_default(),
+            styles: registry.styles(),
         }
     }
 }
@@ -103,6 +105,7 @@ pub(crate) struct DashboardPage {
     pub(crate) nav: Vec<NavLink>,
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
+    pub(crate) styles: String,
     pub(crate) title: &'static str,
     pub(crate) cards: Vec<CardView>,
     pub(crate) tables: Vec<LatestTable>,
@@ -144,6 +147,7 @@ pub(crate) struct LoginPage {
     pub(crate) nav: Vec<NavLink>,
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
+    pub(crate) styles: String,
     pub(crate) title: &'static str,
     pub(crate) action: String,
     pub(crate) email: String,
@@ -163,6 +167,7 @@ pub(crate) struct IndexPage {
     pub(crate) nav: Vec<NavLink>,
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
+    pub(crate) styles: String,
     pub(crate) title: &'static str,
     pub(crate) singular: &'static str,
     pub(crate) index_url: String,
@@ -212,6 +217,7 @@ pub(crate) struct FormPage {
     pub(crate) nav: Vec<NavLink>,
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
+    pub(crate) styles: String,
     pub(crate) title: &'static str,
     pub(crate) singular: &'static str,
     pub(crate) heading: String,

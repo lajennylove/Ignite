@@ -106,10 +106,10 @@ fn a_signed_in_user_reaches_the_panel() {
     assert!(body.contains("Sign out"));
     // The Widgets resource provides a card with the number of rows it holds.
     assert!(body.contains("Widgets"));
-    assert!(body.contains(r#"<p class="card-value">3</p>"#));
+    assert!(body.contains(">3</p>"), "the widget card shows the count");
     // The declared table shows its title, its headers, and the two newest rows, newest first.
     assert!(body.contains("Latest widgets"));
-    assert!(body.contains("<th>Name</th>") && body.contains("<th>Price</th>"));
+    assert!(body.contains(">Name</th>") && body.contains(">Price</th>"));
     let cherry = body.find("Cherry").expect("newest row shown");
     let banana = body.find("Banana").expect("second row shown");
     assert!(cherry < banana, "newest first");

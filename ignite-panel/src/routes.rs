@@ -4,6 +4,7 @@
 
 use std::collections::HashMap;
 use std::net::IpAddr;
+use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 
 use ignite_core::{
@@ -11,7 +12,7 @@ use ignite_core::{
 };
 use propel_rocket::PropelView;
 use rocket::data::{Data, ToByteUnit};
-use rocket::http::{CookieJar, Status};
+use rocket::http::{ContentType, CookieJar, Status};
 use rocket::request::{FromRequest, Outcome, Request};
 use rocket::response::{self, Redirect, Responder, Response};
 use rocket::{get, post, routes, Route, State};
@@ -38,6 +39,7 @@ const MAX_FORM_BYTES: u64 = 64 * 1024;
 /// Every route the panel mounts.
 pub(crate) fn all() -> Vec<Route> {
     routes![
+        build_asset,
         dashboard,
         login_form,
         login,
@@ -115,6 +117,7 @@ async fn dashboard(
         nav: layout.nav,
         has_flash: layout.has_flash,
         flash: layout.flash,
+        styles: layout.styles,
         title: "Dashboard",
         cards: widgets
             .into_iter()
@@ -130,6 +133,20 @@ async fn dashboard(
         &page,
         compiled::dashboard::render,
     ))
+}
+
+/// Serves the panel's built stylesheet and script from the crate, under `{mount}/build`.
+/// The names are hashed, so a changed file has a new name and an old copy is never stale.
+// A lower priority than the resource routes, so a resource named "build" still works.
+#[get("/build/<path..>", rank = 10)]
+fn build_asset(path: PathBuf) -> Option<(ContentType, &'static [u8])> {
+    let bytes = crate::assets::embedded(&path)?;
+    let content_type = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .and_then(ContentType::from_extension)
+        .unwrap_or(ContentType::Binary);
+    Some((content_type, bytes))
 }
 
 #[get("/login")]
@@ -158,6 +175,7 @@ fn login_page(
         nav: layout.nav,
         has_flash: layout.has_flash,
         flash: layout.flash,
+        styles: layout.styles,
         title: "Sign in",
         action: format!("{}/login", registry.mount),
         email: email.to_string(),
@@ -404,6 +422,7 @@ async fn index(
         nav: layout.nav,
         has_flash: layout.has_flash,
         flash: layout.flash,
+        styles: layout.styles,
         title: resource.title(),
         singular: resource.singular(),
         new_url: format!("{index_url}/new"),
@@ -451,6 +470,7 @@ async fn new_form(
         nav: layout.nav,
         has_flash: layout.has_flash,
         flash: layout.flash,
+        styles: layout.styles,
         title: resource.title(),
         singular: resource.singular(),
         heading: format!("New {}", resource.singular()),
@@ -539,6 +559,7 @@ async fn edit_form(
         nav: layout.nav,
         has_flash: layout.has_flash,
         flash: layout.flash,
+        styles: layout.styles,
         title: resource.title(),
         singular: resource.singular(),
         heading: format!("Edit {} #{id}", resource.singular()),
@@ -639,6 +660,7 @@ fn form_page(
         nav: layout.nav,
         has_flash: layout.has_flash,
         flash: layout.flash,
+        styles: layout.styles,
         title: resource.title(),
         singular: resource.singular(),
         heading,
