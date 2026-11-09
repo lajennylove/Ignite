@@ -1,0 +1,43 @@
+@extends('ignite::layouts.app')
+
+@section('title')
+  {{ $heading }}
+@endsection
+
+@section('content')
+  <h1>{{ $heading }}</h1>
+
+  <form class="form" method="post" action="{{ $action }}">
+    @foreach (field in fields)
+      <div class="field">
+        @if (field.is_checkbox)
+          <label>
+            <input type="checkbox" name="{{ $field.name }}" value="on" @if (field.checked)checked@endif>
+            {{ $field.label }}
+          </label>
+        @else
+          <label for="{{ $field.name }}">{{ $field.label }}@if (field.required) *@endif</label>
+          @if (field.is_textarea)
+            <textarea id="{{ $field.name }}" name="{{ $field.name }}">{{ $field.value }}</textarea>
+          @elseif (field.is_select)
+            <select id="{{ $field.name }}" name="{{ $field.name }}">
+              @foreach (option in field.options)
+                <option value="{{ $option.value }}" @if (option.selected)selected@endif>{{ $option.label }}</option>
+              @endforeach
+            </select>
+          @else
+            <input id="{{ $field.name }}" name="{{ $field.name }}" type="{{ $field.input_type }}" value="{{ $field.value }}">
+          @endif
+        @endif
+        @if (field.has_error)
+          <p class="error">{{ $field.error }}</p>
+        @endif
+      </div>
+    @endforeach
+
+    <div class="form-actions">
+      <button type="submit">{{ $submit_label }}</button>
+      <a href="{{ $back_url }}">Cancel</a>
+    </div>
+  </form>
+@endsection

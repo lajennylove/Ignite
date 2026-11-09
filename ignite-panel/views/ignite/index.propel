@@ -1,0 +1,65 @@
+@extends('ignite::layouts.app')
+
+@section('title')
+  {{ $title }}
+@endsection
+
+@section('content')
+  <div class="page-head">
+    <h1>{{ $title }}</h1>
+    <a class="button" href="{{ $new_url }}">New {{ $title }}</a>
+  </div>
+
+  <form class="search" method="get" action="{{ $index_url }}">
+    <input type="search" name="q" value="{{ $search }}" placeholder="Search">
+    <button type="submit" class="secondary">Search</button>
+  </form>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          @foreach (column in columns)
+            <th>
+              @if (column.sortable)
+                <a href="{{ $column.sort_url }}">{{ $column.label }} {{ $column.indicator }}</a>
+              @else
+                {{ $column.label }}
+              @endif
+            </th>
+          @endforeach
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        @forelse (row in rows)
+          <tr>
+            @foreach (cell in row.cells)
+              <td>{{ $cell.text }}</td>
+            @endforeach
+            <td class="actions">
+              <a href="{{ $row.edit_url }}">Edit</a>
+              <form method="post" action="{{ $row.delete_url }}" onsubmit="return confirm('Delete this record? This cannot be undone.');">
+                <button type="submit" class="danger">Delete</button>
+              </form>
+            </td>
+          </tr>
+        @empty
+          <tr>
+            <td colspan="{{ $colspan }}" class="muted">No records found.</td>
+          </tr>
+        @endforelse
+      </tbody>
+    </table>
+  </div>
+
+  <div class="pager">
+    @if (has_prev)
+      <a href="{{ $prev_url }}">Previous</a>
+    @endif
+    <span>Page {{ $page }} of {{ $last_page }} · {{ $total }} in total</span>
+    @if (has_next)
+      <a href="{{ $next_url }}">Next</a>
+    @endif
+  </div>
+@endsection

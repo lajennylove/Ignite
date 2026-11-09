@@ -1,0 +1,3 @@
+@if (has_flash)
+  <p class="flash" role="status">{{ $flash }}</p>
+@endif
