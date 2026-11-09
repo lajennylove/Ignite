@@ -1013,6 +1013,7 @@ dependencies = [
  "hmac",
  "ignite-core",
  "propel_rocket",
+ "propel_runtime",
  "rand_core 0.6.4",
  "rocket",
  "rpassword",
@@ -1509,7 +1510,7 @@ dependencies = [
 [[package]]
 name = "propel_parser"
 version = "0.1.0"
-source = "git+https://github.com/lajennylove/propel?rev=025279f0409efceaf5f8a0309dc31044ad753138#025279f0409efceaf5f8a0309dc31044ad753138"
+source = "git+https://github.com/lajennylove/propel?rev=ac85231ee4808c45a62a18e06122eed3538ebe81#ac85231ee4808c45a62a18e06122eed3538ebe81"
 dependencies = [
  "pest",
  "pest_derive",
@@ -1518,7 +1519,7 @@ dependencies = [
 [[package]]
 name = "propel_rocket"
 version = "0.1.0"
-source = "git+https://github.com/lajennylove/propel?rev=025279f0409efceaf5f8a0309dc31044ad753138#025279f0409efceaf5f8a0309dc31044ad753138"
+source = "git+https://github.com/lajennylove/propel?rev=ac85231ee4808c45a62a18e06122eed3538ebe81#ac85231ee4808c45a62a18e06122eed3538ebe81"
 dependencies = [
  "propel_runtime",
  "rocket",
@@ -1528,7 +1529,7 @@ dependencies = [
 [[package]]
 name = "propel_runtime"
 version = "0.1.0"
-source = "git+https://github.com/lajennylove/propel?rev=025279f0409efceaf5f8a0309dc31044ad753138#025279f0409efceaf5f8a0309dc31044ad753138"
+source = "git+https://github.com/lajennylove/propel?rev=ac85231ee4808c45a62a18e06122eed3538ebe81#ac85231ee4808c45a62a18e06122eed3538ebe81"
 dependencies = [
  "propel_parser",
  "serde",

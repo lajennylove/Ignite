@@ -7,7 +7,8 @@ publish = false
 [dependencies]
 ignite-core = { path = "../ignite-core" }
 rocket = { git = "https://github.com/rwf2/Rocket", rev = "3a54d079" }
-propel_rocket = { git = "https://github.com/lajennylove/propel", rev = "025279f0409efceaf5f8a0309dc31044ad753138" }
+propel_rocket = { git = "https://github.com/lajennylove/propel", rev = "ac85231ee4808c45a62a18e06122eed3538ebe81" }
+propel_runtime = { git = "https://github.com/lajennylove/propel", rev = "ac85231ee4808c45a62a18e06122eed3538ebe81" }
 diesel = { git = "https://github.com/lajennylove/diesel", rev = "a07c4b2c20a466ef34f50ca283790f4df20b0699", features = ["mysql", "r2d2", "chrono"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

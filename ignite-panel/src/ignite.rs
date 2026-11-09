@@ -4,7 +4,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use ignite_core::{build_pool, IgniteResource, Pool};
-use propel_rocket::register_namespace;
+use propel_rocket::{register_namespace, register_namespace_loader};
+
+use crate::embedded::EmbeddedViews;
 use rocket::catchers;
 use rocket::fairing::AdHoc;
 
@@ -14,10 +16,6 @@ use crate::session;
 
 /// The directory of the `ignite` view namespace, shipped with this crate.
 ///
-/// Used when neither `views_dir` nor `IGNITE_VIEWS_DIR` names a directory. It
-/// exists on the machine that built the crate, not on a deployed server.
-const DEFAULT_VIEWS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/views/ignite");
-
 /// The environment variable that names the panel's view directory at run time.
 pub const VIEWS_DIR_ENV: &str = "IGNITE_VIEWS_DIR";
 
@@ -65,15 +63,10 @@ impl Ignite {
         let url = std::env::var("DATABASE_URL")
             .expect("DATABASE_URL must be set to a mysql:// URL for the Ignite panel");
         let pool = build_pool(&url).expect("Ignite could not connect to DATABASE_URL");
-        // The views directory is checked when the fairing is built, so a builder
-        // call to `views_dir` can still name it.
-        let views = match std::env::var(VIEWS_DIR_ENV) {
-            Ok(path) => Some(PathBuf::from(path)),
-            Err(_) if Path::new(DEFAULT_VIEWS_DIR).is_dir() => {
-                Some(PathBuf::from(DEFAULT_VIEWS_DIR))
-            }
-            Err(_) => None,
-        };
+        // The views are embedded in this crate unless a directory overrides them.
+        // The override is read here and checked when the fairing is built, so a
+        // builder call to `views_dir` can still replace it.
+        let views = std::env::var(VIEWS_DIR_ENV).ok().map(PathBuf::from);
 
         Ignite {
             pool,
@@ -99,8 +92,8 @@ impl Ignite {
         self
     }
 
-    /// Reads the panel's views from `path` instead of the default. Use it when the
-    /// views are shipped next to a deployed binary. The directory must hold
+    /// Reads the panel's views from `path` instead of the views embedded in the
+    /// binary. Use it to edit views without rebuilding. The directory must hold
     /// `layouts/app.propel`, and an override here wins over `IGNITE_VIEWS_DIR`.
     ///
     /// # Panics
@@ -128,12 +121,10 @@ impl Ignite {
             secret,
             views,
         } = self;
-        let views = views.unwrap_or_else(|| {
-            panic!(
-                "Ignite could not find its views: ship the views/ignite directory, or set {VIEWS_DIR_ENV}, or call views_dir"
-            )
-        });
-        register_views(&views);
+        match &views {
+            Some(dir) => register_views(dir),
+            None => register_namespace_loader("ignite", EmbeddedViews),
+        }
         AdHoc::on_ignite("Ignite", move |rocket| async move {
             let registry = Registry {
                 mount: mount.clone(),

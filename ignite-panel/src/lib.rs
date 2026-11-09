@@ -8,6 +8,7 @@
 //! ```
 
 pub mod cli;
+mod embedded;
 mod erased;
 mod ignite;
 mod routes;
