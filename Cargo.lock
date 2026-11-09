@@ -377,6 +377,7 @@ dependencies = [
 [[package]]
 name = "diesel"
 version = "2.3.14"
+source = "git+https://github.com/lajennylove/diesel?rev=a07c4b2c20a466ef34f50ca283790f4df20b0699#a07c4b2c20a466ef34f50ca283790f4df20b0699"
 dependencies = [
  "bitflags",
  "byteorder",
@@ -392,8 +393,7 @@ dependencies = [
 [[package]]
 name = "diesel_derives"
 version = "2.3.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ecbd51fb6c020672543641167efa4e6417ff7ad76849ed556ace3595e72de03a"
+source = "git+https://github.com/lajennylove/diesel?rev=a07c4b2c20a466ef34f50ca283790f4df20b0699#a07c4b2c20a466ef34f50ca283790f4df20b0699"
 dependencies = [
  "diesel_table_macro_syntax",
  "dsl_auto_type",
@@ -405,8 +405,7 @@ dependencies = [
 [[package]]
 name = "diesel_migrations"
 version = "2.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "28d0f4a98124ba6d4ca75da535f65984badec16a003b6e2f94a01e31a79490b8"
+source = "git+https://github.com/lajennylove/diesel?rev=a07c4b2c20a466ef34f50ca283790f4df20b0699#a07c4b2c20a466ef34f50ca283790f4df20b0699"
 dependencies = [
  "diesel",
  "migrations_internals",
@@ -416,8 +415,7 @@ dependencies = [
 [[package]]
 name = "diesel_table_macro_syntax"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe2444076b48641147115697648dc743c2c00b61adade0f01ce67133c7babe8c"
+source = "git+https://github.com/lajennylove/diesel?rev=a07c4b2c20a466ef34f50ca283790f4df20b0699#a07c4b2c20a466ef34f50ca283790f4df20b0699"
 dependencies = [
  "syn 2.0.119",
 ]
@@ -459,8 +457,7 @@ checksum = "117240f60069e65410b3ae1bb213295bd828f707b5bec6596a1afc8793ce0cbc"
 [[package]]
 name = "dsl_auto_type"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd122633e4bef06db27737f21d3738fb89c8f6d5360d6d9d7635dda142a7757e"
+source = "git+https://github.com/lajennylove/diesel?rev=a07c4b2c20a466ef34f50ca283790f4df20b0699#a07c4b2c20a466ef34f50ca283790f4df20b0699"
 dependencies = [
  "darling",
  "either",
@@ -1173,18 +1170,16 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 [[package]]
 name = "migrations_internals"
 version = "2.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "36c791ecdf977c99f45f23280405d7723727470f6689a5e6dbf513ac547ae10d"
+source = "git+https://github.com/lajennylove/diesel?rev=a07c4b2c20a466ef34f50ca283790f4df20b0699#a07c4b2c20a466ef34f50ca283790f4df20b0699"
 dependencies = [
  "serde",
- "toml 0.9.12+spec-1.1.0",
+ "toml 1.2.1+spec-1.1.0",
 ]
 
 [[package]]
 name = "migrations_macros"
 version = "2.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9423d6affd681fb4d25d35885d0d0262c52f8ade16e96f87c064c442e5aa5d47"
+source = "git+https://github.com/lajennylove/diesel?rev=a07c4b2c20a466ef34f50ca283790f4df20b0699#a07c4b2c20a466ef34f50ca283790f4df20b0699"
 dependencies = [
  "migrations_internals",
  "proc-macro2",
@@ -2406,19 +2401,6 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "0.9.12+spec-1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf92845e79fc2e2def6a5d828f0801e29a2f8acc037becc5ab08595c7d5e9863"
-dependencies = [
- "serde_core",
- "serde_spanned 1.1.3",
- "toml_datetime 0.7.5+spec-1.1.0",
- "toml_parser",
- "winnow 0.7.15",
-]
-
-[[package]]
-name = "toml"
 version = "1.2.1+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d5755c51863cdac711f1956baf8eb9588e060755f7d3c4c979e70ea1e1f32cd7"
@@ -2439,15 +2421,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "22cddaf88f4fbc13c51aebbf5f8eceb5c7c5a9da2ac40a13519eb5b0a0e8f11c"
 dependencies = [
  "serde",
-]
-
-[[package]]
-name = "toml_datetime"
-version = "0.7.5+spec-1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92e1cfed4a3038bc5a127e35a2d360f145e1f4b971b551a2ba5fd7aedf7e1347"
-dependencies = [
- "serde_core",
 ]
 
 [[package]]

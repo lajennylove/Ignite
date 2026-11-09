@@ -8,12 +8,12 @@ publish = false
 ignite-core = { path = "../ignite-core" }
 rocket = { git = "https://github.com/rwf2/Rocket", rev = "3a54d079" }
 propel_rocket = { git = "https://github.com/lajennylove/propel", rev = "025279f0409efceaf5f8a0309dc31044ad753138" }
-diesel = { version = "2", features = ["mysql", "r2d2", "chrono"] }
+diesel = { git = "https://github.com/lajennylove/diesel", rev = "a07c4b2c20a466ef34f50ca283790f4df20b0699", features = ["mysql", "r2d2", "chrono"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 form_urlencoded = "1"
 chrono = { version = "0.4", features = ["serde"] }
-diesel_migrations = "2"
+diesel_migrations = { git = "https://github.com/lajennylove/diesel", rev = "a07c4b2c20a466ef34f50ca283790f4df20b0699" }
 argon2 = "0.5"
 rand_core = { version = "0.6", features = ["getrandom"] }
 hmac = "0.12"
