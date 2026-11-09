@@ -17,7 +17,7 @@
 @endsection
 
 @section('content')
-  <h1>{{ $title }}</h1>
+  <h1 class="text-center">{{ $title }}</h1>
 
   <form class="mx-auto grid max-w-md gap-4 rounded-lg border border-hairline bg-white p-6" method="post" action="{{ $action }}">
     <input type="hidden" name="_token" value="{{ $csrf_token }}">
