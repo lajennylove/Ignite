@@ -31,6 +31,7 @@ mod schema {
 #[derive(diesel::Queryable, diesel::Selectable, Serialize, IgniteResource)]
 #[diesel(table_name = schema::gadgets)]
 #[ignite(table = schema::gadgets, title = "Gadgets")]
+#[ignite(latest_records(limit = 1, columns = "name,price"))]
 pub struct Gadget {
     id: i32,
     #[ignite(searchable, sortable)]
@@ -383,4 +384,30 @@ fn the_derived_latest_returns_the_newest_rows_first() {
 
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].name, "Beacon", "the highest id is the newest");
+}
+
+#[test]
+fn a_derived_resource_declares_its_dashboard_table() {
+    let declared = <Gadget as IgniteResource>::latest_records().expect("declared on the model");
+
+    assert_eq!(
+        declared.title, "Latest Gadgets",
+        "the default title is Latest and the title"
+    );
+    assert_eq!(declared.columns, &["name", "price"]);
+    assert_eq!(declared.limit, 1);
+}
+
+#[test]
+fn the_derived_dashboard_shows_the_declared_table() {
+    let _guard = setup();
+    let client = signed_in();
+    let body = client.get("/admin").dispatch().into_string().unwrap();
+
+    assert!(body.contains("Latest Gadgets"));
+    assert!(body.contains("Beacon"), "the newest row (highest id) shows");
+    assert!(
+        !body.contains("Anchor"),
+        "only the declared limit of one row shows"
+    );
 }

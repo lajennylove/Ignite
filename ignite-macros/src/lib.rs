@@ -100,7 +100,7 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
         }
     };
 
-    let (table, title, singular) = struct_attrs(input)?;
+    let (table, title, singular, latest) = struct_attrs(input)?;
     let table_name = table
         .segments
         .last()
@@ -128,6 +128,11 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
     }
     let pk_ident = primary.ident.clone();
     let pk_ty = primary.inner.clone();
+
+    let latest_records = match &latest {
+        Some(spec) => latest_records_tokens(spec, &fields, &title, name)?,
+        None => quote! { ::core::option::Option::None },
+    };
 
     let form_fields: Vec<&Field> = fields.iter().filter(|f| f.ident != pk_ident).collect();
     let input_name = format_ident!("{}Input", name);
@@ -324,6 +329,10 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
                     .optional()
             }
 
+            fn latest_records() -> ::core::option::Option<::ignite_core::LatestRecords> {
+                #latest_records
+            }
+
             fn latest(
                 conn: &mut ::diesel::mysql::MysqlConnection,
                 limit: i64,
@@ -429,11 +438,32 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
     })
 }
 
-/// Reads `#[ignite(table = ..., title = ...)]` on the struct.
-fn struct_attrs(input: &DeriveInput) -> syn::Result<(syn::Path, Option<String>, Option<String>)> {
+/// The `#[ignite(latest_records(...))]` attribute, as written.
+struct LatestSpec {
+    /// The table heading. Defaults to "Latest" and the title.
+    title: Option<String>,
+    /// The most rows the dashboard table shows.
+    limit: i64,
+    /// Each column key, with the span of the string it came from.
+    columns: Vec<(String, Span)>,
+}
+
+/// What the struct-level attributes give: the table, the title, the singular name, and
+/// the dashboard table.
+type StructAttrs = (
+    syn::Path,
+    Option<String>,
+    Option<String>,
+    Option<LatestSpec>,
+);
+
+/// Reads `#[ignite(...)]` on the struct: the table, the title, the singular name, and
+/// the dashboard table.
+fn struct_attrs(input: &DeriveInput) -> syn::Result<StructAttrs> {
     let mut table = None;
     let mut title = None;
     let mut singular = None;
+    let mut latest = None;
     for attr in input.attrs.iter().filter(|a| a.path().is_ident("ignite")) {
         attr.parse_nested_meta(|meta| {
             if meta.path.is_ident("table") {
@@ -445,9 +475,12 @@ fn struct_attrs(input: &DeriveInput) -> syn::Result<(syn::Path, Option<String>, 
             } else if meta.path.is_ident("singular") {
                 singular = Some(meta.value()?.parse::<LitStr>()?.value());
                 Ok(())
+            } else if meta.path.is_ident("latest_records") {
+                latest = Some(latest_spec(&meta)?);
+                Ok(())
             } else {
                 Err(meta.error(
-                    "unknown ignite attribute on the struct; expected `table`, `title` or `singular`",
+                    "unknown ignite attribute on the struct; expected `table`, `title`, `singular` or `latest_records`",
                 ))
             }
         })?;
@@ -458,7 +491,91 @@ fn struct_attrs(input: &DeriveInput) -> syn::Result<(syn::Path, Option<String>, 
             "IgniteResource needs #[ignite(table = <diesel table module>)]",
         )
     })?;
-    Ok((table, title, singular))
+    Ok((table, title, singular, latest))
+}
+
+/// Reads `latest_records(limit = 5, columns = "name,email", title = "...")`.
+fn latest_spec(meta: &syn::meta::ParseNestedMeta<'_>) -> syn::Result<LatestSpec> {
+    let mut title = None;
+    let mut limit = 5i64;
+    let mut columns = None;
+    meta.parse_nested_meta(|inner| {
+        if inner.path.is_ident("limit") {
+            let value: syn::LitInt = inner.value()?.parse()?;
+            limit = value.base10_parse::<i64>()?;
+            if limit < 1 {
+                return Err(syn::Error::new(value.span(), "limit must be at least 1"));
+            }
+            Ok(())
+        } else if inner.path.is_ident("columns") {
+            let list: LitStr = inner.value()?.parse()?;
+            let span = list.span();
+            let names: Vec<(String, Span)> = list
+                .value()
+                .split(',')
+                .map(|name| (name.trim().to_string(), span))
+                .collect();
+            columns = Some(names);
+            Ok(())
+        } else if inner.path.is_ident("title") {
+            title = Some(inner.value()?.parse::<LitStr>()?.value());
+            Ok(())
+        } else {
+            Err(inner.error("latest_records takes limit, columns and title"))
+        }
+    })?;
+    let columns = columns.ok_or_else(|| {
+        meta.error(
+            "latest_records needs columns = \"name,email\": the columns the dashboard table shows",
+        )
+    })?;
+    Ok(LatestSpec {
+        title,
+        limit,
+        columns,
+    })
+}
+
+/// Writes the body of `latest_records()` from the attribute, after checking each
+/// column: it must be a field of the model, and it must not be a password.
+fn latest_records_tokens(
+    spec: &LatestSpec,
+    fields: &[Field],
+    title: &str,
+    name: &syn::Ident,
+) -> syn::Result<TokenStream2> {
+    let mut keys = Vec::new();
+    for (key, span) in &spec.columns {
+        if key.is_empty() {
+            return Err(syn::Error::new(
+                *span,
+                "latest_records has an empty column name",
+            ));
+        }
+        let field = fields
+            .iter()
+            .find(|f| f.ident == key.as_str())
+            .ok_or_else(|| syn::Error::new(*span, format!("`{key}` is not a field of {name}")))?;
+        if field.is_password {
+            return Err(syn::Error::new(
+                *span,
+                format!("`{key}` is a password and cannot be shown on the dashboard"),
+            ));
+        }
+        keys.push(key.clone());
+    }
+    let table_title = spec
+        .title
+        .clone()
+        .unwrap_or_else(|| format!("Latest {title}"));
+    let limit = spec.limit;
+    Ok(quote! {
+        ::core::option::Option::Some(::ignite_core::LatestRecords {
+            title: #table_title,
+            columns: &[#(#keys),*],
+            limit: #limit,
+        })
+    })
 }
 
 /// Reads the `#[ignite(...)]` attributes of a field and resolves its defaults.

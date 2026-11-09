@@ -1,0 +1,5 @@
+error: `colour` is not a field of Widget
+  --> tests/fail/latest_unknown_column.rs:14:35
+   |
+14 | #[ignite(latest_records(columns = "name,colour"))]
+   |                                   ^^^^^^^^^^^^^
