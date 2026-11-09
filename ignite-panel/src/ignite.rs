@@ -32,6 +32,8 @@ pub(crate) struct Registry {
     pub(crate) resources: Vec<Arc<dyn Erased>>,
     /// The key that signs the session and flash cookies.
     pub(crate) secret: Vec<u8>,
+    /// Paths that the app's CSRF guard does not check (see `Ignite::csrf_exempt`).
+    pub(crate) csrf_exempt: Vec<String>,
 }
 
 impl Registry {
@@ -49,6 +51,7 @@ pub struct Ignite {
     resources: Vec<Arc<dyn Erased>>,
     secret: Vec<u8>,
     views: Option<PathBuf>,
+    csrf_exempt: Vec<String>,
 }
 
 impl Ignite {
@@ -77,6 +80,7 @@ impl Ignite {
             resources: Vec::new(),
             secret: session::secret_from_env(),
             views,
+            csrf_exempt: Vec::new(),
         }
     }
 
@@ -107,6 +111,14 @@ impl Ignite {
         self
     }
 
+    /// Paths the app's CSRF guard (`CsrfForm`) does not check, such as a payment
+    /// webhook that the provider posts to. A path ends with `/*` to match everything
+    /// under it. The panel's own routes are always checked.
+    pub fn csrf_exempt(mut self, paths: &[&str]) -> Self {
+        self.csrf_exempt = paths.iter().map(|p| p.to_string()).collect();
+        self
+    }
+
     /// Changes the URL prefix of the panel. The default is `/admin`.
     pub fn mount(mut self, path: &str) -> Self {
         self.mount = path.trim_end_matches('/').to_string();
@@ -123,6 +135,7 @@ impl Ignite {
             resources,
             secret,
             views,
+            csrf_exempt,
         } = self;
         // A debug build renders with the dev renderer, from the embedded views or from a
         // directory. A release build renders compiled views only, so a directory is ignored.
@@ -138,6 +151,7 @@ impl Ignite {
                 mount: mount.clone(),
                 resources,
                 secret,
+                csrf_exempt,
             };
             rocket
                 .manage(pool)

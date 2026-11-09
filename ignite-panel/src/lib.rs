@@ -8,6 +8,7 @@
 //! ```
 
 pub mod cli;
+mod csrf;
 mod embedded;
 mod erased;
 mod ignite;
@@ -23,6 +24,7 @@ use std::error::Error;
 use diesel::mysql::MysqlConnection;
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 
+pub use csrf::{CsrfForm, CsrfToken};
 pub use ignite::Ignite;
 pub use ignite_core;
 pub use session::AdminUser;
