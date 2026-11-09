@@ -4,7 +4,7 @@
 use std::marker::PhantomData;
 
 use diesel::mysql::MysqlConnection;
-use diesel::result::{Error as DieselError, QueryResult};
+use diesel::result::{DatabaseErrorKind, Error as DieselError, QueryResult};
 use ignite_core::{Column, Field, FieldErrors, FormInput, IgniteResource, ListQuery, StatWidget};
 use serde::Serialize;
 use serde_json::Value;
@@ -91,7 +91,10 @@ impl<R: IgniteResource> Erased for Adapter<R> {
         form: &FormInput,
     ) -> QueryResult<Result<Value, FieldErrors>> {
         match R::validate(form) {
-            Ok(input) => to_json(R::create(conn, input)?).map(Ok),
+            Ok(input) => match R::create(conn, input) {
+                Ok(record) => to_json(record).map(Ok),
+                Err(error) => unique_violation(error, R::fields()).map(Err),
+            },
             Err(errors) => Ok(Err(errors)),
         }
     }
@@ -103,7 +106,10 @@ impl<R: IgniteResource> Erased for Adapter<R> {
         form: &FormInput,
     ) -> QueryResult<Result<Value, FieldErrors>> {
         match R::validate_update(form) {
-            Ok(input) => to_json(R::update(conn, id, input)?).map(Ok),
+            Ok(input) => match R::update(conn, id, input) {
+                Ok(record) => to_json(record).map(Ok),
+                Err(error) => unique_violation(error, R::fields()).map(Err),
+            },
             Err(errors) => Ok(Err(errors)),
         }
     }
@@ -114,6 +120,38 @@ impl<R: IgniteResource> Erased for Adapter<R> {
 
     fn widgets(&self, conn: &mut MysqlConnection) -> QueryResult<Vec<StatWidget>> {
         R::widgets(conn)
+    }
+}
+
+/// Turns a unique-index violation into a field error on the field the index is
+/// named after, such as `users_email_unique` for `email`, so the form shows
+/// "Email is already taken." instead of a server error. Any other error, or a
+/// violation that names no field, is returned unchanged.
+fn unique_violation(error: DieselError, fields: &[Field]) -> QueryResult<FieldErrors> {
+    let DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, info) = &error else {
+        return Err(error);
+    };
+    let message = info.message();
+    let key = message
+        .rfind("for key '")
+        .map(|start| &message[start + "for key '".len()..])
+        .map(|rest| {
+            rest.trim_end_matches('\'')
+                .trim_end_matches(|c| c == '\'' || c == '`')
+        })
+        .unwrap_or_default();
+    // An exact match wins, then a field whose name appears in the index name.
+    let field = fields
+        .iter()
+        .find(|f| f.name == key)
+        .or_else(|| fields.iter().find(|f| key.contains(f.name)));
+    match field {
+        Some(field) => {
+            let mut errors = FieldErrors::new();
+            errors.insert(field.name, format!("{} is already taken.", field.label));
+            Ok(errors)
+        }
+        None => Err(error),
     }
 }
 

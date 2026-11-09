@@ -59,7 +59,8 @@ fn setup() -> std::sync::MutexGuard<'static, ()> {
         .unwrap();
     sql_query(
         "CREATE TABLE gadgets (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(255) NOT NULL, price INT NOT NULL, \
-         note TEXT NULL, active TINYINT(1) NOT NULL, due DATE NULL, secret VARCHAR(255) NOT NULL)",
+         note TEXT NULL, active TINYINT(1) NOT NULL, due DATE NULL, secret VARCHAR(255) NOT NULL, \
+         UNIQUE KEY gadgets_name_unique (name))",
     )
     .execute(&mut conn)
     .unwrap();
@@ -299,4 +300,37 @@ fn the_hash_never_reaches_the_list_or_the_edit_form() {
     assert!(!edit.contains("$argon2"));
     assert!(!edit.contains(&stored));
     assert!(edit.contains(r#"type="password""#));
+}
+
+#[test]
+fn a_duplicate_name_on_create_is_a_field_error_not_a_server_error() {
+    let _guard = setup();
+    let client = signed_in();
+    let response = client
+        .post("/admin/gadgets")
+        .header(ContentType::Form)
+        .body("name=Anchor&price=1&secret=another-pass")
+        .dispatch();
+
+    assert_eq!(response.status(), Status::UnprocessableEntity);
+    let body = response.into_string().unwrap();
+    assert!(body.contains("Name is already taken."), "body: {body}");
+    assert_eq!(gadget_count(), 2);
+}
+
+#[test]
+fn a_duplicate_name_on_edit_is_a_field_error_not_a_server_error() {
+    let _guard = setup();
+    let client = signed_in();
+    let response = client
+        .post("/admin/gadgets/2")
+        .header(ContentType::Form)
+        .body("name=Anchor&price=9&secret=")
+        .dispatch();
+
+    assert_eq!(response.status(), Status::UnprocessableEntity);
+    assert!(response
+        .into_string()
+        .unwrap()
+        .contains("Name is already taken."));
 }
