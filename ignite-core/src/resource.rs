@@ -7,6 +7,7 @@ use serde::Serialize;
 use crate::field::{Column, Field};
 use crate::form::{FieldErrors, FormInput};
 use crate::query::{ListQuery, Page};
+use crate::widget::StatWidget;
 
 /// A table of records the panel can list, create, edit and delete.
 ///
@@ -27,6 +28,13 @@ pub trait IgniteResource: Send + Sync + 'static {
     const TITLE: &'static str;
     /// Rows per page on the list view.
     const PER_PAGE: i64 = 20;
+
+    /// Stat cards for the dashboard, in display order. The default is none.
+    /// Override it to show counts, such as the total number of rows.
+    fn widgets(conn: &mut MysqlConnection) -> QueryResult<Vec<StatWidget>> {
+        let _ = conn;
+        Ok(Vec::new())
+    }
 
     /// Form fields, in display order.
     fn fields() -> &'static [Field];
