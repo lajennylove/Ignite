@@ -1,0 +1,8 @@
+@foreach (link in nav)
+  <a href="{{ $link.url }}">{{ $link.title }}</a>
+@endforeach
+@if (signed_in)
+  <form method="post" action="{{ $logout_url }}">
+    <button type="submit" class="secondary">Sign out</button>
+  </form>
+@endif

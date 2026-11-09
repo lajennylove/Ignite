@@ -51,20 +51,11 @@ td form { display: inline; }
 </head>
 <body>
 <header class="topbar">
-  <a class="brand" href="{{ $home_url }}">Ignite</a>
-  <nav>
-    @foreach (link in nav)
-      <a href="{{ $link.url }}">{{ $link.title }}</a>
-    @endforeach
-  </nav>
-  @if (signed_in)
-    <form method="post" action="{{ $logout_url }}">
-      <button type="submit" class="secondary">Sign out</button>
-    </form>
-  @endif
+  <a class="brand" href="@yield('ignite_home', '/admin')">Ignite</a>
+  <nav>@yield('ignite_nav')</nav>
 </header>
 <main>
-  @include('ignite::partials.flash')
+  @yield('ignite_flash')
   @yield('content')
 </main>
 </body>

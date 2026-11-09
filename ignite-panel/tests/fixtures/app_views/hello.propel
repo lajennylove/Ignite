@@ -1,0 +1,9 @@
+@extends('ignite::layouts.app')
+
+@section('title')
+  Hello
+@endsection
+
+@section('content')
+  <p>Hello {{ $name }}</p>
+@endsection
