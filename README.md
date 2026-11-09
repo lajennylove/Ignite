@@ -1,6 +1,6 @@
 # Ignite
 
-A Filament-inspired admin panel for [Rocket.rs](https://rocket.rs), built on [Propel](https://github.com/lajennylove/propel) templates and [Diesel](https://diesel.rs).
+A Filament-inspired admin panel for [Rocket.rs](https://rocket.rs), built on [Propel](https://github.com/lajennylove/Propel) templates and [Diesel](https://diesel.rs).
 
 Status: early scaffold. The workspace has three crates, and none of them implements the plan yet.
 
