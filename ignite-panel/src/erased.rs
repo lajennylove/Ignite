@@ -102,7 +102,7 @@ impl<R: IgniteResource> Erased for Adapter<R> {
         id: i64,
         form: &FormInput,
     ) -> QueryResult<Result<Value, FieldErrors>> {
-        match R::validate(form) {
+        match R::validate_update(form) {
             Ok(input) => to_json(R::update(conn, id, input)?).map(Ok),
             Err(errors) => Ok(Err(errors)),
         }

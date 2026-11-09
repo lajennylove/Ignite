@@ -975,8 +975,10 @@ dependencies = [
 name = "ignite-core"
 version = "0.0.0"
 dependencies = [
+ "argon2",
  "diesel",
  "ignite-macros",
+ "rand_core 0.6.4",
  "serde",
 ]
 

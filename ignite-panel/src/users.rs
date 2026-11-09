@@ -1,15 +1,10 @@
 //! The `users` table the panel signs in with: its schema, argon2 password
 //! hashes, and the lookups the login and the CLI need.
 
-use argon2::password_hash::{
-    Error as PasswordError, PasswordHash, PasswordHasher, PasswordVerifier, SaltString,
-};
-use argon2::Argon2;
 use chrono::NaiveDateTime;
 use diesel::mysql::MysqlConnection;
 use diesel::prelude::*;
 use diesel::result::QueryResult;
-use rand_core::OsRng;
 
 diesel::table! {
     /// The panel's `users` table. See `migrations/20261108000000_create_users`.
@@ -46,23 +41,7 @@ struct NewUser<'a> {
     password_hash: &'a str,
 }
 
-/// Hashes `password` with argon2 and a random salt.
-pub fn hash_password(password: &str) -> Result<String, PasswordError> {
-    let salt = SaltString::generate(&mut OsRng);
-    Ok(Argon2::default()
-        .hash_password(password.as_bytes(), &salt)?
-        .to_string())
-}
-
-/// Returns true when `password` matches the stored `hash`. A malformed hash never matches.
-pub fn verify_password(hash: &str, password: &str) -> bool {
-    match PasswordHash::new(hash) {
-        Ok(parsed) => Argon2::default()
-            .verify_password(password.as_bytes(), &parsed)
-            .is_ok(),
-        Err(_) => false,
-    }
-}
+pub use ignite_core::{hash_password, verify_password};
 
 /// Inserts a user with a hashed password and returns the new row.
 pub fn create_user(
@@ -100,30 +79,4 @@ pub fn find_by_id(conn: &mut MysqlConnection, id: i64) -> QueryResult<Option<Use
         .select(User::as_select())
         .first(conn)
         .optional()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_wrong_password_does_not_verify() {
-        let hash = hash_password("correct horse").unwrap();
-
-        assert!(verify_password(&hash, "correct horse"));
-        assert!(!verify_password(&hash, "wrong password"));
-    }
-
-    #[test]
-    fn a_malformed_hash_never_verifies() {
-        assert!(!verify_password("not-a-hash", "anything"));
-    }
-
-    #[test]
-    fn hashes_use_a_fresh_salt() {
-        assert_ne!(
-            hash_password("same").unwrap(),
-            hash_password("same").unwrap()
-        );
-    }
 }

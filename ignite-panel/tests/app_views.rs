@@ -33,6 +33,12 @@ fn an_app_view_extending_the_layout_renders_with_only_the_app_context() {
     assert_eq!(response.status(), Status::Ok);
     let body = response.into_string().unwrap();
     assert!(body.contains("<p>Hello Ada</p>"));
-    assert!(body.contains(r#"href="/admin""#), "the brand falls back to /admin");
-    assert!(!body.contains("Sign out"), "no panel navigation without the panel's context");
+    assert!(
+        body.contains(r#"href="/admin""#),
+        "the brand falls back to /admin"
+    );
+    assert!(
+        !body.contains("Sign out"),
+        "no panel navigation without the panel's context"
+    );
 }

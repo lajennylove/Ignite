@@ -53,7 +53,14 @@ pub trait IgniteResource: Send + Sync + 'static {
     /// Deletes the row with `id` and returns the number of rows deleted.
     fn delete(conn: &mut MysqlConnection, id: i64) -> QueryResult<usize>;
 
-    /// Turns the submitted form into `Input`, or returns one message per
-    /// field. Call [`Field::check_required`] for required fields.
+    /// Turns the submitted form into `Input` for a create, or returns one message
+    /// per field. Call [`Field::check_required`] for required fields.
     fn validate(form: &FormInput) -> Result<Self::Input, FieldErrors>;
+
+    /// Turns the submitted form into `Input` for an update. The default is
+    /// [`validate`](Self::validate). Override it when a field may be left blank
+    /// on edit, such as a password that keeps its stored value.
+    fn validate_update(form: &FormInput) -> Result<Self::Input, FieldErrors> {
+        Self::validate(form)
+    }
 }

@@ -55,6 +55,8 @@ struct Field {
     searchable: bool,
     sortable: bool,
     hidden_on_index: bool,
+    /// A password: hashed on save, and blank on an edit keeps the stored hash.
+    is_password: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -128,6 +130,12 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
     let input_name = format_ident!("{}Input", name);
 
     for f in &form_fields {
+        if f.is_password && base_of(&f.inner) != Some(Base::Text) {
+            return Err(syn::Error::new_spanned(
+                &f.ty,
+                "a password field must be a String (or Option<String>), so the derive can hash it",
+            ));
+        }
         if base_of(&f.inner).is_none() {
             return Err(syn::Error::new_spanned(
                 &f.ty,
@@ -147,8 +155,13 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
 
     let input_fields = form_fields.iter().map(|f| {
         let ident = &f.ident;
-        let ty = &f.ty;
-        quote! { pub #ident: #ty }
+        // A password is Option<String> on input, so a blank edit leaves the column as it is.
+        if f.is_password {
+            quote! { pub #ident: ::core::option::Option<::std::string::String> }
+        } else {
+            let ty = &f.ty;
+            quote! { pub #ident: #ty }
+        }
     });
     let input_struct = quote! {
         #[derive(::diesel::Insertable, ::diesel::AsChangeset)]
@@ -173,20 +186,23 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
         }
     });
 
-    let column_defs = fields.iter().filter(|f| !f.hidden_on_index).map(|f| {
-        let key = f.ident.to_string();
-        let label = &f.label;
-        let sortable = f.sortable;
-        let searchable = f.searchable;
-        quote! {
-            ::ignite_core::Column {
-                key: #key,
-                label: #label,
-                sortable: #sortable,
-                searchable: #searchable,
+    let column_defs = fields
+        .iter()
+        .filter(|f| !f.hidden_on_index && !f.is_password)
+        .map(|f| {
+            let key = f.ident.to_string();
+            let label = &f.label;
+            let sortable = f.sortable;
+            let searchable = f.searchable;
+            quote! {
+                ::ignite_core::Column {
+                    key: #key,
+                    label: #label,
+                    sortable: #sortable,
+                    searchable: #searchable,
+                }
             }
-        }
-    });
+        });
 
     let searchable: Vec<&Field> = fields.iter().filter(|f| f.searchable).collect();
     // One LIKE per searchable column, joined with OR. Each query gets its own
@@ -227,7 +243,7 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
     let validate_idents: Vec<&syn::Ident> = form_fields.iter().map(|f| &f.ident).collect();
     let validate_patterns = form_fields.iter().map(|f| {
         let ident = &f.ident;
-        if f.optional {
+        if f.optional || f.is_password {
             quote! { #ident }
         } else {
             quote! { ::core::option::Option::Some(#ident) }
@@ -359,6 +375,26 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
             fn validate(
                 form: &::ignite_core::FormInput,
             ) -> ::core::result::Result<#input_name, ::ignite_core::FieldErrors> {
+                #name::__ignite_validate(form, true)
+            }
+
+            fn validate_update(
+                form: &::ignite_core::FormInput,
+            ) -> ::core::result::Result<#input_name, ::ignite_core::FieldErrors> {
+                #name::__ignite_validate(form, false)
+            }
+        }
+
+        impl #name {
+            /// Shared by `validate` and `validate_update`. `creating` decides
+            /// whether a blank password is an error.
+            #[doc(hidden)]
+            #[allow(clippy::nonminimal_bool, clippy::needless_bool)]
+            fn __ignite_validate(
+                form: &::ignite_core::FormInput,
+                creating: bool,
+            ) -> ::core::result::Result<#input_name, ::ignite_core::FieldErrors> {
+                let _ = creating;
                 let mut errors = ::ignite_core::FieldErrors::new();
                 #(#validate_steps)*
                 match (#(#validate_idents,)*) {
@@ -488,6 +524,7 @@ fn field_attrs(field: &syn::Field) -> syn::Result<Field> {
         searchable,
         sortable,
         hidden_on_index,
+        is_password: kind == Kind::Password,
     })
 }
 
@@ -540,8 +577,21 @@ fn validate_expr(field: &Field) -> TokenStream2 {
     let kind = kind_tokens(field.kind);
     let required = field.required;
     let base = base_of(&field.inner).expect("checked before expansion");
+    let is_password = field.is_password;
 
     let convert = match base {
+        Base::Text if is_password => {
+            let message = "Could not save this password.".to_string();
+            quote! {
+                match ::ignite_core::hash_password(text) {
+                    Ok(hash) => ::core::option::Option::Some(hash),
+                    Err(_) => {
+                        errors.insert(#name, #message.to_string());
+                        ::core::option::Option::None
+                    }
+                }
+            }
+        }
         Base::Text => quote! { ::core::option::Option::Some(text.to_string()) },
         Base::Bool => quote! { ::core::option::Option::Some(form.checkbox(#name)) },
         Base::Integer => {
@@ -576,21 +626,20 @@ fn validate_expr(field: &Field) -> TokenStream2 {
         return quote! { let #ident = #convert; };
     }
 
-    let present = if required {
-        quote! {
-            {
+    // A password is required only when creating. On an edit a blank password
+    // keeps the stored hash.
+    quote! {
+        let #ident = {
+            let present = if #required && (creating || !#is_password) {
                 let field = ::ignite_core::Field { name: #name, label: #label, kind: #kind, required: true };
                 field.check_required(form, &mut errors)
+            } else {
+                form.get(#name)
+            };
+            match present {
+                ::core::option::Option::Some(text) => { let text: &str = text; #convert }
+                ::core::option::Option::None => ::core::option::Option::None,
             }
-        }
-    } else {
-        quote! { form.get(#name) }
-    };
-
-    quote! {
-        let #ident = match #present {
-            ::core::option::Option::Some(text) => { let text: &str = text; #convert }
-            ::core::option::Option::None => ::core::option::Option::None,
         };
     }
 }
