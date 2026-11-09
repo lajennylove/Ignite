@@ -61,13 +61,13 @@ fn run_piped(args: &[&str], stdin: &str) -> std::process::Output {
     child.wait_with_output().expect("wait for ignite")
 }
 
-/// An email that no earlier run used.
+/// An email that no other test or run uses. Tests run in parallel, and a clock can
+/// give two calls the same reading, so a counter and the process id make it unique.
 fn fresh_email() -> String {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    format!("stdin-{nanos}@example.test")
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, Ordering::SeqCst);
+    format!("stdin-{}-{n}@example.test", std::process::id())
 }
 
 #[test]
