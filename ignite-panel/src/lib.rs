@@ -25,7 +25,6 @@ use std::error::Error;
 use diesel::mysql::MysqlConnection;
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 
-pub use assets::panel_source;
 pub use csrf::{CsrfForm, CsrfToken};
 pub use embedded::EmbeddedViews;
 pub use ignite::Ignite;

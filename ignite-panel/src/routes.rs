@@ -128,7 +128,6 @@ async fn dashboard(
         tables,
     };
     Ok(render_page(
-        registry,
         "ignite::dashboard",
         &page,
         compiled::dashboard::render,
@@ -139,9 +138,9 @@ async fn dashboard(
 /// hashed, so a changed file has a new name and an old copy is never stale.
 // A lower priority than the resource routes, so a resource named "build" still works.
 #[get("/build/<path..>", rank = 10)]
-fn build_asset(path: PathBuf, registry: &State<Registry>) -> Option<(ContentType, Vec<u8>)> {
+fn build_asset(path: PathBuf) -> Option<(ContentType, Vec<u8>)> {
     let name = path.to_string_lossy().replace('\\', "/");
-    let bytes = crate::assets::file(&registry.assets, &name)?;
+    let bytes = crate::assets::file(&name)?;
     let content_type = path
         .extension()
         .and_then(|extension| extension.to_str())
@@ -154,7 +153,6 @@ fn build_asset(path: PathBuf, registry: &State<Registry>) -> Option<(ContentType
 fn login_form(cookies: &CookieJar<'_>, registry: &State<Registry>) -> PropelView {
     let token = csrf_token(cookies, &registry.secret);
     render_page(
-        registry,
         "ignite::login",
         &login_page(registry, "", None, token),
         compiled::login::render,
@@ -213,7 +211,6 @@ async fn login(
     if let Some(seconds) = waiting {
         let message = format!("Too many sign-in attempts. Try again in {seconds} seconds.");
         let page = render_page(
-            registry,
             "ignite::login",
             &login_page(
                 registry,
@@ -262,7 +259,6 @@ async fn login(
         None => Ok(Reply::Page(
             Status::UnprocessableEntity,
             render_page(
-                registry,
                 "ignite::login",
                 &login_page(
                     registry,
@@ -442,7 +438,6 @@ async fn index(
         next_url: list_url(&index_url, &search, sort_pair, page_no + 1),
     };
     Ok(render_page(
-        registry,
         "ignite::index",
         &page_view,
         compiled::index::render,
@@ -485,12 +480,7 @@ async fn new_form(
             &FieldErrors::new(),
         ),
     };
-    Ok(render_page(
-        registry,
-        "ignite::form",
-        &page,
-        compiled::form::render,
-    ))
+    Ok(render_page("ignite::form", &page, compiled::form::render))
 }
 
 #[post("/<slug>", data = "<body>")]
@@ -574,12 +564,7 @@ async fn edit_form(
         back_url: index_url,
         fields: field_views(resource.fields(), &form, &FieldErrors::new()),
     };
-    Ok(render_page(
-        registry,
-        "ignite::form",
-        &page,
-        compiled::form::render,
-    ))
+    Ok(render_page("ignite::form", &page, compiled::form::render))
 }
 
 #[post("/<slug>/<id>", data = "<body>")]
@@ -681,7 +666,7 @@ fn form_page(
     };
     Reply::Page(
         Status::UnprocessableEntity,
-        render_page(registry, "ignite::form", &page, compiled::form::render),
+        render_page("ignite::form", &page, compiled::form::render),
     )
 }
 

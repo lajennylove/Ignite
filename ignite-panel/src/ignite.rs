@@ -1,8 +1,6 @@
 //! The builder that collects resources and attaches the panel to Rocket.
 
-#[cfg(debug_assertions)]
-use std::path::Path;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use ignite_core::{build_pool, IgniteResource, Pool};
@@ -30,12 +28,6 @@ pub(crate) struct Registry {
     pub(crate) secret: Vec<u8>,
     /// Paths that the app's CSRF guard does not check (see `Ignite::csrf_exempt`).
     pub(crate) csrf_exempt: Vec<String>,
-    /// The panel's own build, as the `ui` asset namespace.
-    pub(crate) assets: propel_runtime::Assets,
-    /// A directory that replaces the embedded views in a debug build. Release builds
-    /// render compiled views and ignore it.
-    #[cfg_attr(not(debug_assertions), allow(dead_code))]
-    pub(crate) views: Option<PathBuf>,
 }
 
 impl Registry {
@@ -139,21 +131,15 @@ impl Ignite {
             views,
             csrf_exempt,
         } = self;
-        // A debug build renders the views from a directory when one is named, and from
-        // the embedded views otherwise. A release build renders compiled views only.
-        #[cfg(debug_assertions)]
-        if let Some(dir) = &views {
-            check_views(dir);
-        }
+        // The panel registers its own assets, so an app adds nothing for its styling.
+        crate::assets::register(&mount);
+        register_views(views.as_deref());
         AdHoc::on_ignite("Ignite", move |rocket| async move {
-            let assets = crate::assets::panel_assets(&mount);
             let registry = Registry {
                 mount: mount.clone(),
                 resources,
                 secret,
                 csrf_exempt,
-                assets,
-                views,
             };
             rocket
                 .manage(pool)
@@ -166,6 +152,23 @@ impl Ignite {
         })
     }
 }
+
+/// Registers the panel's views for the dev renderer: a directory when one is named, or
+/// the embedded views. A release build renders compiled views, so it registers nothing.
+#[cfg(debug_assertions)]
+fn register_views(dir: Option<&Path>) {
+    match dir {
+        Some(dir) => {
+            check_views(dir);
+            propel_rocket::register_namespace("ignite", dir);
+        }
+        None => propel_rocket::register_namespace_loader("ignite", crate::embedded::EmbeddedViews),
+    }
+}
+
+/// See the debug version.
+#[cfg(not(debug_assertions))]
+fn register_views(_dir: Option<&Path>) {}
 
 /// Checks that a views directory holds the panel's layout. Panics when it does not.
 #[cfg(debug_assertions)]

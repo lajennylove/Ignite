@@ -256,12 +256,8 @@ impl<'r> FromRequest<'r> for AdminUser {
 /// Answers a request that failed the CSRF check: the form expired or its token did not match.
 /// The page loads the panel's stylesheet, so it looks like the rest of the panel.
 #[catch(419)]
-pub(crate) fn csrf_mismatch(request: &Request<'_>) -> RawHtml<String> {
-    let styles = request
-        .rocket()
-        .state::<Registry>()
-        .map(|registry| crate::assets::tags(&registry.assets))
-        .unwrap_or_default();
+pub(crate) fn csrf_mismatch() -> RawHtml<String> {
+    let styles = crate::assets::tags();
     RawHtml(format!(
         r#"<!doctype html>
 <html lang="en">
