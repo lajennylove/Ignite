@@ -1,6 +1,6 @@
 //! The admin routes. Each handler looks up the resource by its slug, runs the
 //! database work on a blocking thread, and renders a Propel view. Every route
-//! except the sign-in and the sign-out needs a [`Session`].
+//! except the sign-in and the sign-out needs an [`AdminUser`].
 
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
@@ -16,7 +16,7 @@ use serde_json::Value;
 
 use crate::erased::Erased;
 use crate::ignite::Registry;
-use crate::session::{end_session, set_flash, start_session, take_flash, Session};
+use crate::session::{end_session, set_flash, start_session, take_flash, AdminUser};
 use crate::users;
 use crate::views::{
     cell_text, field_views, record_form, CardView, CellView, ColumnHead, DashboardPage, FormPage,
@@ -51,7 +51,7 @@ impl<'r> Responder<'r, 'static> for Reply {
 /// The dashboard: the stat cards that every resource provides.
 #[get("/")]
 async fn dashboard(
-    _session: Session,
+    _session: AdminUser,
     cookies: &CookieJar<'_>,
     registry: &State<Registry>,
     pool: &State<Pool>,
@@ -166,7 +166,7 @@ async fn index(
     sort: Option<String>,
     dir: Option<String>,
     page: Option<String>,
-    _session: Session,
+    _session: AdminUser,
     cookies: &CookieJar<'_>,
     registry: &State<Registry>,
     pool: &State<Pool>,
@@ -262,7 +262,7 @@ async fn index(
 #[get("/<slug>/new")]
 async fn new_form(
     slug: &str,
-    _session: Session,
+    _session: AdminUser,
     cookies: &CookieJar<'_>,
     registry: &State<Registry>,
 ) -> Result<PropelView, Status> {
@@ -289,7 +289,7 @@ async fn new_form(
 async fn create(
     slug: &str,
     body: Data<'_>,
-    _session: Session,
+    _session: AdminUser,
     cookies: &CookieJar<'_>,
     registry: &State<Registry>,
     pool: &State<Pool>,
@@ -326,7 +326,7 @@ async fn create(
 async fn edit_form(
     slug: &str,
     id: &str,
-    _session: Session,
+    _session: AdminUser,
     cookies: &CookieJar<'_>,
     registry: &State<Registry>,
     pool: &State<Pool>,
@@ -359,7 +359,7 @@ async fn update(
     slug: &str,
     id: &str,
     body: Data<'_>,
-    _session: Session,
+    _session: AdminUser,
     cookies: &CookieJar<'_>,
     registry: &State<Registry>,
     pool: &State<Pool>,
@@ -397,7 +397,7 @@ async fn update(
 async fn destroy(
     slug: &str,
     id: &str,
-    _session: Session,
+    _session: AdminUser,
     cookies: &CookieJar<'_>,
     registry: &State<Registry>,
     pool: &State<Pool>,

@@ -148,17 +148,17 @@ pub(crate) fn take_flash(cookies: &CookieJar<'_>, key: &[u8]) -> Option<String> 
 ///
 /// ```ignore
 /// #[get("/admin/reports")]
-/// fn reports(session: ignite_panel::Session) -> PropelView { /* session.user_id() */ }
+/// fn reports(session: ignite_panel::AdminUser) -> PropelView { /* session.user_id() */ }
 /// ```
 ///
 /// A request without a valid, unexpired sign-in fails with 401, and the panel's
 /// catcher turns that into a redirect to the login page for paths under the mount.
 #[derive(Debug, Clone, Copy)]
-pub struct Session {
+pub struct AdminUser {
     user_id: i64,
 }
 
-impl Session {
+impl AdminUser {
     /// The signed-in user's id.
     pub fn user_id(&self) -> i64 {
         self.user_id
@@ -166,7 +166,7 @@ impl Session {
 }
 
 #[rocket::async_trait]
-impl<'r> FromRequest<'r> for Session {
+impl<'r> FromRequest<'r> for AdminUser {
     type Error = ();
 
     async fn from_request(request: &'r Request<'_>) -> Outcome<Self, ()> {
@@ -178,7 +178,7 @@ impl<'r> FromRequest<'r> for Session {
             .get(SESSION_COOKIE)
             .and_then(|c| open::<SessionPayload>(&registry.secret, "session", c.value()));
         match payload {
-            Some(p) if p.exp > now() => Outcome::Success(Session { user_id: p.uid }),
+            Some(p) if p.exp > now() => Outcome::Success(AdminUser { user_id: p.uid }),
             _ => Outcome::Error((Status::Unauthorized, ())),
         }
     }

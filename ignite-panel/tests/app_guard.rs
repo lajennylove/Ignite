@@ -3,13 +3,13 @@
 mod common;
 
 use common::{reset, EMAIL, PASSWORD};
-use ignite_panel::{Ignite, Session};
+use ignite_panel::{AdminUser, Ignite};
 use rocket::http::{ContentType, Status};
 use rocket::local::blocking::Client;
 use rocket::{get, routes};
 
 #[get("/admin/app-private")]
-fn app_private(session: Session) -> String {
+fn app_private(session: AdminUser) -> String {
     format!("user {}", session.user_id())
 }
 
