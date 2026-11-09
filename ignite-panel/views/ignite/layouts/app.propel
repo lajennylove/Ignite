@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>@yield('title') · Ignite</title>
-@yield('ignite_styles')
+@vite(['ui::resources/css/app.css', 'ui::resources/js/app.js'])
 </head>
 <body class="min-h-screen bg-white font-sans text-text antialiased">
 <header class="flex flex-wrap items-center justify-between gap-4 border-b border-hairline bg-header px-4 py-3">

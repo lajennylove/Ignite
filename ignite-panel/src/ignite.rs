@@ -6,10 +6,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use ignite_core::{build_pool, IgniteResource, Pool};
-#[cfg(debug_assertions)]
-use propel_rocket::{register_namespace, register_namespace_loader};
-
-use crate::embedded::EmbeddedViews;
 use rocket::catchers;
 use rocket::fairing::AdHoc;
 
@@ -34,27 +30,12 @@ pub(crate) struct Registry {
     pub(crate) secret: Vec<u8>,
     /// Paths that the app's CSRF guard does not check (see `Ignite::csrf_exempt`).
     pub(crate) csrf_exempt: Vec<String>,
-    /// The panel's own build: its stylesheet and script.
+    /// The panel's own build, as the `ui` asset namespace.
     pub(crate) assets: propel_runtime::Assets,
-}
-
-impl Registry {
-    /// The tags that load the panel's stylesheet and script. The URLs are under the
-    /// panel's mount, where the `build` route serves the files. In a debug build the
-    /// Vite dev server's tags replace them while `npm run dev` runs.
-    pub(crate) fn styles(&self) -> String {
-        let entries: Vec<String> = crate::assets::ENTRIES
-            .iter()
-            .map(|e| e.to_string())
-            .collect();
-        match self.assets.tags(&entries) {
-            Some(tags) => tags.replace("\"/build/", &format!("\"{}/build/", self.mount)),
-            None => {
-                rocket::warn!("the panel's build is missing: its styles are not loaded");
-                String::new()
-            }
-        }
-    }
+    /// A directory that replaces the embedded views in a debug build. Release builds
+    /// render compiled views and ignore it.
+    #[cfg_attr(not(debug_assertions), allow(dead_code))]
+    pub(crate) views: Option<PathBuf>,
 }
 
 impl Registry {
@@ -158,25 +139,21 @@ impl Ignite {
             views,
             csrf_exempt,
         } = self;
-        // A debug build renders with the dev renderer, from the embedded views or from a
-        // directory. A release build renders compiled views only, so a directory is ignored.
+        // A debug build renders the views from a directory when one is named, and from
+        // the embedded views otherwise. A release build renders compiled views only.
         #[cfg(debug_assertions)]
-        match &views {
-            Some(dir) => register_views(dir),
-            None => register_namespace_loader("ignite", EmbeddedViews),
+        if let Some(dir) = &views {
+            check_views(dir);
         }
-        #[cfg(not(debug_assertions))]
-        let _ = (&views, EmbeddedViews);
         AdHoc::on_ignite("Ignite", move |rocket| async move {
-            let assets = crate::assets::panel_assets().unwrap_or_else(|error| {
-                panic!("Ignite could not prepare its built assets: {error}")
-            });
+            let assets = crate::assets::panel_assets(&mount);
             let registry = Registry {
                 mount: mount.clone(),
                 resources,
                 secret,
                 csrf_exempt,
                 assets,
+                views,
             };
             rocket
                 .manage(pool)
@@ -190,13 +167,12 @@ impl Ignite {
     }
 }
 
+/// Checks that a views directory holds the panel's layout. Panics when it does not.
 #[cfg(debug_assertions)]
-/// Registers the panel's views from `dir`. Panics if the directory does not hold them.
-fn register_views(dir: &Path) {
+fn check_views(dir: &Path) {
     assert!(
         dir.join("layouts/app.propel").is_file(),
         "Ignite could not find its views in {}: ship the views/ignite directory, or set {VIEWS_DIR_ENV}",
         dir.display()
     );
-    register_namespace("ignite", dir);
 }

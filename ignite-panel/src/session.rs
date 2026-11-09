@@ -260,7 +260,7 @@ pub(crate) fn csrf_mismatch(request: &Request<'_>) -> RawHtml<String> {
     let styles = request
         .rocket()
         .state::<Registry>()
-        .map(|registry| registry.styles())
+        .map(|registry| crate::assets::tags(&registry.assets))
         .unwrap_or_default();
     RawHtml(format!(
         r#"<!doctype html>

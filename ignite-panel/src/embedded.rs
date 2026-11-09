@@ -8,7 +8,7 @@ use propel_runtime::Loader;
 
 /// Serves the panel's `.propel` views from the binary. The names are the
 /// view names: `index`, `layouts.app`, `partials.nav`, and so on.
-pub(crate) struct EmbeddedViews;
+pub struct EmbeddedViews;
 
 /// Every view the panel ships, by name. A test checks this list against the
 /// `views/ignite` directory, so a new view cannot be left out.

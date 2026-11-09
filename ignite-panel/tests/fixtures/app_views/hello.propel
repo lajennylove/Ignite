@@ -1,7 +1,5 @@
 @extends('ignite::layouts.app')
 
-@section('ignite_styles'){!! $ignite_styles !!}@endsection
-
 @section('title')
   Hello
 @endsection

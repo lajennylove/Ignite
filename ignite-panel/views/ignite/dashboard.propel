@@ -2,8 +2,6 @@
 
 @section('ignite_home'){{ $home_url }}@endsection
 
-@section('ignite_styles'){!! $styles !!}@endsection
-
 @section('ignite_nav')
   @include('ignite::partials.nav')
 @endsection
