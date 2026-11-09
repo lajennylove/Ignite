@@ -194,7 +194,7 @@ impl IgniteResource for Widgets {
 
 pub fn database_url() -> String {
     std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "mysql://lajennylove@localhost/ignite_test".into())
+        .expect("set DATABASE_URL to the test database, such as mysql://user@localhost/ignite_test")
 }
 
 /// Locks the shared tables, resets them, seeds three rows and one user.

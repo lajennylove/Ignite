@@ -44,7 +44,7 @@ pub struct Gadget {
 
 fn database_url() -> String {
     std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "mysql://lajennylove@localhost/ignite_test".into())
+        .expect("set DATABASE_URL to the test database, such as mysql://user@localhost/ignite_test")
 }
 
 /// Resets the shared database, creates the `gadgets` table, and seeds two rows.
