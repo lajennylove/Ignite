@@ -3,6 +3,7 @@
 //! except the sign-in and the sign-out needs an [`AdminUser`].
 
 use std::collections::HashMap;
+use std::net::IpAddr;
 use std::sync::{Arc, OnceLock};
 
 use ignite_core::{
@@ -11,8 +12,8 @@ use ignite_core::{
 use propel_rocket::PropelView;
 use rocket::data::{Data, ToByteUnit};
 use rocket::http::{CookieJar, Status};
-use rocket::request::Request;
-use rocket::response::{self, Redirect, Responder};
+use rocket::request::{FromRequest, Outcome, Request};
+use rocket::response::{self, Redirect, Responder, Response};
 use rocket::{get, post, routes, Route, State};
 use serde_json::Value;
 
@@ -23,6 +24,7 @@ use crate::session::{
     AdminUser,
 };
 use crate::sessions;
+use crate::throttle;
 use crate::users;
 use crate::views::{
     cell_text, field_views, record_form, CardView, CellView, ColumnHead, DashboardPage, FormPage,
@@ -53,6 +55,8 @@ pub(crate) fn all() -> Vec<Route> {
 enum Reply {
     Redirect(Box<Redirect>),
     Page(Status, PropelView),
+    /// A page refused because of too many attempts, with the seconds to wait.
+    Throttled(i64, PropelView),
 }
 
 impl<'r> Responder<'r, 'static> for Reply {
@@ -60,6 +64,12 @@ impl<'r> Responder<'r, 'static> for Reply {
         match self {
             Reply::Redirect(redirect) => (*redirect).respond_to(request),
             Reply::Page(status, view) => (status, view).respond_to(request),
+            Reply::Throttled(seconds, view) => {
+                let refused = (Status::TooManyRequests, view).respond_to(request)?;
+                Response::build_from(refused)
+                    .raw_header("Retry-After", seconds.to_string())
+                    .ok()
+            }
         }
     }
 }
@@ -134,6 +144,7 @@ fn login_page(
 #[post("/login", data = "<body>")]
 async fn login(
     body: Data<'_>,
+    client_ip: ClientIp,
     cookies: &CookieJar<'_>,
     registry: &State<Registry>,
     pool: &State<Pool>,
@@ -142,6 +153,32 @@ async fn login(
     check_csrf(cookies, &registry.secret, form.get("_token"))?;
     let email = form.get("email").unwrap_or("").trim().to_string();
     let password = form.get("password").unwrap_or("").to_string();
+    let email_key = throttle::email_key(&email);
+    let ip_key = throttle::ip_key(client_ip.0);
+
+    // Refuse before checking the password while either count is at its limit.
+    let (check_email, check_ip) = (email_key.clone(), ip_key.clone());
+    let waiting = blocking(pool, move |conn| {
+        let by_email =
+            throttle::retry_after(conn, &check_email, throttle::EMAIL_LIMIT).map_err(db_status)?;
+        let by_ip =
+            throttle::retry_after(conn, &check_ip, throttle::IP_LIMIT).map_err(db_status)?;
+        Ok(by_email.into_iter().chain(by_ip).max())
+    })
+    .await?;
+    if let Some(seconds) = waiting {
+        let message = format!("Too many sign-in attempts. Try again in {seconds} seconds.");
+        let page = PropelView::render(
+            "ignite::login",
+            &login_page(
+                registry,
+                &email,
+                Some(&message),
+                csrf_token(cookies, &registry.secret),
+            ),
+        );
+        return Ok(Reply::Throttled(seconds, page));
+    }
 
     let lookup = email.clone();
     let signed_in = blocking(pool, move |conn| {
@@ -156,8 +193,15 @@ async fn login(
             }
         };
         match user.filter(|_| matched) {
-            Some(user) => sessions::create(conn, user.id).map(Some).map_err(db_status),
-            None => Ok(None),
+            Some(user) => {
+                throttle::clear(conn, &email_key).map_err(db_status)?;
+                sessions::create(conn, user.id).map(Some).map_err(db_status)
+            }
+            None => {
+                throttle::record_failure(conn, &email_key).map_err(db_status)?;
+                throttle::record_failure(conn, &ip_key).map_err(db_status)?;
+                Ok(None)
+            }
         }
     })
     .await?;
@@ -181,6 +225,18 @@ async fn login(
                 ),
             ),
         )),
+    }
+}
+
+/// The client's IP address, for the login throttle. Unknown when the request has none.
+struct ClientIp(Option<IpAddr>);
+
+#[rocket::async_trait]
+impl<'r> FromRequest<'r> for ClientIp {
+    type Error = ();
+
+    async fn from_request(request: &'r Request<'_>) -> Outcome<Self, ()> {
+        Outcome::Success(ClientIp(request.client_ip()))
     }
 }
 

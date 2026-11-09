@@ -14,6 +14,7 @@ mod ignite;
 mod routes;
 mod session;
 mod sessions;
+mod throttle;
 pub mod users;
 mod views;
 

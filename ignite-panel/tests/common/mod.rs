@@ -235,6 +235,9 @@ pub fn reset() -> MutexGuard<'static, ()> {
     sql_query("DELETE FROM sessions")
         .execute(&mut conn)
         .unwrap();
+    sql_query("DELETE FROM login_throttles")
+        .execute(&mut conn)
+        .unwrap();
     users::create_user(&mut conn, "Admin", EMAIL, PASSWORD).expect("create test user");
     guard
 }
