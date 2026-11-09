@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Fixtures shared by the panel tests: a `Widgets` resource, the `ignite_test`
 //! database, and the client helpers. The tests share one table, so they run one at a time.
 

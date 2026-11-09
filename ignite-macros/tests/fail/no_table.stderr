@@ -1,0 +1,5 @@
+error: IgniteResource needs #[ignite(table = <diesel table module>)]
+ --> tests/fail/no_table.rs:4:12
+  |
+4 | pub struct Widget {
+  |            ^^^^^^

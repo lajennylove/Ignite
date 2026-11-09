@@ -15,6 +15,8 @@ pub mod widget;
 pub use database::{build_pool, Conn, Pool};
 pub use field::{Column, Field, FieldKind};
 pub use form::{FieldErrors, FormInput};
+/// Derives `IgniteResource` for a Diesel model. See `ignite_macros` for the attributes.
+pub use ignite_macros::IgniteResource;
 pub use query::{escape_like, Direction, ListQuery, Page};
 pub use resource::IgniteResource;
 pub use widget::StatWidget;

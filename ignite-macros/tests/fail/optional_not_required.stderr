@@ -1,0 +1,5 @@
+error: a field that is not an Option is required; remove `required = false` or make the field an Option
+  --> tests/fail/optional_not_required.rs:17:11
+   |
+17 |     name: String,
+   |           ^^^^^^

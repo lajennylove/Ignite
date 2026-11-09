@@ -8,3 +8,13 @@ publish = false
 proc-macro = true
 
 [dependencies]
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["full"] }
+
+[dev-dependencies]
+trybuild = "1"
+ignite-core = { path = "../ignite-core" }
+diesel = { version = "2", features = ["mysql", "r2d2", "chrono"] }
+serde = { version = "1", features = ["derive"] }
+chrono = { version = "0.4", features = ["serde"] }

@@ -7,5 +7,6 @@ publish = false
 [dependencies]
 diesel = { version = "2", features = ["mysql", "r2d2", "chrono"] }
 serde = { version = "1", features = ["derive"] }
+ignite-macros = { path = "../ignite-macros" }
 
 [dev-dependencies]

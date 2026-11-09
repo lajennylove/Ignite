@@ -227,3 +227,17 @@ fn the_mount_path_is_configurable() {
         Status::NotFound
     );
 }
+
+#[test]
+fn saving_an_unchanged_row_succeeds() {
+    let _guard = reset();
+    let client = signed_in(None);
+    // MySQL reports zero changed rows for an unchanged save; the row still exists.
+    let response = client
+        .post("/admin/widgets/1")
+        .header(ContentType::Form)
+        .body("name=Apple&price=3")
+        .dispatch();
+
+    assert_eq!(response.status(), Status::SeeOther);
+}
