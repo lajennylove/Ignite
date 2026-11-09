@@ -3,6 +3,10 @@
 @section('ignite_home'){{ $home_url }}@endsection
 
 @section('ignite_nav')
+  @include('ignite::partials.topbar')
+@endsection
+
+@section('ignite_aside')
   @include('ignite::partials.nav')
 @endsection
 

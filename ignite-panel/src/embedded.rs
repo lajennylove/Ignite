@@ -32,6 +32,11 @@ pub(crate) const VIEWS: &[(&str, &str)] = &[
         "partials.nav",
         include_str!("../views/ignite/partials/nav.propel"),
     ),
+    (
+        "partials.topbar",
+        include_str!("../views/ignite/partials/topbar.propel"),
+    ),
+    ("profile", include_str!("../views/ignite/profile.propel")),
 ];
 
 impl Loader for EmbeddedViews {

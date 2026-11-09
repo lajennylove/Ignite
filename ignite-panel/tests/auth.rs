@@ -330,3 +330,46 @@ fn an_expired_session_row_is_refused() {
         Status::SeeOther
     );
 }
+
+#[test]
+fn the_sidebar_links_each_resource_with_an_add_link_and_marks_the_current_one() {
+    let _guard = reset();
+    let client = signed_in(None);
+    let body = client
+        .get("/admin/widgets")
+        .dispatch()
+        .into_string()
+        .unwrap();
+    assert!(body.contains("href=\"/admin/widgets\""), "the list link");
+    assert!(
+        body.contains("href=\"/admin/widgets/new\""),
+        "the Add new link"
+    );
+    assert!(
+        body.contains("aria-current=\"page\""),
+        "the current section is marked"
+    );
+}
+
+#[test]
+fn the_top_bar_links_the_user_to_a_profile_page() {
+    let _guard = reset();
+    let client = signed_in(None);
+    let body = client.get("/admin").dispatch().into_string().unwrap();
+    assert!(body.contains("href=\"/admin/profile\""));
+    assert!(body.contains(">Admin</a>"), "the user's name is the link");
+
+    let profile = client.get("/admin/profile").dispatch();
+    assert_eq!(profile.status(), Status::Ok);
+    let page = profile.into_string().unwrap();
+    assert!(page.contains(EMAIL), "the profile shows the email");
+}
+
+#[test]
+fn the_profile_needs_a_session() {
+    let _guard = reset();
+    let client = client(None);
+    let response = client.get("/admin/profile").dispatch();
+    assert_eq!(response.status(), Status::SeeOther);
+    assert_eq!(response.headers().get_one("Location"), Some("/admin/login"));
+}

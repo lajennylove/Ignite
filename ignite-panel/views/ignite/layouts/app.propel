@@ -10,16 +10,19 @@
 @vite(['ui::resources/css/app.css', 'ui::resources/js/app.js'])
 </head>
 <body class="min-h-screen bg-white font-sans text-text antialiased">
-<header class="flex flex-wrap items-center justify-between gap-4 border-b border-hairline bg-header px-4 py-3">
+<header class="flex flex-wrap items-center gap-4 border-b border-hairline bg-header px-4 py-3">
   <a class="flex items-center gap-2 font-semibold text-heading no-underline" href="@yield('ignite_home', '/admin')">
     <img src="{{ asset('ui::resources/images/ignite-mark.png') }}" alt="" class="h-10 w-auto">
     Ignite
   </a>
   <nav class="flex flex-wrap items-center gap-4">@yield('ignite_nav')</nav>
 </header>
-<main class="mx-auto max-w-5xl px-4 py-6">
-  @yield('ignite_flash')
-  @yield('content')
-</main>
+<div class="flex flex-col md:flex-row">
+  @yield('ignite_aside')
+  <main class="mx-auto w-full min-w-0 max-w-5xl flex-1 px-4 py-6">
+    @yield('ignite_flash')
+    @yield('content')
+  </main>
+</div>
 </body>
 </html>

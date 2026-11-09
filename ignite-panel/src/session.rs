@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 
 use crate::ignite::Registry;
-use crate::sessions;
+use crate::{sessions, users};
 use ignite_core::Pool;
 
 type HmacSha256 = Hmac<Sha256>;
@@ -214,12 +214,24 @@ pub(crate) fn take_flash(cookies: &CookieJar<'_>, key: &[u8]) -> Option<String> 
 #[derive(Debug, Clone)]
 pub struct AdminUser {
     user_id: i64,
+    name: String,
+    email: String,
 }
 
 impl AdminUser {
     /// The signed-in user's id.
     pub fn user_id(&self) -> i64 {
         self.user_id
+    }
+
+    /// The signed-in user's name, as the panel's top bar shows it.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// The signed-in user's email.
+    pub fn email(&self) -> &str {
+        &self.email
     }
 }
 
@@ -241,13 +253,18 @@ impl<'r> FromRequest<'r> for AdminUser {
         let lookup = sid.clone();
         let user = rocket::tokio::task::spawn_blocking(move || {
             let mut conn = pool.get().ok()?;
-            sessions::user_for(&mut conn, &lookup).ok().flatten()
+            let user_id = sessions::user_for(&mut conn, &lookup).ok().flatten()?;
+            users::find_by_id(&mut conn, user_id).ok().flatten()
         })
         .await
         .ok()
         .flatten();
         match user {
-            Some(user_id) => Outcome::Success(AdminUser { user_id }),
+            Some(user) => Outcome::Success(AdminUser {
+                user_id: user.id,
+                name: user.name,
+                email: user.email,
+            }),
             None => Outcome::Error((Status::Unauthorized, ())),
         }
     }

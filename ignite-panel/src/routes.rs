@@ -30,7 +30,7 @@ use crate::users;
 use crate::views::{
     cell_text, compiled, field_views, record_form, render_page, CardView, CellView, ColumnHead,
     DashboardPage, FormPage, HeaderView, IndexPage, LatestRow, LatestTable, Layout, LoginPage,
-    RowView,
+    ProfilePage, RowView,
 };
 
 /// The largest form body the panel reads.
@@ -45,6 +45,7 @@ pub(crate) fn all() -> Vec<Route> {
         login,
         logout,
         logout_everywhere,
+        profile,
         index,
         new_form,
         create,
@@ -80,7 +81,7 @@ impl<'r> Responder<'r, 'static> for Reply {
 /// The dashboard: the stat cards that every resource provides.
 #[get("/")]
 async fn dashboard(
-    _session: AdminUser,
+    session: AdminUser,
     cookies: &CookieJar<'_>,
     registry: &State<Registry>,
     pool: &State<Pool>,
@@ -107,11 +108,12 @@ async fn dashboard(
         .map(|(declared, columns, records)| latest_table(&declared, columns, &records))
         .collect();
 
-    let layout = Layout::new(registry, true, flash, token.clone());
+    let layout = Layout::new(registry, Some(&session), "", flash, token.clone());
     let page = DashboardPage {
         home_url: layout.home_url,
         signed_in: layout.signed_in,
-        logout_url: layout.logout_url,
+        user_name: layout.user_name,
+        profile_url: layout.profile_url,
         logout_everywhere_url: layout.logout_everywhere_url,
         csrf_token: layout.csrf_token,
         nav: layout.nav,
@@ -165,11 +167,12 @@ fn login_page(
     error: Option<&str>,
     csrf_token: String,
 ) -> LoginPage {
-    let layout = Layout::new(registry, false, None, csrf_token);
+    let layout = Layout::new(registry, None, "", None, csrf_token);
     LoginPage {
         home_url: layout.home_url,
         signed_in: layout.signed_in,
-        logout_url: layout.logout_url,
+        user_name: layout.user_name,
+        profile_url: layout.profile_url,
         logout_everywhere_url: layout.logout_everywhere_url,
         csrf_token: layout.csrf_token,
         nav: layout.nav,
@@ -329,6 +332,32 @@ async fn logout_everywhere(
     Ok(Redirect::to(format!("{}/login", registry.mount)))
 }
 
+/// The signed-in user's profile, linked from the top bar.
+#[get("/profile")]
+async fn profile(
+    session: AdminUser,
+    cookies: &CookieJar<'_>,
+    registry: &State<Registry>,
+) -> PropelView {
+    let flash = take_flash(cookies, &registry.secret);
+    let token = csrf_token(cookies, &registry.secret);
+    let layout = Layout::new(registry, Some(&session), "profile", flash, token);
+    let page = ProfilePage {
+        home_url: layout.home_url,
+        signed_in: layout.signed_in,
+        user_name: layout.user_name,
+        profile_url: layout.profile_url,
+        logout_everywhere_url: layout.logout_everywhere_url,
+        csrf_token: layout.csrf_token,
+        nav: layout.nav,
+        has_flash: layout.has_flash,
+        flash: layout.flash,
+        title: "Profile",
+        email: session.email().to_string(),
+    };
+    render_page("ignite::profile", &page, compiled::profile::render)
+}
+
 // Rocket takes each query parameter as an argument, so the list has many.
 #[allow(clippy::too_many_arguments)]
 #[get("/<slug>?<q>&<sort>&<dir>&<page>")]
@@ -338,7 +367,7 @@ async fn index(
     sort: Option<String>,
     dir: Option<String>,
     page: Option<String>,
-    _session: AdminUser,
+    session: AdminUser,
     cookies: &CookieJar<'_>,
     registry: &State<Registry>,
     pool: &State<Pool>,
@@ -411,11 +440,12 @@ async fn index(
         Direction::Desc => "desc",
     };
     let sort_pair = sort.as_deref().map(|key| (key, dir_name));
-    let layout = Layout::new(registry, true, flash, token.clone());
+    let layout = Layout::new(registry, Some(&session), slug, flash, token.clone());
     let page_view = IndexPage {
         home_url: layout.home_url,
         signed_in: layout.signed_in,
-        logout_url: layout.logout_url,
+        user_name: layout.user_name,
+        profile_url: layout.profile_url,
         logout_everywhere_url: layout.logout_everywhere_url,
         csrf_token: layout.csrf_token,
         nav: layout.nav,
@@ -447,7 +477,7 @@ async fn index(
 #[get("/<slug>/new")]
 async fn new_form(
     slug: &str,
-    _session: AdminUser,
+    session: AdminUser,
     cookies: &CookieJar<'_>,
     registry: &State<Registry>,
 ) -> Result<PropelView, Status> {
@@ -455,14 +485,16 @@ async fn new_form(
     let index_url = format!("{}/{}", registry.mount, resource.slug());
     let layout = Layout::new(
         registry,
-        true,
+        Some(&session),
+        slug,
         take_flash(cookies, &registry.secret),
         csrf_token(cookies, &registry.secret),
     );
     let page = FormPage {
         home_url: layout.home_url,
         signed_in: layout.signed_in,
-        logout_url: layout.logout_url,
+        user_name: layout.user_name,
+        profile_url: layout.profile_url,
         logout_everywhere_url: layout.logout_everywhere_url,
         csrf_token: layout.csrf_token,
         nav: layout.nav,
@@ -487,7 +519,7 @@ async fn new_form(
 async fn create(
     slug: &str,
     body: Data<'_>,
-    _session: AdminUser,
+    session: AdminUser,
     cookies: &CookieJar<'_>,
     registry: &State<Registry>,
     pool: &State<Pool>,
@@ -511,6 +543,7 @@ async fn create(
         }
         Err(errors) => Ok(form_page(
             registry,
+            &session,
             &resource,
             &form,
             &errors,
@@ -526,7 +559,7 @@ async fn create(
 async fn edit_form(
     slug: &str,
     id: &str,
-    _session: AdminUser,
+    session: AdminUser,
     cookies: &CookieJar<'_>,
     registry: &State<Registry>,
     pool: &State<Pool>,
@@ -543,14 +576,16 @@ async fn edit_form(
 
     let layout = Layout::new(
         registry,
-        true,
+        Some(&session),
+        slug,
         take_flash(cookies, &registry.secret),
         csrf_token(cookies, &registry.secret),
     );
     let page = FormPage {
         home_url: layout.home_url,
         signed_in: layout.signed_in,
-        logout_url: layout.logout_url,
+        user_name: layout.user_name,
+        profile_url: layout.profile_url,
         logout_everywhere_url: layout.logout_everywhere_url,
         csrf_token: layout.csrf_token,
         nav: layout.nav,
@@ -572,7 +607,7 @@ async fn update(
     slug: &str,
     id: &str,
     body: Data<'_>,
-    _session: AdminUser,
+    session: AdminUser,
     cookies: &CookieJar<'_>,
     registry: &State<Registry>,
     pool: &State<Pool>,
@@ -597,6 +632,7 @@ async fn update(
         }
         Err(errors) => Ok(form_page(
             registry,
+            &session,
             &resource,
             &form,
             &errors,
@@ -638,6 +674,7 @@ async fn destroy(
 #[allow(clippy::too_many_arguments)]
 fn form_page(
     registry: &Registry,
+    user: &AdminUser,
     resource: &Arc<dyn Erased>,
     form: &FormInput,
     errors: &FieldErrors,
@@ -646,11 +683,12 @@ fn form_page(
     submit_label: &'static str,
     csrf_token: String,
 ) -> Reply {
-    let layout = Layout::new(registry, true, None, csrf_token);
+    let layout = Layout::new(registry, Some(user), resource.slug(), None, csrf_token);
     let page = FormPage {
         home_url: layout.home_url,
         signed_in: layout.signed_in,
-        logout_url: layout.logout_url,
+        user_name: layout.user_name,
+        profile_url: layout.profile_url,
         logout_everywhere_url: layout.logout_everywhere_url,
         csrf_token: layout.csrf_token,
         nav: layout.nav,

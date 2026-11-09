@@ -37,42 +37,57 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::ignite::Registry;
+use crate::session::AdminUser;
 
-/// The values every page shares: the navigation, the sign-out link and the flash message.
+/// The values every page shares: the sidebar, the top bar and the flash message.
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct Layout {
     pub(crate) home_url: String,
     pub(crate) signed_in: bool,
-    pub(crate) logout_url: String,
+    pub(crate) user_name: String,
+    pub(crate) profile_url: String,
     pub(crate) logout_everywhere_url: String,
     pub(crate) csrf_token: String,
-    pub(crate) nav: Vec<NavLink>,
+    pub(crate) nav: Vec<NavGroup>,
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
 }
 
+/// One entry of the sidebar: a list, and a link to add a record when the resource has forms.
 #[derive(Debug, Clone, Serialize)]
-pub(crate) struct NavLink {
+pub(crate) struct NavGroup {
     pub(crate) title: &'static str,
     pub(crate) url: String,
+    pub(crate) has_add: bool,
+    pub(crate) add_url: String,
+    pub(crate) active: bool,
 }
 
 impl Layout {
-    /// The layout for a page. Signed-out pages show no navigation.
+    /// The layout for a page. `section` is the slug of the page's resource, or empty for
+    /// the dashboard, and marks its entry in the sidebar. Signed-out pages have neither
+    /// the sidebar nor the top bar.
     pub(crate) fn new(
         registry: &Registry,
-        signed_in: bool,
+        user: Option<&AdminUser>,
+        section: &str,
         flash: Option<String>,
         csrf_token: String,
     ) -> Self {
-        let nav = if signed_in {
-            std::iter::once(NavLink {
+        let nav = if user.is_some() {
+            std::iter::once(NavGroup {
                 title: "Dashboard",
                 url: registry.mount.clone(),
+                has_add: false,
+                add_url: String::new(),
+                active: section.is_empty(),
             })
-            .chain(registry.resources.iter().map(|r| NavLink {
+            .chain(registry.resources.iter().map(|r| NavGroup {
                 title: r.title(),
                 url: format!("{}/{}", registry.mount, r.slug()),
+                has_add: true,
+                add_url: format!("{}/{}/new", registry.mount, r.slug()),
+                active: section == r.slug(),
             }))
             .collect()
         } else {
@@ -80,8 +95,9 @@ impl Layout {
         };
         Layout {
             home_url: registry.mount.clone(),
-            signed_in,
-            logout_url: format!("{}/logout", registry.mount),
+            signed_in: user.is_some(),
+            user_name: user.map(|u| u.name().to_string()).unwrap_or_default(),
+            profile_url: format!("{}/profile", registry.mount),
             logout_everywhere_url: format!("{}/logout-everywhere", registry.mount),
             nav,
             csrf_token,
@@ -97,10 +113,11 @@ pub(crate) struct DashboardPage {
     // The layout's values, flat: a compiled view reads each one as a field.
     pub(crate) home_url: String,
     pub(crate) signed_in: bool,
-    pub(crate) logout_url: String,
+    pub(crate) user_name: String,
+    pub(crate) profile_url: String,
     pub(crate) logout_everywhere_url: String,
     pub(crate) csrf_token: String,
-    pub(crate) nav: Vec<NavLink>,
+    pub(crate) nav: Vec<NavGroup>,
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
     pub(crate) title: &'static str,
@@ -138,10 +155,11 @@ pub(crate) struct LoginPage {
     // The layout's values, flat: a compiled view reads each one as a field.
     pub(crate) home_url: String,
     pub(crate) signed_in: bool,
-    pub(crate) logout_url: String,
+    pub(crate) user_name: String,
+    pub(crate) profile_url: String,
     pub(crate) logout_everywhere_url: String,
     pub(crate) csrf_token: String,
-    pub(crate) nav: Vec<NavLink>,
+    pub(crate) nav: Vec<NavGroup>,
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
     pub(crate) title: &'static str,
@@ -151,16 +169,34 @@ pub(crate) struct LoginPage {
     pub(crate) error: String,
 }
 
+/// The profile of the signed-in user.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct ProfilePage {
+    // The layout's values, flat: a compiled view reads each one as a field.
+    pub(crate) home_url: String,
+    pub(crate) signed_in: bool,
+    pub(crate) user_name: String,
+    pub(crate) profile_url: String,
+    pub(crate) logout_everywhere_url: String,
+    pub(crate) csrf_token: String,
+    pub(crate) nav: Vec<NavGroup>,
+    pub(crate) has_flash: bool,
+    pub(crate) flash: String,
+    pub(crate) title: &'static str,
+    pub(crate) email: String,
+}
+
 /// The list view of a resource.
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct IndexPage {
     // The layout's values, flat: a compiled view reads each one as a field.
     pub(crate) home_url: String,
     pub(crate) signed_in: bool,
-    pub(crate) logout_url: String,
+    pub(crate) user_name: String,
+    pub(crate) profile_url: String,
     pub(crate) logout_everywhere_url: String,
     pub(crate) csrf_token: String,
-    pub(crate) nav: Vec<NavLink>,
+    pub(crate) nav: Vec<NavGroup>,
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
     pub(crate) title: &'static str,
@@ -206,10 +242,11 @@ pub(crate) struct FormPage {
     // The layout's values, flat: a compiled view reads each one as a field.
     pub(crate) home_url: String,
     pub(crate) signed_in: bool,
-    pub(crate) logout_url: String,
+    pub(crate) user_name: String,
+    pub(crate) profile_url: String,
     pub(crate) logout_everywhere_url: String,
     pub(crate) csrf_token: String,
-    pub(crate) nav: Vec<NavLink>,
+    pub(crate) nav: Vec<NavGroup>,
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
     pub(crate) title: &'static str,

@@ -1,0 +1,30 @@
+@extends('ignite::layouts.app')
+
+@section('ignite_home'){{ $home_url }}@endsection
+
+@section('ignite_nav')
+  @include('ignite::partials.topbar')
+@endsection
+
+@section('ignite_aside')
+  @include('ignite::partials.nav')
+@endsection
+
+@section('ignite_flash')
+  @include('ignite::partials.flash')
+@endsection
+
+@section('title')
+  {{ $title }}
+@endsection
+
+@section('content')
+  <h1>{{ $title }}</h1>
+
+  <dl class="grid max-w-md grid-cols-[8rem_minmax(0,1fr)] gap-x-4 gap-y-3 rounded-lg border border-hairline bg-white p-6">
+    <dt class="font-semibold text-heading">Name</dt>
+    <dd class="m-0">{{ $user_name }}</dd>
+    <dt class="font-semibold text-heading">Email</dt>
+    <dd class="m-0">{{ $email }}</dd>
+  </dl>
+@endsection

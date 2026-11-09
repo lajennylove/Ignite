@@ -1,9 +1,18 @@
-@foreach (link in nav)
-  <a class="text-accent no-underline hover:underline" href="{{ $link.url }}">{{ $link.title }}</a>
-@endforeach
 @if (signed_in)
-  <form method="post" action="{{ $logout_everywhere_url }}">
-    <input type="hidden" name="_token" value="{{ $csrf_token }}">
-    <button type="submit" class="cursor-pointer rounded-md border border-accent bg-white px-3 py-1.5 font-[inherit] text-accent hover:bg-header">Sign out</button>
-  </form>
+<aside class="border-b border-hairline bg-header px-4 py-4 md:w-56 md:shrink-0 md:border-b-0 md:border-r">
+  <nav class="flex flex-col gap-3" aria-label="Main">
+    @foreach (group in nav)
+      <div class="flex flex-col gap-1">
+        @if (group.active)
+          <a class="rounded-md bg-white px-2.5 py-1.5 font-semibold text-heading no-underline shadow-sm" href="{{ $group.url }}" aria-current="page">{{ $group.title }}</a>
+        @else
+          <a class="rounded-md px-2.5 py-1.5 text-text no-underline hover:bg-white" href="{{ $group.url }}">{{ $group.title }}</a>
+        @endif
+        @if (group.has_add)
+          <a class="ml-2.5 border-l border-hairline py-0.5 pl-2.5 text-[14px] text-accent no-underline hover:underline" href="{{ $group.add_url }}">Add new</a>
+        @endif
+      </div>
+    @endforeach
+  </nav>
+</aside>
 @endif

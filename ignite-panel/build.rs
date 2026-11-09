@@ -24,6 +24,7 @@ fn main() {
         .view("form", "crate::views::FormPage")
         .view("index", "crate::views::IndexPage")
         .view("login", "crate::views::LoginPage")
+        .view("profile", "crate::views::ProfilePage")
         .build();
 }
 
