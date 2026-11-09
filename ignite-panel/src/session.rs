@@ -22,6 +22,9 @@ type HmacSha256 = Hmac<Sha256>;
 
 /// The cookie that holds the signed-in user.
 pub(crate) const SESSION_COOKIE: &str = "ignite_session";
+/// The cookie that holds the CSRF token of the browser session. Every form
+/// sends the token back in a hidden `_token` field.
+pub(crate) const CSRF_COOKIE: &str = "ignite_csrf";
 /// The cookie that holds the flash message until the next page shows it.
 pub(crate) const FLASH_COOKIE: &str = "ignite_flash";
 /// The shortest key the panel accepts, in bytes.
@@ -30,6 +33,11 @@ const MIN_KEY_BYTES: usize = 32;
 #[derive(Serialize, Deserialize)]
 struct SessionPayload {
     sid: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct CsrfPayload {
+    token: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -120,6 +128,55 @@ pub(crate) fn end_session(cookies: &CookieJar<'_>) {
     cookies.remove(cookie(SESSION_COOKIE, String::new()));
 }
 
+/// The CSRF token of this browser session, created when it is first needed.
+pub(crate) fn csrf_token(cookies: &CookieJar<'_>, key: &[u8]) -> String {
+    if let Some(token) = cookies
+        .get(CSRF_COOKIE)
+        .and_then(|c| open::<CsrfPayload>(key, "csrf", c.value()))
+        .map(|p| p.token)
+    {
+        return token;
+    }
+    let mut bytes = [0u8; 32];
+    OsRng.fill_bytes(&mut bytes);
+    let token = URL_SAFE_NO_PAD.encode(bytes);
+    let payload = CsrfPayload {
+        token: token.clone(),
+    };
+    cookies.add(cookie(CSRF_COOKIE, seal(key, "csrf", &payload)));
+    token
+}
+
+/// Checks the `_token` of a state-changing request against this browser session's
+/// token. A missing or wrong token fails with 419, the status Laravel uses for an
+/// expired page or token mismatch.
+pub(crate) fn check_csrf(
+    cookies: &CookieJar<'_>,
+    key: &[u8],
+    submitted: Option<&str>,
+) -> Result<(), Status> {
+    let expected = cookies
+        .get(CSRF_COOKIE)
+        .and_then(|c| open::<CsrfPayload>(key, "csrf", c.value()))
+        .map(|p| p.token);
+    match (expected, submitted) {
+        (Some(expected), Some(submitted))
+            if constant_time_eq(expected.as_bytes(), submitted.as_bytes()) =>
+        {
+            Ok(())
+        }
+        _ => Err(Status::new(419)),
+    }
+}
+
+/// Compares two byte strings without stopping at the first difference.
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
 /// Stores a flash message for the next page.
 pub(crate) fn set_flash(cookies: &CookieJar<'_>, key: &[u8], message: &str) {
     let payload = FlashPayload {
@@ -193,6 +250,18 @@ impl<'r> FromRequest<'r> for AdminUser {
             None => Outcome::Error((Status::Unauthorized, ())),
         }
     }
+}
+
+/// Answers a request that failed the CSRF check: the form expired or its token did not match.
+#[catch(419)]
+pub(crate) fn csrf_mismatch() -> rocket::response::content::RawHtml<&'static str> {
+    rocket::response::content::RawHtml(
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>Page Expired</title></head>\
+<body style=\"font-family: system-ui, sans-serif; max-width: 40rem; margin: 3rem auto; padding: 0 1rem;\">\
+<h1>Page Expired</h1>\
+<p>This form expired, or its security token did not match. Go back, reload the page and try again.</p>\
+</body></html>",
+    )
 }
 
 /// Sends a request for a page under the panel that has no sign-in to the login page.

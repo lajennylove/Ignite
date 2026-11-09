@@ -15,6 +15,7 @@ pub(crate) struct Layout {
     pub(crate) signed_in: bool,
     pub(crate) logout_url: String,
     pub(crate) logout_everywhere_url: String,
+    pub(crate) csrf_token: String,
     pub(crate) nav: Vec<NavLink>,
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
@@ -28,7 +29,12 @@ pub(crate) struct NavLink {
 
 impl Layout {
     /// The layout for a page. Signed-out pages show no navigation.
-    pub(crate) fn new(registry: &Registry, signed_in: bool, flash: Option<String>) -> Self {
+    pub(crate) fn new(
+        registry: &Registry,
+        signed_in: bool,
+        flash: Option<String>,
+        csrf_token: String,
+    ) -> Self {
         let nav = if signed_in {
             std::iter::once(NavLink {
                 title: "Dashboard",
@@ -48,6 +54,7 @@ impl Layout {
             logout_url: format!("{}/logout", registry.mount),
             logout_everywhere_url: format!("{}/logout-everywhere", registry.mount),
             nav,
+            csrf_token,
             has_flash: flash.is_some(),
             flash: flash.unwrap_or_default(),
         }

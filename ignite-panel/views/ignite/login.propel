@@ -18,6 +18,7 @@
   <h1>{{ $title }}</h1>
 
   <form class="form" method="post" action="{{ $action }}">
+    <input type="hidden" name="_token" value="{{ $csrf_token }}">
     @if (has_error)
       <p class="error" role="alert">{{ $error }}</p>
     @endif

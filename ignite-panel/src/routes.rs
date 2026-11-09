@@ -18,7 +18,10 @@ use serde_json::Value;
 
 use crate::erased::Erased;
 use crate::ignite::Registry;
-use crate::session::{end_session, session_id, set_flash, start_session, take_flash, AdminUser};
+use crate::session::{
+    check_csrf, csrf_token, end_session, session_id, set_flash, start_session, take_flash,
+    AdminUser,
+};
 use crate::sessions;
 use crate::users;
 use crate::views::{
@@ -70,6 +73,7 @@ async fn dashboard(
     pool: &State<Pool>,
 ) -> Result<PropelView, Status> {
     let flash = take_flash(cookies, &registry.secret);
+    let token = csrf_token(cookies, &registry.secret);
     let resources = registry.resources.clone();
     let (widgets, tables) = blocking(pool, move |conn| {
         let mut widgets = Vec::new();
@@ -91,7 +95,7 @@ async fn dashboard(
         .collect();
 
     let page = DashboardPage {
-        layout: Layout::new(registry, true, flash),
+        layout: Layout::new(registry, true, flash, token.clone()),
         title: "Dashboard",
         cards: widgets
             .into_iter()
@@ -106,13 +110,19 @@ async fn dashboard(
 }
 
 #[get("/login")]
-fn login_form(registry: &State<Registry>) -> PropelView {
-    PropelView::render("ignite::login", &login_page(registry, "", None))
+fn login_form(cookies: &CookieJar<'_>, registry: &State<Registry>) -> PropelView {
+    let token = csrf_token(cookies, &registry.secret);
+    PropelView::render("ignite::login", &login_page(registry, "", None, token))
 }
 
-fn login_page(registry: &Registry, email: &str, error: Option<&str>) -> LoginPage {
+fn login_page(
+    registry: &Registry,
+    email: &str,
+    error: Option<&str>,
+    csrf_token: String,
+) -> LoginPage {
     LoginPage {
-        layout: Layout::new(registry, false, None),
+        layout: Layout::new(registry, false, None, csrf_token),
         title: "Sign in",
         action: format!("{}/login", registry.mount),
         email: email.to_string(),
@@ -129,6 +139,7 @@ async fn login(
     pool: &State<Pool>,
 ) -> Result<Reply, Status> {
     let form = read_form(body).await?;
+    check_csrf(cookies, &registry.secret, form.get("_token"))?;
     let email = form.get("email").unwrap_or("").trim().to_string();
     let password = form.get("password").unwrap_or("").to_string();
 
@@ -166,6 +177,7 @@ async fn login(
                     registry,
                     &email,
                     Some("The email or password is incorrect."),
+                    csrf_token(cookies, &registry.secret),
                 ),
             ),
         )),
@@ -178,12 +190,15 @@ fn dummy_hash() -> &'static str {
     HASH.get_or_init(|| users::hash_password("not-a-real-password").expect("argon2 hashes"))
 }
 
-#[post("/logout")]
+#[post("/logout", data = "<body>")]
 async fn logout(
+    body: Data<'_>,
     cookies: &CookieJar<'_>,
     registry: &State<Registry>,
     pool: &State<Pool>,
-) -> Redirect {
+) -> Result<Redirect, Status> {
+    let form = read_form(body).await?;
+    check_csrf(cookies, &registry.secret, form.get("_token"))?;
     if let Some(session_id) = session_id(cookies, &registry.secret) {
         // The row goes first: a copied cookie stops working even if the cookie is still in the jar.
         let _ = blocking(pool, move |conn| {
@@ -192,17 +207,20 @@ async fn logout(
         .await;
     }
     end_session(cookies);
-    Redirect::to(format!("{}/login", registry.mount))
+    Ok(Redirect::to(format!("{}/login", registry.mount)))
 }
 
 /// Ends every session of the signed-in user, on every device.
-#[post("/logout-everywhere")]
+#[post("/logout-everywhere", data = "<body>")]
 async fn logout_everywhere(
+    body: Data<'_>,
     user: AdminUser,
     cookies: &CookieJar<'_>,
     registry: &State<Registry>,
     pool: &State<Pool>,
 ) -> Result<Redirect, Status> {
+    let form = read_form(body).await?;
+    check_csrf(cookies, &registry.secret, form.get("_token"))?;
     blocking(pool, move |conn| {
         sessions::delete_for_user(conn, user.user_id()).map_err(db_status)
     })
@@ -229,6 +247,7 @@ async fn index(
     let columns = resource.columns();
     let index_url = format!("{}/{}", registry.mount, resource.slug());
     let flash = take_flash(cookies, &registry.secret);
+    let token = csrf_token(cookies, &registry.secret);
 
     let search = q.unwrap_or_default().trim().to_string();
     // Only a sortable column can be sorted by; anything else is ignored.
@@ -293,7 +312,7 @@ async fn index(
     };
     let sort_pair = sort.as_deref().map(|key| (key, dir_name));
     let page_view = IndexPage {
-        layout: Layout::new(registry, true, flash),
+        layout: Layout::new(registry, true, flash, token.clone()),
         title: resource.title(),
         singular: resource.singular(),
         new_url: format!("{index_url}/new"),
@@ -323,7 +342,12 @@ async fn new_form(
     let resource = registry.find(slug).ok_or(Status::NotFound)?;
     let index_url = format!("{}/{}", registry.mount, resource.slug());
     let page = FormPage {
-        layout: Layout::new(registry, true, take_flash(cookies, &registry.secret)),
+        layout: Layout::new(
+            registry,
+            true,
+            take_flash(cookies, &registry.secret),
+            csrf_token(cookies, &registry.secret),
+        ),
         title: resource.title(),
         singular: resource.singular(),
         heading: format!("New {}", resource.singular()),
@@ -351,6 +375,7 @@ async fn create(
     let resource = registry.find(slug).ok_or(Status::NotFound)?;
     let index_url = format!("{}/{}", registry.mount, resource.slug());
     let form = read_form(body).await?;
+    check_csrf(cookies, &registry.secret, form.get("_token"))?;
 
     let worker = resource.clone();
     let db_form = form.clone();
@@ -372,6 +397,7 @@ async fn create(
             format!("New {}", resource.singular()),
             index_url,
             "Create",
+            csrf_token(cookies, &registry.secret),
         )),
     }
 }
@@ -396,7 +422,12 @@ async fn edit_form(
     let form = record_form(resource.fields(), &record);
 
     let page = FormPage {
-        layout: Layout::new(registry, true, take_flash(cookies, &registry.secret)),
+        layout: Layout::new(
+            registry,
+            true,
+            take_flash(cookies, &registry.secret),
+            csrf_token(cookies, &registry.secret),
+        ),
         title: resource.title(),
         singular: resource.singular(),
         heading: format!("Edit {} #{id}", resource.singular()),
@@ -422,6 +453,7 @@ async fn update(
     let resource = registry.find(slug).ok_or(Status::NotFound)?;
     let index_url = format!("{}/{}", registry.mount, resource.slug());
     let form = read_form(body).await?;
+    check_csrf(cookies, &registry.secret, form.get("_token"))?;
 
     let worker = resource.clone();
     let db_form = form.clone();
@@ -443,19 +475,23 @@ async fn update(
             format!("Edit {} #{id}", resource.singular()),
             format!("{index_url}/{id}"),
             "Save",
+            csrf_token(cookies, &registry.secret),
         )),
     }
 }
 
-#[post("/<slug>/<id>/delete")]
+#[post("/<slug>/<id>/delete", data = "<body>")]
 async fn destroy(
     slug: &str,
     id: &str,
+    body: Data<'_>,
     _session: AdminUser,
     cookies: &CookieJar<'_>,
     registry: &State<Registry>,
     pool: &State<Pool>,
 ) -> Result<Redirect, Status> {
+    let form = read_form(body).await?;
+    check_csrf(cookies, &registry.secret, form.get("_token"))?;
     let id = parse_id(id)?;
     let resource = registry.find(slug).ok_or(Status::NotFound)?;
     let index_url = format!("{}/{}", registry.mount, resource.slug());
@@ -471,6 +507,7 @@ async fn destroy(
 
 /// Renders a form again with the submitted values and the errors, and a 422
 /// status so the browser and tests can tell it from a fresh form.
+#[allow(clippy::too_many_arguments)]
 fn form_page(
     registry: &Registry,
     resource: &Arc<dyn Erased>,
@@ -479,9 +516,10 @@ fn form_page(
     heading: String,
     action: String,
     submit_label: &'static str,
+    csrf_token: String,
 ) -> Reply {
     let page = FormPage {
-        layout: Layout::new(registry, true, None),
+        layout: Layout::new(registry, true, None, csrf_token),
         title: resource.title(),
         singular: resource.singular(),
         heading,

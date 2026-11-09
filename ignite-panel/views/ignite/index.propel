@@ -50,6 +50,7 @@
             <td class="actions">
               <a href="{{ $row.edit_url }}">Edit</a>
               <form method="post" action="{{ $row.delete_url }}" onsubmit="return confirm('Delete this record? This cannot be undone.');">
+                <input type="hidden" name="_token" value="{{ $csrf_token }}">
                 <button type="submit" class="danger">Delete</button>
               </form>
             </td>

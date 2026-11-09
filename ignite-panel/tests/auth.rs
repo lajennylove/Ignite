@@ -10,10 +10,12 @@ use rocket::http::{ContentType, Cookie, Status};
 const SESSION: &str = "ignite_session";
 
 fn login(client: &rocket::local::blocking::Client, email: &str, password: &str) -> Status {
+    client.get("/admin/login").dispatch();
+    let body = with_token(client, &format!("email={email}&password={password}"));
     client
         .post("/admin/login")
         .header(ContentType::Form)
-        .body(format!("email={email}&password={password}"))
+        .body(body)
         .dispatch()
         .status()
 }
@@ -47,10 +49,14 @@ fn a_write_without_a_session_is_refused_and_changes_nothing() {
 fn a_wrong_password_is_rejected_and_sets_no_session() {
     let _guard = reset();
     let client = client(None);
+    client.get("/admin/login").dispatch();
     let response = client
         .post("/admin/login")
         .header(ContentType::Form)
-        .body(format!("email={EMAIL}&password=wrong-password"))
+        .body(with_token(
+            &client,
+            &format!("email={EMAIL}&password=wrong-password"),
+        ))
         .dispatch();
 
     assert_eq!(response.status(), Status::UnprocessableEntity);
@@ -71,10 +77,14 @@ fn a_wrong_password_is_rejected_and_sets_no_session() {
 fn an_unknown_email_gets_the_same_message() {
     let _guard = reset();
     let client = client(None);
+    client.get("/admin/login").dispatch();
     let response = client
         .post("/admin/login")
         .header(ContentType::Form)
-        .body(format!("email=nobody@example.test&password={PASSWORD}"))
+        .body(with_token(
+            &client,
+            &format!("email=nobody@example.test&password={PASSWORD}"),
+        ))
         .dispatch();
 
     assert_eq!(response.status(), Status::UnprocessableEntity);
@@ -120,7 +130,11 @@ fn the_dashboard_needs_a_session() {
 fn logout_ends_the_session() {
     let _guard = reset();
     let client = signed_in(None);
-    let response = client.post("/admin/logout").dispatch();
+    let response = client
+        .post("/admin/logout")
+        .header(ContentType::Form)
+        .body(with_token(&client, ""))
+        .dispatch();
 
     assert_eq!(response.status(), Status::SeeOther);
     assert_eq!(response.headers().get_one("Location"), Some("/admin/login"));
@@ -172,7 +186,7 @@ fn the_flash_message_shows_once() {
     let created = client
         .post("/admin/widgets")
         .header(ContentType::Form)
-        .body("name=Date&price=5")
+        .body(with_token(&client, "name=Date&price=5"))
         .dispatch();
     assert_eq!(created.status(), Status::SeeOther);
 
@@ -249,7 +263,12 @@ fn a_copied_cookie_stops_working_after_logout() {
     let signed = signed_in(None);
     let copied = session_value(&signed);
     assert_eq!(
-        signed.post("/admin/logout").dispatch().status(),
+        signed
+            .post("/admin/logout")
+            .header(ContentType::Form)
+            .body(with_token(&signed, ""))
+            .dispatch()
+            .status(),
         Status::SeeOther
     );
 
@@ -268,7 +287,11 @@ fn sign_out_everywhere_ends_every_session_of_the_user() {
     let laptop = signed_in(None);
     assert_eq!(laptop.get("/admin/widgets").dispatch().status(), Status::Ok);
 
-    let response = phone.post("/admin/logout-everywhere").dispatch();
+    let response = phone
+        .post("/admin/logout-everywhere")
+        .header(ContentType::Form)
+        .body(with_token(&phone, ""))
+        .dispatch();
     assert_eq!(response.status(), Status::SeeOther);
 
     assert_eq!(

@@ -134,7 +134,10 @@ impl Ignite {
             rocket
                 .manage(pool)
                 .manage(registry)
-                .register("/", catchers![session::unauthorized])
+                .register(
+                    "/",
+                    catchers![session::unauthorized, session::csrf_mismatch],
+                )
                 .mount(mount, routes::all())
         })
     }

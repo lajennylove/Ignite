@@ -18,6 +18,7 @@
   <h1>{{ $heading }}</h1>
 
   <form class="form" method="post" action="{{ $action }}">
+    <input type="hidden" name="_token" value="{{ $csrf_token }}">
     @foreach (field in fields)
       <div class="field">
         @if (field.is_checkbox)

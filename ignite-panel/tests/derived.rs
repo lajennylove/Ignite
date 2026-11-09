@@ -4,7 +4,7 @@
 mod common;
 
 use chrono::NaiveDate;
-use common::{reset, EMAIL, PASSWORD};
+use common::{reset, with_token, EMAIL, PASSWORD};
 use diesel::mysql::MysqlConnection;
 use diesel::prelude::*;
 use diesel::sql_query;
@@ -94,10 +94,14 @@ fn signed_in() -> Client {
     let client =
         Client::tracked(rocket::build().attach(Ignite::new().resource::<Gadget>().fairing()))
             .unwrap();
+    client.get("/admin/login").dispatch();
     let status = client
         .post("/admin/login")
         .header(ContentType::Form)
-        .body(format!("email={EMAIL}&password={PASSWORD}"))
+        .body(with_token(
+            &client,
+            &format!("email={EMAIL}&password={PASSWORD}"),
+        ))
         .dispatch()
         .status();
     assert_eq!(status, Status::SeeOther);
@@ -153,7 +157,7 @@ fn the_derived_form_validates_each_field_type() {
     let response = client
         .post("/admin/gadgets")
         .header(ContentType::Form)
-        .body("name=&price=many&due=2026-13-40")
+        .body(with_token(&client, "name=&price=many&due=2026-13-40"))
         .dispatch();
 
     assert_eq!(response.status(), Status::UnprocessableEntity);
@@ -173,7 +177,10 @@ fn the_derived_resource_creates_updates_and_deletes() {
     let created = client
         .post("/admin/gadgets")
         .header(ContentType::Form)
-        .body("name=Compass&price=7&note=North&active=on&due=2026-06-30&secret=compass-pass")
+        .body(with_token(
+            &client,
+            "name=Compass&price=7&note=North&active=on&due=2026-06-30&secret=compass-pass",
+        ))
         .dispatch();
     assert_eq!(created.status(), Status::SeeOther);
     assert_eq!(gadget_count(), 3);
@@ -193,11 +200,15 @@ fn the_derived_resource_creates_updates_and_deletes() {
     let updated = client
         .post("/admin/gadgets/3")
         .header(ContentType::Form)
-        .body("name=Compass&price=8&note=North")
+        .body(with_token(&client, "name=Compass&price=8&note=North"))
         .dispatch();
     assert_eq!(updated.status(), Status::SeeOther);
 
-    let deleted = client.post("/admin/gadgets/3/delete").dispatch();
+    let deleted = client
+        .post("/admin/gadgets/3/delete")
+        .header(ContentType::Form)
+        .body(with_token(&client, ""))
+        .dispatch();
     assert_eq!(deleted.status(), Status::SeeOther);
     assert_eq!(gadget_count(), 2);
 }
@@ -232,7 +243,10 @@ fn a_password_is_stored_as_an_argon2_hash_not_as_submitted() {
     let response = client
         .post("/admin/gadgets")
         .header(ContentType::Form)
-        .body("name=Compass&price=7&secret=hunter2-hunter2")
+        .body(with_token(
+            &client,
+            "name=Compass&price=7&secret=hunter2-hunter2",
+        ))
         .dispatch();
     assert_eq!(response.status(), Status::SeeOther);
 
@@ -254,7 +268,7 @@ fn a_blank_password_on_edit_keeps_the_stored_hash() {
     let response = client
         .post("/admin/gadgets/1")
         .header(ContentType::Form)
-        .body("name=Anchor&price=6&secret=")
+        .body(with_token(&client, "name=Anchor&price=6&secret="))
         .dispatch();
 
     assert_eq!(response.status(), Status::SeeOther);
@@ -270,7 +284,10 @@ fn a_new_password_on_edit_replaces_the_hash() {
     let response = client
         .post("/admin/gadgets/1")
         .header(ContentType::Form)
-        .body("name=Anchor&price=5&secret=a-new-password")
+        .body(with_token(
+            &client,
+            "name=Anchor&price=5&secret=a-new-password",
+        ))
         .dispatch();
 
     assert_eq!(response.status(), Status::SeeOther);
@@ -310,7 +327,10 @@ fn a_duplicate_name_on_create_is_a_field_error_not_a_server_error() {
     let response = client
         .post("/admin/gadgets")
         .header(ContentType::Form)
-        .body("name=Anchor&price=1&secret=another-pass")
+        .body(with_token(
+            &client,
+            "name=Anchor&price=1&secret=another-pass",
+        ))
         .dispatch();
 
     assert_eq!(response.status(), Status::UnprocessableEntity);
@@ -326,7 +346,7 @@ fn a_duplicate_name_on_edit_is_a_field_error_not_a_server_error() {
     let response = client
         .post("/admin/gadgets/2")
         .header(ContentType::Form)
-        .body("name=Anchor&price=9&secret=")
+        .body(with_token(&client, "name=Anchor&price=9&secret="))
         .dispatch();
 
     assert_eq!(response.status(), Status::UnprocessableEntity);

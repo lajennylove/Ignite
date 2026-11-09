@@ -3,9 +3,11 @@
 @endforeach
 @if (signed_in)
   <form method="post" action="{{ $logout_url }}">
+    <input type="hidden" name="_token" value="{{ $csrf_token }}">
     <button type="submit" class="secondary">Sign out</button>
   </form>
   <form method="post" action="{{ $logout_everywhere_url }}">
+    <input type="hidden" name="_token" value="{{ $csrf_token }}">
     <button type="submit" class="secondary">Sign out everywhere</button>
   </form>
 @endif

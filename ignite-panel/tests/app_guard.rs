@@ -2,7 +2,7 @@
 
 mod common;
 
-use common::{reset, EMAIL, PASSWORD};
+use common::{reset, with_token, EMAIL, PASSWORD};
 use ignite_panel::{AdminUser, Ignite};
 use rocket::http::{ContentType, Status};
 use rocket::local::blocking::Client;
@@ -36,10 +36,14 @@ fn an_app_route_redirects_to_login_without_a_session() {
 fn an_app_route_reads_the_signed_in_user() {
     let _guard = reset();
     let client = client();
+    client.get("/admin/login").dispatch();
     let login = client
         .post("/admin/login")
         .header(ContentType::Form)
-        .body(format!("email={EMAIL}&password={PASSWORD}"))
+        .body(with_token(
+            &client,
+            &format!("email={EMAIL}&password={PASSWORD}"),
+        ))
         .dispatch();
     assert_eq!(login.status(), Status::SeeOther);
 

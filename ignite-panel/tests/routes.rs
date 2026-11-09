@@ -111,7 +111,7 @@ fn create_saves_a_valid_form_and_redirects() {
     let response = client
         .post("/admin/widgets")
         .header(ContentType::Form)
-        .body("name=Date&price=5&note=Sweet")
+        .body(with_token(&client, "name=Date&price=5&note=Sweet"))
         .dispatch();
 
     assert_eq!(response.status(), Status::SeeOther);
@@ -129,7 +129,7 @@ fn create_rerenders_the_form_with_errors() {
     let response = client
         .post("/admin/widgets")
         .header(ContentType::Form)
-        .body("name=&price=abc")
+        .body(with_token(&client, "name=&price=abc"))
         .dispatch();
 
     assert_eq!(response.status(), Status::UnprocessableEntity);
@@ -161,7 +161,7 @@ fn update_changes_the_row() {
     let response = client
         .post("/admin/widgets/1")
         .header(ContentType::Form)
-        .body("name=Apricot&price=4")
+        .body(with_token(&client, "name=Apricot&price=4"))
         .dispatch();
 
     assert_eq!(response.status(), Status::SeeOther);
@@ -178,7 +178,11 @@ fn update_changes_the_row() {
 fn delete_removes_the_row() {
     let _guard = reset();
     let client = signed_in(None);
-    let response = client.post("/admin/widgets/2/delete").dispatch();
+    let response = client
+        .post("/admin/widgets/2/delete")
+        .header(ContentType::Form)
+        .body(with_token(&client, ""))
+        .dispatch();
 
     assert_eq!(response.status(), Status::SeeOther);
     assert_eq!(count_widgets(), 2);
@@ -197,13 +201,18 @@ fn missing_rows_and_resources_are_404() {
         client
             .post("/admin/widgets/99")
             .header(ContentType::Form)
-            .body("name=x&price=1")
+            .body(with_token(&client, "name=x&price=1"))
             .dispatch()
             .status(),
         Status::NotFound
     );
     assert_eq!(
-        client.post("/admin/widgets/99/delete").dispatch().status(),
+        client
+            .post("/admin/widgets/99/delete")
+            .header(ContentType::Form)
+            .body(with_token(&client, ""))
+            .dispatch()
+            .status(),
         Status::NotFound
     );
     assert_eq!(
@@ -236,7 +245,7 @@ fn saving_an_unchanged_row_succeeds() {
     let response = client
         .post("/admin/widgets/1")
         .header(ContentType::Form)
-        .body("name=Apple&price=3")
+        .body(with_token(&client, "name=Apple&price=3"))
         .dispatch();
 
     assert_eq!(response.status(), Status::SeeOther);

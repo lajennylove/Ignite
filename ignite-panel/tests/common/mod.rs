@@ -253,14 +253,43 @@ pub fn client(mount: Option<&str>) -> Client {
     Client::tracked(rocket::build().attach(ignite.fairing())).expect("valid rocket")
 }
 
-/// A client signed in as the test user.
+/// The CSRF token of a client's browser session, read from its token cookie.
+/// The cookie is `payload.tag`, and the payload is base64url JSON with the token.
+pub fn csrf_token(client: &Client) -> String {
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use base64::Engine;
+    let cookie = client
+        .cookies()
+        .get("ignite_csrf")
+        .expect("the token cookie is set by a page that has a form")
+        .value()
+        .to_string();
+    let payload = cookie.split('.').next().expect("payload");
+    let json = URL_SAFE_NO_PAD.decode(payload).expect("base64 payload");
+    let value: serde_json::Value = serde_json::from_slice(&json).expect("json payload");
+    value["token"].as_str().expect("token").to_string()
+}
+
+/// Adds the CSRF token to a form body, as the panel's own forms do.
+pub fn with_token(client: &Client, body: &str) -> String {
+    let token = csrf_token(client);
+    if body.is_empty() {
+        format!("_token={token}")
+    } else {
+        format!("{body}&_token={token}")
+    }
+}
+
+/// A client signed in as the test user. It loads the login page first, so it has a token.
 pub fn signed_in(mount: Option<&str>) -> Client {
     let client = client(mount);
     let base = mount.unwrap_or("/admin").trim_end_matches('/').to_string();
+    client.get(format!("{base}/login")).dispatch();
+    let body = with_token(&client, &format!("email={EMAIL}&password={PASSWORD}"));
     let status = client
         .post(format!("{base}/login"))
         .header(ContentType::Form)
-        .body(format!("email={EMAIL}&password={PASSWORD}"))
+        .body(body)
         .dispatch()
         .status();
     assert_eq!(status, Status::SeeOther, "test sign-in failed");
