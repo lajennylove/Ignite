@@ -1,6 +1,10 @@
 @extends('ignite::layouts.app')
 
-@section('ignite_home'){{ $home_url }}@endsection
+@section('ignite_bar')
+  <header class="flex items-center border-b border-border bg-page px-5 py-3">
+    @include('ignite::partials.topbar')
+  </header>
+@endsection
 
 @section('ignite_flash')
   @include('ignite::partials.flash')
@@ -11,27 +15,29 @@
 @endsection
 
 @section('content')
-  <h1 class="text-center">{{ $title }}</h1>
+  <div class="mx-auto mt-10 w-full max-w-md">
+    <section class="ig-card p-8">
+      <h1 class="mb-6 text-center text-2xl">{{ $title }}</h1>
 
-  <form class="mx-auto grid max-w-md gap-4 rounded-lg border border-hairline bg-white p-6" method="post" action="{{ $action }}">
-    <input type="hidden" name="_token" value="{{ $csrf_token }}">
+      <form class="grid gap-5" method="post" action="{{ $action }}">
+        <input type="hidden" name="_token" value="{{ $csrf_token }}">
 
-    @if (has_error)
-      <p class="rounded-md border border-danger bg-white px-3 py-2 text-danger" role="alert">{{ $error }}</p>
-    @endif
+        @if (has_error)
+          <p class="rounded-md border border-error bg-lighterror px-4 py-3 text-sm text-error-emphasis" role="alert">{{ $error }}</p>
+        @endif
 
-    <div>
-      <label class="mb-1 block font-semibold text-heading" for="email">Email</label>
-      <input class="w-full rounded-md border border-hairline bg-white px-2.5 py-1.5 font-[inherit] text-text" id="email" name="email" type="email" value="{{ $email }}" autocomplete="username">
-    </div>
+        <div>
+          <label class="ig-label" for="email">Email</label>
+          <input class="ig-input py-2.5" id="email" name="email" type="email" value="{{ $email }}" autocomplete="username">
+        </div>
 
-    <div>
-      <label class="mb-1 block font-semibold text-heading" for="password">Password</label>
-      <input class="w-full rounded-md border border-hairline bg-white px-2.5 py-1.5 font-[inherit] text-text" id="password" name="password" type="password" autocomplete="current-password">
-    </div>
+        <div>
+          <label class="ig-label" for="password">Password</label>
+          <input class="ig-input py-2.5" id="password" name="password" type="password" autocomplete="current-password">
+        </div>
 
-    <div class="flex items-center gap-3">
-      <button type="submit" class="cursor-pointer rounded-md border border-accent bg-accent px-3.5 py-1.5 font-[inherit] text-white hover:opacity-90">Sign in</button>
-    </div>
-  </form>
+        <button type="submit" class="ig-btn ig-btn-primary w-full py-3">Sign in</button>
+      </form>
+    </section>
+  </div>
 @endsection

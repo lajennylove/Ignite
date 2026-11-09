@@ -1,7 +1,15 @@
-@if (signed_in)
-  <a class="font-semibold text-heading no-underline" href="{{ $profile_url }}">{{ $user_name }}</a>
-  <form method="post" action="{{ $logout_everywhere_url }}">
-    <input type="hidden" name="_token" value="{{ $csrf_token }}">
-    <button type="submit" class="cursor-pointer rounded-md border border-accent bg-white px-3 py-1.5 font-[inherit] text-accent hover:bg-header">Sign out</button>
-  </form>
-@endif
+<div class="flex w-full items-center gap-4">
+  @if (signed_in)
+    <label for="ig-nav" class="ig-btn ig-btn-ghost h-10 w-10 px-0 xl:hidden" aria-label="Open the menu"><i class="ti ti-menu-2 text-xl"></i></label>
+    <a class="flex items-center gap-2.5 font-semibold text-heading no-underline hover:underline" href="{{ $profile_url }}"><span class="flex h-9 w-9 items-center justify-center rounded-full bg-lightprimary text-sm font-semibold text-primary">{{ $user_initials }}</span>{{ $user_name }}</a>
+    <form class="ml-auto" method="post" action="{{ $logout_everywhere_url }}">
+      <input type="hidden" name="_token" value="{{ $csrf_token }}">
+      <button type="submit" class="ig-btn ig-btn-outline">Sign out</button>
+    </form>
+  @else
+    <a class="flex items-center gap-2 font-semibold text-heading no-underline" href="{{ $home_url }}">
+      <img src="{{ asset('ui::resources/images/ignite-mark.png') }}" alt="" class="h-9 w-auto">
+      Ignite
+    </a>
+  @endif
+</div>

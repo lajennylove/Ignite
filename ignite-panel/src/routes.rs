@@ -113,6 +113,7 @@ async fn dashboard(
         home_url: layout.home_url,
         signed_in: layout.signed_in,
         user_name: layout.user_name,
+        user_initials: layout.user_initials,
         profile_url: layout.profile_url,
         logout_everywhere_url: layout.logout_everywhere_url,
         csrf_token: layout.csrf_token,
@@ -122,10 +123,8 @@ async fn dashboard(
         title: "Dashboard",
         cards: widgets
             .into_iter()
-            .map(|w| CardView {
-                label: w.label,
-                value: w.value.to_string(),
-            })
+            .enumerate()
+            .map(|(index, w)| CardView::new(index, w.label, w.value.to_string()))
             .collect(),
         tables,
     };
@@ -172,6 +171,7 @@ fn login_page(
         home_url: layout.home_url,
         signed_in: layout.signed_in,
         user_name: layout.user_name,
+        user_initials: layout.user_initials,
         profile_url: layout.profile_url,
         logout_everywhere_url: layout.logout_everywhere_url,
         csrf_token: layout.csrf_token,
@@ -346,6 +346,7 @@ async fn profile(
         home_url: layout.home_url,
         signed_in: layout.signed_in,
         user_name: layout.user_name,
+        user_initials: layout.user_initials,
         profile_url: layout.profile_url,
         logout_everywhere_url: layout.logout_everywhere_url,
         csrf_token: layout.csrf_token,
@@ -445,6 +446,7 @@ async fn index(
         home_url: layout.home_url,
         signed_in: layout.signed_in,
         user_name: layout.user_name,
+        user_initials: layout.user_initials,
         profile_url: layout.profile_url,
         logout_everywhere_url: layout.logout_everywhere_url,
         csrf_token: layout.csrf_token,
@@ -494,6 +496,7 @@ async fn new_form(
         home_url: layout.home_url,
         signed_in: layout.signed_in,
         user_name: layout.user_name,
+        user_initials: layout.user_initials,
         profile_url: layout.profile_url,
         logout_everywhere_url: layout.logout_everywhere_url,
         csrf_token: layout.csrf_token,
@@ -585,6 +588,7 @@ async fn edit_form(
         home_url: layout.home_url,
         signed_in: layout.signed_in,
         user_name: layout.user_name,
+        user_initials: layout.user_initials,
         profile_url: layout.profile_url,
         logout_everywhere_url: layout.logout_everywhere_url,
         csrf_token: layout.csrf_token,
@@ -688,6 +692,7 @@ fn form_page(
         home_url: layout.home_url,
         signed_in: layout.signed_in,
         user_name: layout.user_name,
+        user_initials: layout.user_initials,
         profile_url: layout.profile_url,
         logout_everywhere_url: layout.logout_everywhere_url,
         csrf_token: layout.csrf_token,

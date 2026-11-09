@@ -1,13 +1,15 @@
 @extends('ignite::layouts.app')
 
-@section('ignite_home'){{ $home_url }}@endsection
-
-@section('ignite_nav')
-  @include('ignite::partials.topbar')
-@endsection
-
 @section('ignite_aside')
   @include('ignite::partials.nav')
+@endsection
+
+@section('ignite_column')xl:pl-[270px]@endsection
+
+@section('ignite_bar')
+  <header class="sticky top-0 z-20 flex items-center border-b border-border bg-page px-5 py-3">
+    @include('ignite::partials.topbar')
+  </header>
 @endsection
 
 @section('ignite_flash')
@@ -19,41 +21,41 @@
 @endsection
 
 @section('content')
-  <h1>{{ $heading }}</h1>
+  <h1 class="mb-6">{{ $heading }}</h1>
 
-  <form class="grid max-w-xl gap-4 rounded-lg border border-hairline bg-white p-6" method="post" action="{{ $action }}">
+  <form class="ig-card grid max-w-2xl gap-5" method="post" action="{{ $action }}">
     <input type="hidden" name="_token" value="{{ $csrf_token }}">
 
     @foreach (field in fields)
       <div>
         @if (field.is_checkbox)
-          <label class="flex items-center gap-2 font-semibold text-heading">
-            <input type="checkbox" name="{{ $field.name }}" value="on" @if (field.checked)checked@endif>
+          <label class="flex items-center gap-2 text-sm font-semibold text-heading">
+            <input type="checkbox" class="h-4 w-4 rounded border-bordergray text-primary focus:ring-primary" name="{{ $field.name }}" value="on" @if (field.checked)checked@endif>
             {{ $field.label }}
           </label>
         @else
-          <label class="mb-1 block font-semibold text-heading" for="{{ $field.name }}">{{ $field.label }}@if (field.required) *@endif</label>
+          <label class="ig-label" for="{{ $field.name }}">{{ $field.label }}@if (field.required) *@endif</label>
           @if (field.is_textarea)
-            <textarea class="min-h-32 w-full rounded-md border border-hairline bg-white px-2.5 py-1.5 font-[inherit] text-text" id="{{ $field.name }}" name="{{ $field.name }}">{{ $field.value }}</textarea>
+            <textarea class="ig-input min-h-32" id="{{ $field.name }}" name="{{ $field.name }}">{{ $field.value }}</textarea>
           @elseif (field.is_select)
-            <select class="w-full rounded-md border border-hairline bg-white px-2.5 py-1.5 font-[inherit] text-text" id="{{ $field.name }}" name="{{ $field.name }}">
+            <select class="ig-input" id="{{ $field.name }}" name="{{ $field.name }}">
               @foreach (option in field.options)
                 <option value="{{ $option.value }}" @if (option.selected)selected@endif>{{ $option.label }}</option>
               @endforeach
             </select>
           @else
-            <input class="w-full rounded-md border border-hairline bg-white px-2.5 py-1.5 font-[inherit] text-text" id="{{ $field.name }}" name="{{ $field.name }}" type="{{ $field.input_type }}" value="{{ $field.value }}">
+            <input class="ig-input" id="{{ $field.name }}" name="{{ $field.name }}" type="{{ $field.input_type }}" value="{{ $field.value }}">
           @endif
         @endif
         @if (field.has_error)
-          <p class="mt-1 mb-0 text-danger">{{ $field.error }}</p>
+          <p class="mt-1.5 mb-0 text-sm text-error-emphasis">{{ $field.error }}</p>
         @endif
       </div>
     @endforeach
 
-    <div class="flex items-center gap-3">
-      <button type="submit" class="cursor-pointer rounded-md border border-accent bg-accent px-3.5 py-1.5 font-[inherit] text-white no-underline hover:opacity-90">{{ $submit_label }}</button>
-      <a class="text-accent" href="{{ $back_url }}">Cancel</a>
+    <div class="flex flex-wrap items-center gap-3">
+      <button type="submit" class="ig-btn ig-btn-primary">{{ $submit_label }}</button>
+      <a class="ig-btn ig-btn-outline" href="{{ $back_url }}">Cancel</a>
     </div>
   </form>
 @endsection

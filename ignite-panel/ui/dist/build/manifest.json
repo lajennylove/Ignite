@@ -1,12 +1,264 @@
 {
+  "node_modules/@fontsource-variable/dm-sans/files/dm-sans-latin-ext-wght-normal.woff2": {
+    "file": "assets/dm-sans-latin-ext-wght-normal-BOFOeGcA.woff2",
+    "src": "node_modules/@fontsource-variable/dm-sans/files/dm-sans-latin-ext-wght-normal.woff2"
+  },
+  "node_modules/@fontsource-variable/dm-sans/files/dm-sans-latin-wght-normal.woff2": {
+    "file": "assets/dm-sans-latin-wght-normal-Xz1IZZA0.woff2",
+    "src": "node_modules/@fontsource-variable/dm-sans/files/dm-sans-latin-wght-normal.woff2"
+  },
+  "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.animals.woff2": {
+    "file": "assets/tabler-icons.animals-BFtwQ8YR.woff2",
+    "src": "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.animals.woff2"
+  },
+  "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.arrows-1.woff2": {
+    "file": "assets/tabler-icons.arrows-1-Cx8YOeJo.woff2",
+    "src": "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.arrows-1.woff2"
+  },
+  "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.arrows-2.woff2": {
+    "file": "assets/tabler-icons.arrows-2-fNI5ZGWK.woff2",
+    "src": "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.arrows-2.woff2"
+  },
+  "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.badges.woff2": {
+    "file": "assets/tabler-icons.badges-Jd1b4ciw.woff2",
+    "src": "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.badges.woff2"
+  },
+  "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.brand-1.woff2": {
+    "file": "assets/tabler-icons.brand-1-BnPwtX9j.woff2",
+    "src": "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.brand-1.woff2"
+  },
+  "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.brand-2.woff2": {
+    "file": "assets/tabler-icons.brand-2-BMpxSPRz.woff2",
+    "src": "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.brand-2.woff2"
+  },
+  "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.buildings.woff2": {
+    "file": "assets/tabler-icons.buildings-BJokQ16Z.woff2",
+    "src": "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.buildings.woff2"
+  },
+  "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.charts.woff2": {
+    "file": "assets/tabler-icons.charts-RGaDcXri.woff2",
+    "src": "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.charts.woff2"
+  },
+  "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.communication.woff2": {
+    "file": "assets/tabler-icons.communication-Dc9KjEGf.woff2",
+    "src": "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.communication.woff2"
+  },
+  "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.computers.woff2": {
+    "file": "assets/tabler-icons.computers-C4f7hEXo.woff2",
+    "src": "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.computers.woff2"
+  },
+  "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.core.woff2": {
+    "file": "assets/tabler-icons.core-B4ZnTWxn.woff2",
+    "src": "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.core.woff2"
+  },
+  "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.currencies.woff2": {
+    "file": "assets/tabler-icons.currencies-BKkmydI9.woff2",
+    "src": "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.currencies.woff2"
+  },
+  "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.database.woff2": {
+    "file": "assets/tabler-icons.database-Dz0KLKxB.woff2",
+    "src": "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.database.woff2"
+  },
+  "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.design-1.woff2": {
+    "file": "assets/tabler-icons.design-1-D36lPVKQ.woff2",
+    "src": "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.design-1.woff2"
+  },
+  "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.design-2.woff2": {
+    "file": "assets/tabler-icons.design-2-BecAtVQa.woff2",
+    "src": "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.design-2.woff2"
+  },
+  "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.development.woff2": {
+    "file": "assets/tabler-icons.development-BcFxV5xJ.woff2",
+    "src": "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.development.woff2"
+  },
+  "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.devices-1.woff2": {
+    "file": "assets/tabler-icons.devices-1-BC5Xgxcd.woff2",
+    "src": "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.devices-1.woff2"
+  },
+  "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.devices-2.woff2": {
+    "file": "assets/tabler-icons.devices-2-DxU2KcFc.woff2",
+    "src": "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.devices-2.woff2"
+  },
+  "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.document.woff2": {
+    "file": "assets/tabler-icons.document-D-vJDV_G.woff2",
+    "src": "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.document.woff2"
+  },
+  "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.e-commerce.woff2": {
+    "file": "assets/tabler-icons.e-commerce-BbUHcRjH.woff2",
+    "src": "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.e-commerce.woff2"
+  },
+  "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.electrical.woff2": {
+    "file": "assets/tabler-icons.electrical-Rugd9Lp9.woff2",
+    "src": "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.electrical.woff2"
+  },
+  "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.extensions.woff2": {
+    "file": "assets/tabler-icons.extensions-CFIoj-zs.woff2",
+    "src": "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.extensions.woff2"
+  },
+  "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.food.woff2": {
+    "file": "assets/tabler-icons.food-BVFOtlzL.woff2",
+    "src": "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.food.woff2"
+  },
+  "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.games.woff2": {
+    "file": "assets/tabler-icons.games-CJsNLJWD.woff2",
+    "src": "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.games.woff2"
+  },
+  "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.gender.woff2": {
+    "file": "assets/tabler-icons.gender-DV1dcKO1.woff2",
+    "src": "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.gender.woff2"
+  },
+  "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.gestures.woff2": {
+    "file": "assets/tabler-icons.gestures-CfLTrMo_.woff2",
+    "src": "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.gestures.woff2"
+  },
+  "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.health.woff2": {
+    "file": "assets/tabler-icons.health-CiVgsckw.woff2",
+    "src": "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.health.woff2"
+  },
+  "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.laundry.woff2": {
+    "file": "assets/tabler-icons.laundry-D49B2jvm.woff2",
+    "src": "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.laundry.woff2"
+  },
+  "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.letters.woff2": {
+    "file": "assets/tabler-icons.letters-DBQu7wmg.woff2",
+    "src": "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.letters.woff2"
+  },
+  "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.logic.woff2": {
+    "file": "assets/tabler-icons.logic-B0VR4UFj.woff2",
+    "src": "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.logic.woff2"
+  },
+  "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.map.woff2": {
+    "file": "assets/tabler-icons.map-gmPMOfjL.woff2",
+    "src": "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.map.woff2"
+  },
+  "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.math.woff2": {
+    "file": "assets/tabler-icons.math-CcEQ1Tyd.woff2",
+    "src": "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.math.woff2"
+  },
+  "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.media.woff2": {
+    "file": "assets/tabler-icons.media-B12VTRW6.woff2",
+    "src": "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.media.woff2"
+  },
+  "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.mood.woff2": {
+    "file": "assets/tabler-icons.mood-CYTxKxQE.woff2",
+    "src": "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.mood.woff2"
+  },
+  "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.nature.woff2": {
+    "file": "assets/tabler-icons.nature-D5PLudoF.woff2",
+    "src": "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.nature.woff2"
+  },
+  "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.numbers.woff2": {
+    "file": "assets/tabler-icons.numbers-FBzIfXhh.woff2",
+    "src": "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.numbers.woff2"
+  },
+  "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.photography.woff2": {
+    "file": "assets/tabler-icons.photography-DRnCxHFT.woff2",
+    "src": "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.photography.woff2"
+  },
+  "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.shapes.woff2": {
+    "file": "assets/tabler-icons.shapes-DjvlvwxH.woff2",
+    "src": "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.shapes.woff2"
+  },
+  "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.sport.woff2": {
+    "file": "assets/tabler-icons.sport-D7jCgiQj.woff2",
+    "src": "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.sport.woff2"
+  },
+  "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.symbols.woff2": {
+    "file": "assets/tabler-icons.symbols-IX_Lnj2m.woff2",
+    "src": "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.symbols.woff2"
+  },
+  "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.system-1.woff2": {
+    "file": "assets/tabler-icons.system-1-BOviPcub.woff2",
+    "src": "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.system-1.woff2"
+  },
+  "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.system-2.woff2": {
+    "file": "assets/tabler-icons.system-2-DeWsY1PS.woff2",
+    "src": "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.system-2.woff2"
+  },
+  "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.system-3.woff2": {
+    "file": "assets/tabler-icons.system-3-e9YjSlaC.woff2",
+    "src": "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.system-3.woff2"
+  },
+  "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.text.woff2": {
+    "file": "assets/tabler-icons.text-BbSuA39E.woff2",
+    "src": "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.text.woff2"
+  },
+  "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.vehicles.woff2": {
+    "file": "assets/tabler-icons.vehicles-CNf1Of5a.woff2",
+    "src": "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.vehicles.woff2"
+  },
+  "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.version-control.woff2": {
+    "file": "assets/tabler-icons.version-control-BSqYXrdb.woff2",
+    "src": "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.version-control.woff2"
+  },
+  "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.weather.woff2": {
+    "file": "assets/tabler-icons.weather-C772lO3H.woff2",
+    "src": "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.weather.woff2"
+  },
+  "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.zodiac.woff2": {
+    "file": "assets/tabler-icons.zodiac-L3y56Yt6.woff2",
+    "src": "node_modules/@tabler/icons-webfont/dist/fonts/tabler-icons.zodiac.woff2"
+  },
   "resources/css/app.css": {
-    "file": "assets/app-C3GlxVkg.css",
+    "file": "assets/app-2vNUb71_.css",
     "name": "app",
     "names": [
       "app.css"
     ],
     "src": "resources/css/app.css",
-    "isEntry": true
+    "isEntry": true,
+    "assets": [
+      "assets/dm-sans-latin-ext-wght-normal-BOFOeGcA.woff2",
+      "assets/dm-sans-latin-wght-normal-Xz1IZZA0.woff2",
+      "assets/tabler-icons.core-B4ZnTWxn.woff2",
+      "assets/tabler-icons.numbers-FBzIfXhh.woff2",
+      "assets/tabler-icons.games-CJsNLJWD.woff2",
+      "assets/tabler-icons.buildings-BJokQ16Z.woff2",
+      "assets/tabler-icons.arrows-1-Cx8YOeJo.woff2",
+      "assets/tabler-icons.arrows-2-fNI5ZGWK.woff2",
+      "assets/tabler-icons.math-CcEQ1Tyd.woff2",
+      "assets/tabler-icons.vehicles-CNf1Of5a.woff2",
+      "assets/tabler-icons.e-commerce-BbUHcRjH.woff2",
+      "assets/tabler-icons.document-D-vJDV_G.woff2",
+      "assets/tabler-icons.brand-1-BnPwtX9j.woff2",
+      "assets/tabler-icons.brand-2-BMpxSPRz.woff2",
+      "assets/tabler-icons.food-BVFOtlzL.woff2",
+      "assets/tabler-icons.system-1-BOviPcub.woff2",
+      "assets/tabler-icons.system-2-DeWsY1PS.woff2",
+      "assets/tabler-icons.system-3-e9YjSlaC.woff2",
+      "assets/tabler-icons.devices-1-BC5Xgxcd.woff2",
+      "assets/tabler-icons.devices-2-DxU2KcFc.woff2",
+      "assets/tabler-icons.sport-D7jCgiQj.woff2",
+      "assets/tabler-icons.badges-Jd1b4ciw.woff2",
+      "assets/tabler-icons.shapes-DjvlvwxH.woff2",
+      "assets/tabler-icons.computers-C4f7hEXo.woff2",
+      "assets/tabler-icons.gestures-CfLTrMo_.woff2",
+      "assets/tabler-icons.media-B12VTRW6.woff2",
+      "assets/tabler-icons.symbols-IX_Lnj2m.woff2",
+      "assets/tabler-icons.health-CiVgsckw.woff2",
+      "assets/tabler-icons.text-BbSuA39E.woff2",
+      "assets/tabler-icons.development-BcFxV5xJ.woff2",
+      "assets/tabler-icons.map-gmPMOfjL.woff2",
+      "assets/tabler-icons.charts-RGaDcXri.woff2",
+      "assets/tabler-icons.design-1-D36lPVKQ.woff2",
+      "assets/tabler-icons.design-2-BecAtVQa.woff2",
+      "assets/tabler-icons.letters-DBQu7wmg.woff2",
+      "assets/tabler-icons.nature-D5PLudoF.woff2",
+      "assets/tabler-icons.currencies-BKkmydI9.woff2",
+      "assets/tabler-icons.weather-C772lO3H.woff2",
+      "assets/tabler-icons.version-control-BSqYXrdb.woff2",
+      "assets/tabler-icons.communication-Dc9KjEGf.woff2",
+      "assets/tabler-icons.animals-BFtwQ8YR.woff2",
+      "assets/tabler-icons.photography-DRnCxHFT.woff2",
+      "assets/tabler-icons.mood-CYTxKxQE.woff2",
+      "assets/tabler-icons.zodiac-L3y56Yt6.woff2",
+      "assets/tabler-icons.database-Dz0KLKxB.woff2",
+      "assets/tabler-icons.gender-DV1dcKO1.woff2",
+      "assets/tabler-icons.logic-B0VR4UFj.woff2",
+      "assets/tabler-icons.extensions-CFIoj-zs.woff2",
+      "assets/tabler-icons.electrical-Rugd9Lp9.woff2",
+      "assets/tabler-icons.laundry-D49B2jvm.woff2"
+    ]
   },
   "resources/js/app.js": {
     "file": "assets/app-DF9n0ybU.js",

@@ -1,13 +1,15 @@
 @extends('ignite::layouts.app')
 
-@section('ignite_home'){{ $home_url }}@endsection
-
-@section('ignite_nav')
-  @include('ignite::partials.topbar')
-@endsection
-
 @section('ignite_aside')
   @include('ignite::partials.nav')
+@endsection
+
+@section('ignite_column')xl:pl-[270px]@endsection
+
+@section('ignite_bar')
+  <header class="sticky top-0 z-20 flex items-center border-b border-border bg-page px-5 py-3">
+    @include('ignite::partials.topbar')
+  </header>
 @endsection
 
 @section('ignite_flash')
@@ -19,62 +21,64 @@
 @endsection
 
 @section('content')
-  <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+  <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
     <h1 class="mb-0">{{ $title }}</h1>
-    <a class="cursor-pointer rounded-md border border-accent bg-accent px-3.5 py-1.5 font-[inherit] text-white no-underline hover:opacity-90" href="{{ $new_url }}">New {{ $singular }}</a>
+    <a class="ig-btn ig-btn-primary" href="{{ $new_url }}">New {{ $singular }}</a>
   </div>
 
-  <form class="my-4 flex flex-wrap gap-2" method="get" action="{{ $index_url }}">
-    <input class="max-w-full flex-[1_1_14rem] rounded-md border border-hairline bg-white px-2.5 py-1.5 font-[inherit] text-text" type="search" name="q" value="{{ $search }}" placeholder="Search">
-    <button type="submit" class="cursor-pointer rounded-md border border-accent bg-white px-3.5 py-1.5 font-[inherit] text-accent no-underline hover:bg-header">Search</button>
-  </form>
+  <section class="ig-card p-0">
+    <form class="flex flex-wrap items-center gap-3 border-b border-border p-5" method="get" action="{{ $index_url }}">
+      <input class="ig-input max-w-sm flex-[1_1_14rem]" type="search" name="q" value="{{ $search }}" placeholder="Search">
+      <button type="submit" class="ig-btn ig-btn-outline">Search</button>
+    </form>
 
-  <div class="overflow-x-auto rounded-lg border border-hairline bg-white">
-    <table class="w-full border-collapse">
-      <thead>
-        <tr>
-          @foreach (column in columns)
-            <th class="border-b border-hairline px-3 py-2.5 text-left align-top font-semibold text-heading">
-              @if (column.sortable)
-                <a class="whitespace-nowrap text-heading no-underline hover:underline" href="{{ $column.sort_url }}">{{ $column.label }} {{ $column.indicator }}</a>
-              @else
-                {{ $column.label }}
-              @endif
-            </th>
-          @endforeach
-          <th class="border-b border-hairline px-3 py-2.5"></th>
-        </tr>
-      </thead>
-      <tbody>
-        @forelse (row in rows)
+    <div class="overflow-x-auto">
+      <table class="ig-table">
+        <thead>
           <tr>
-            @foreach (cell in row.cells)
-              <td class="border-b border-hairline px-3 py-2.5 text-left align-top">{{ $cell.text }}</td>
+            @foreach (column in columns)
+              <th>
+                @if (column.sortable)
+                  <a class="whitespace-nowrap text-heading no-underline hover:underline" href="{{ $column.sort_url }}">{{ $column.label }} {{ $column.indicator }}</a>
+                @else
+                  {{ $column.label }}
+                @endif
+              </th>
             @endforeach
-            <td class="whitespace-nowrap border-b border-hairline px-3 py-2.5 text-left align-top">
-              <a class="text-accent" href="{{ $row.edit_url }}">Edit</a>
-              <form class="ml-2 inline" method="post" action="{{ $row.delete_url }}" data-confirm="Delete this record? This cannot be undone.">
-                <input type="hidden" name="_token" value="{{ $csrf_token }}">
-                <button type="submit" class="cursor-pointer rounded-md border border-danger bg-danger px-3 py-1 font-[inherit] text-white hover:opacity-90">Delete</button>
-              </form>
-            </td>
+            <th></th>
           </tr>
-        @empty
-          <tr>
-            <td colspan="{{ $colspan }}" class="px-3 py-2.5 text-[#5b6070]">No records found.</td>
-          </tr>
-        @endforelse
-      </tbody>
-    </table>
-  </div>
+        </thead>
+        <tbody>
+          @forelse (row in rows)
+            <tr>
+              @foreach (cell in row.cells)
+                <td>{{ $cell.text }}</td>
+              @endforeach
+              <td class="whitespace-nowrap text-right">
+                <a class="ig-btn ig-btn-ghost px-3 py-1" href="{{ $row.edit_url }}">Edit</a>
+                <form class="inline" method="post" action="{{ $row.delete_url }}" data-confirm="Delete this record? This cannot be undone.">
+                  <input type="hidden" name="_token" value="{{ $csrf_token }}">
+                  <button type="submit" class="ig-btn ig-btn-danger px-3 py-1">Delete</button>
+                </form>
+              </td>
+            </tr>
+          @empty
+            <tr>
+              <td colspan="{{ $colspan }}" class="text-center text-text">No records found.</td>
+            </tr>
+          @endforelse
+        </tbody>
+      </table>
+    </div>
+  </section>
 
-  <div class="mt-4 flex items-center gap-4 text-[#5b6070]">
+  <div class="mt-5 flex flex-wrap items-center gap-4 text-text">
     @if (has_prev)
-      <a class="text-accent" href="{{ $prev_url }}">Previous</a>
+      <a class="ig-btn ig-btn-outline px-3 py-1.5" href="{{ $prev_url }}">Previous</a>
     @endif
     <span>Page {{ $page }} of {{ $last_page }} · {{ $total }} in total</span>
     @if (has_next)
-      <a class="text-accent" href="{{ $next_url }}">Next</a>
+      <a class="ig-btn ig-btn-outline px-3 py-1.5" href="{{ $next_url }}">Next</a>
     @endif
   </div>
 @endsection

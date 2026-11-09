@@ -60,11 +60,11 @@ fn the_built_stylesheet_is_served_and_has_the_classes_the_views_use() {
         .starts_with("text/css"));
     let css = response.into_string().unwrap();
     assert!(
-        css.contains(".bg-accent"),
-        "a utility the views use is in the stylesheet"
+        css.contains(".ig-btn-primary"),
+        "a component class the views use is in the stylesheet"
     );
     assert!(
-        css.contains(".text-danger"),
+        css.contains(".text-error-emphasis"),
         "the error colour is in the stylesheet"
     );
 }

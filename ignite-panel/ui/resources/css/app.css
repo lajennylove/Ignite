@@ -1,39 +1,155 @@
 @import "tailwindcss";
+@import "@fontsource-variable/dm-sans";
+@import "@tabler/icons-webfont/dist/tabler-icons.min.css";
 
 /* The panel's views, which carry the classes. Tailwind scans them for utilities. */
 @source "../../../views";
 
-/* Design tokens, measured from the Astro docs (docs.astro.build), light theme. These
-   are the same tokens as Propel's docs, so the panel matches the RocketBooster family.
-   Borders and spacing are close approximations. */
+/*
+ * Design tokens, taken from the colours of the free Tailwind Admin template
+ * (MIT licence, see NOTICE). The light values are on :root. The dark values below
+ * apply when the page asks for a dark scheme, unless it sets data-theme="light".
+ */
 @theme {
-    --font-sans: -apple-system, "system-ui", "Segoe UI", Roboto, "Helvetica Neue", "Noto Sans", Arial, sans-serif;
+    --font-sans: "DM Sans Variable", ui-sans-serif, system-ui, sans-serif;
     --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-    --color-text: #353841;
-    --color-heading: #17181c;
-    --color-accent: #3d50f5;
-    --color-header: #f6f7f9;
-    --color-code-bg: #edeef3;
-    --color-code-text: #403f53;
-    --color-hairline: #e1e4ea;
-    /* The danger colour for destructive actions and errors. */
-    --color-danger: #b42318;
+
+    --color-primary: oklch(65.33% 0.184 266.79);
+    --color-primary-emphasis: oklch(58.11% 0.161 266.76);
+    --color-lightprimary: oklch(65.33% 0.184 266.79 / 12.5%);
+    --color-secondary: oklch(76.32% 0.139 237.20);
+    --color-secondary-emphasis: oklch(67.79% 0.122 236.84);
+    --color-lightsecondary: oklch(76.32% 0.139 237.20 / 12.5%);
+    --color-info: oklch(68.98% 0.165 257.10);
+    --color-lightinfo: oklch(96.13% 0.017 256.28);
+    --color-success: oklch(80.48% 0.150 174.63);
+    --color-success-emphasis: oklch(71.35% 0.133 174.50);
+    --color-lightsuccess: oklch(98.05% 0.027 182.42);
+    --color-warning: oklch(80.94% 0.165 74.03);
+    --color-warning-emphasis: oklch(71.77% 0.146 74.27);
+    --color-lightwarning: oklch(97.29% 0.023 82.12);
+    --color-error: oklch(74.75% 0.144 35.82);
+    --color-error-emphasis: oklch(66.29% 0.128 35.43);
+    --color-lighterror: oklch(95.74% 0.019 38.15);
+
+    --color-surface: oklch(100% 0 0);
+    --color-page: oklch(100% 0 0);
+    --color-heading: oklch(27.84% 0.027 257.53);
+    --color-text: oklch(52.16% 0.047 260.80);
+    --color-link: oklch(32.70% 0.035 260.11);
+    --color-border: oklch(95.50% 0.009 242.84);
+    --color-bordergray: oklch(92.03% 0.015 260.73);
+    --color-code-bg: oklch(96.7% 0.003 264.542);
+
+    /* Aliases of the names the first version of the panel used, so existing views keep working. */
+    --color-accent: var(--color-primary);
+    --color-hairline: var(--color-bordergray);
+    --color-header: var(--color-page);
+    --color-danger: var(--color-error);
+
+    --radius-md: 7px;
+    --shadow-card: rgba(145, 158, 171, 0.2) 0px 0px 2px 0px, rgba(145, 158, 171, 0.12) 0px 12px 24px -4px;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+        --color-surface: oklch(27.84% 0.027 257.53);
+        --color-page: oklch(21% 0.034 264.665);
+        --color-heading: oklch(100% 0 0);
+        --color-text: oklch(64.54% 0.049 258.74);
+        --color-link: oklch(92.03% 0.015 260.73);
+        --color-border: oklch(36.67% 0.041 262.29);
+        --color-bordergray: oklch(36.67% 0.041 262.29);
+        --color-lightprimary: oklch(65.33% 0.184 266.79 / 20%);
+        --color-lightinfo: oklch(34.05% 0.082 264.13);
+        --color-lightsuccess: oklch(33.68% 0.044 224.24);
+        --color-lightwarning: oklch(36.49% 0.037 61.35);
+        --color-lighterror: oklch(34.83% 0.042 350.24);
+        --color-code-bg: oklch(34% 0.03 262);
+        --shadow-card: rgba(145, 158, 171, 0.3) 0px 0px 2px 0px, rgba(145, 158, 171, 0.02) 0px 12px 24px -4px;
+    }
 }
 
 @layer base {
     body {
-        @apply bg-white font-sans text-[16px] leading-7 text-text antialiased;
+        @apply bg-page font-sans text-[15px] leading-6 text-text antialiased;
     }
 
     h1 {
-        @apply text-[32px] leading-tight font-semibold text-heading;
+        @apply text-3xl leading-tight font-semibold text-heading;
     }
 
     h2 {
-        @apply text-2xl font-semibold text-heading;
+        @apply text-xl font-semibold text-heading;
     }
 
     a {
-        @apply text-accent underline-offset-2 hover:underline;
+        @apply text-primary underline-offset-2 hover:underline;
+    }
+}
+
+@layer components {
+    /* A surface: stat tiles, tables, forms and the login card. */
+    .ig-card {
+        @apply rounded-md bg-surface p-6 shadow-card;
+    }
+
+    /* Stat tiles take a tone: a tinted background, with the matching text colour. */
+    .ig-tone-primary { @apply bg-lightprimary text-primary; }
+    .ig-tone-secondary { @apply bg-lightsecondary text-secondary; }
+    .ig-tone-info { @apply bg-lightinfo text-info; }
+    .ig-tone-success { @apply bg-lightsuccess text-success; }
+    .ig-tone-warning { @apply bg-lightwarning text-warning; }
+    .ig-tone-error { @apply bg-lighterror text-error; }
+
+    .ig-btn {
+        @apply inline-flex cursor-pointer items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-medium no-underline transition-colors duration-150 hover:no-underline disabled:pointer-events-none disabled:opacity-50;
+    }
+    .ig-btn-primary {
+        @apply border border-transparent bg-primary text-white hover:bg-primary-emphasis;
+    }
+    .ig-btn-outline {
+        @apply border border-primary text-primary hover:bg-primary hover:text-white;
+    }
+    .ig-btn-ghost {
+        @apply border border-transparent text-primary hover:bg-lightprimary;
+    }
+    .ig-btn-danger {
+        @apply border border-transparent bg-error text-white hover:bg-error-emphasis;
+    }
+
+    .ig-input {
+        @apply w-full rounded-md border border-bordergray bg-transparent px-3 py-2 text-sm text-heading focus:border-primary focus:outline-2 focus:outline-primary/40;
+    }
+    .ig-label {
+        @apply mb-2 block text-sm font-semibold text-heading;
+    }
+
+    .ig-badge {
+        @apply inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium;
+    }
+
+    .ig-table {
+        @apply min-w-full divide-y divide-border text-sm;
+    }
+    .ig-table th {
+        @apply px-4 py-3 text-left font-semibold text-heading;
+    }
+    .ig-table td {
+        @apply px-4 py-3 align-top text-text;
+    }
+    .ig-table tbody tr:hover {
+        @apply bg-lightprimary;
+    }
+
+    /* The sidebar's section headings and its links. */
+    .ig-caption {
+        @apply mb-3 px-3 text-xs font-bold tracking-wide text-link uppercase;
+    }
+    .ig-nav-link {
+        @apply flex items-center gap-3 rounded-md px-3 py-2.5 text-sm text-link no-underline hover:bg-lightprimary hover:text-primary hover:no-underline;
+    }
+    .ig-nav-link-active {
+        @apply bg-primary font-medium text-white hover:bg-primary hover:text-white;
     }
 }

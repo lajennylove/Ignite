@@ -45,6 +45,7 @@ pub(crate) struct Layout {
     pub(crate) home_url: String,
     pub(crate) signed_in: bool,
     pub(crate) user_name: String,
+    pub(crate) user_initials: String,
     pub(crate) profile_url: String,
     pub(crate) logout_everywhere_url: String,
     pub(crate) csrf_token: String,
@@ -57,10 +58,20 @@ pub(crate) struct Layout {
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct NavGroup {
     pub(crate) title: &'static str,
+    pub(crate) icon: &'static str,
     pub(crate) url: String,
     pub(crate) has_add: bool,
     pub(crate) add_url: String,
     pub(crate) active: bool,
+}
+
+/// The initials of a name, for the avatar: "Ada Lovelace" gives "AL".
+fn initials(name: &str) -> String {
+    name.split_whitespace()
+        .filter_map(|word| word.chars().next())
+        .take(2)
+        .flat_map(char::to_uppercase)
+        .collect()
 }
 
 impl Layout {
@@ -77,6 +88,7 @@ impl Layout {
         let nav = if user.is_some() {
             std::iter::once(NavGroup {
                 title: "Dashboard",
+                icon: "ti-layout-dashboard",
                 url: registry.mount.clone(),
                 has_add: false,
                 add_url: String::new(),
@@ -84,6 +96,7 @@ impl Layout {
             })
             .chain(registry.resources.iter().map(|r| NavGroup {
                 title: r.title(),
+                icon: "ti-table",
                 url: format!("{}/{}", registry.mount, r.slug()),
                 has_add: true,
                 add_url: format!("{}/{}/new", registry.mount, r.slug()),
@@ -97,6 +110,7 @@ impl Layout {
             home_url: registry.mount.clone(),
             signed_in: user.is_some(),
             user_name: user.map(|u| u.name().to_string()).unwrap_or_default(),
+            user_initials: user.map(|u| initials(u.name())).unwrap_or_default(),
             profile_url: format!("{}/profile", registry.mount),
             logout_everywhere_url: format!("{}/logout-everywhere", registry.mount),
             nav,
@@ -114,6 +128,7 @@ pub(crate) struct DashboardPage {
     pub(crate) home_url: String,
     pub(crate) signed_in: bool,
     pub(crate) user_name: String,
+    pub(crate) user_initials: String,
     pub(crate) profile_url: String,
     pub(crate) logout_everywhere_url: String,
     pub(crate) csrf_token: String,
@@ -143,10 +158,42 @@ pub(crate) struct LatestRow {
     pub(crate) cells: Vec<CellView>,
 }
 
+/// The tones and icons of the stat tiles, used in turn, so neighbouring tiles differ.
+const CARD_TONES: [&str; 6] = [
+    "primary",
+    "warning",
+    "info",
+    "error",
+    "success",
+    "secondary",
+];
+const CARD_ICONS: [&str; 6] = [
+    "ti-users",
+    "ti-folder",
+    "ti-calendar-event",
+    "ti-currency-dollar",
+    "ti-chart-bar",
+    "ti-id-badge-2",
+];
+
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct CardView {
     pub(crate) label: &'static str,
     pub(crate) value: String,
+    pub(crate) tone: &'static str,
+    pub(crate) icon: &'static str,
+}
+
+impl CardView {
+    /// The tile at `index` of the dashboard, with its tone and icon.
+    pub(crate) fn new(index: usize, label: &'static str, value: String) -> Self {
+        CardView {
+            label,
+            value,
+            tone: CARD_TONES[index % CARD_TONES.len()],
+            icon: CARD_ICONS[index % CARD_ICONS.len()],
+        }
+    }
 }
 
 /// The sign-in page.
@@ -156,6 +203,7 @@ pub(crate) struct LoginPage {
     pub(crate) home_url: String,
     pub(crate) signed_in: bool,
     pub(crate) user_name: String,
+    pub(crate) user_initials: String,
     pub(crate) profile_url: String,
     pub(crate) logout_everywhere_url: String,
     pub(crate) csrf_token: String,
@@ -176,6 +224,7 @@ pub(crate) struct ProfilePage {
     pub(crate) home_url: String,
     pub(crate) signed_in: bool,
     pub(crate) user_name: String,
+    pub(crate) user_initials: String,
     pub(crate) profile_url: String,
     pub(crate) logout_everywhere_url: String,
     pub(crate) csrf_token: String,
@@ -193,6 +242,7 @@ pub(crate) struct IndexPage {
     pub(crate) home_url: String,
     pub(crate) signed_in: bool,
     pub(crate) user_name: String,
+    pub(crate) user_initials: String,
     pub(crate) profile_url: String,
     pub(crate) logout_everywhere_url: String,
     pub(crate) csrf_token: String,
@@ -243,6 +293,7 @@ pub(crate) struct FormPage {
     pub(crate) home_url: String,
     pub(crate) signed_in: bool,
     pub(crate) user_name: String,
+    pub(crate) user_initials: String,
     pub(crate) profile_url: String,
     pub(crate) logout_everywhere_url: String,
     pub(crate) csrf_token: String,

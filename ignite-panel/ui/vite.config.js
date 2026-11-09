@@ -23,6 +23,8 @@ function copyStaticAssets() {
 // dev server's file while `npm run dev` runs. The build output is committed, so an
 // app needs no Node.
 export default defineConfig({
+    // Relative URLs inside the CSS: the panel mounts under any path, so `/build/...` would miss.
+    base: './',
     plugins: [
         tailwindcss(),
         laravel({

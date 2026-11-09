@@ -1,13 +1,15 @@
 @extends('ignite::layouts.app')
 
-@section('ignite_home'){{ $home_url }}@endsection
-
-@section('ignite_nav')
-  @include('ignite::partials.topbar')
-@endsection
-
 @section('ignite_aside')
   @include('ignite::partials.nav')
+@endsection
+
+@section('ignite_column')xl:pl-[270px]@endsection
+
+@section('ignite_bar')
+  <header class="sticky top-0 z-20 flex items-center border-b border-border bg-page px-5 py-3">
+    @include('ignite::partials.topbar')
+  </header>
 @endsection
 
 @section('ignite_flash')
@@ -19,28 +21,32 @@
 @endsection
 
 @section('content')
-  <h1>{{ $title }}</h1>
+  <section class="ig-card mb-6 bg-lightprimary shadow-none">
+    <h1 class="mb-1 text-2xl">Welcome back, {{ $user_name }}</h1>
+    <p class="m-0">Here is what is happening in your panel.</p>
+  </section>
 
-  <div class="grid gap-4 [grid-template-columns:repeat(auto-fit,minmax(12rem,1fr))]">
+  <div class="grid gap-5 [grid-template-columns:repeat(auto-fit,minmax(11rem,1fr))]">
     @forelse (card in cards)
-      <div class="rounded-lg border border-hairline bg-white p-4">
-        <p class="m-0 text-[#5b6070]">{{ $card.label }}</p>
-        <p class="mt-1 mb-0 text-[2rem] font-bold text-heading">{{ $card.value }}</p>
+      <div class="ig-card ig-tone-{{ $card.tone }} flex flex-col items-center gap-2 text-center shadow-none">
+        <i class="ti {{ $card.icon }} text-4xl"></i>
+        <p class="m-0 font-semibold">{{ $card.label }}</p>
+        <p class="m-0 text-2xl font-semibold">{{ $card.value }}</p>
       </div>
     @empty
-      <p class="text-[#5b6070]">No stats yet. A resource shows its cards here by implementing <code class="rounded bg-code-bg px-1.5 py-0.5 font-mono text-[13px] text-accent">widgets</code>.</p>
+      <p class="col-span-full">No stats yet. A resource shows its cards here by implementing <code>widgets</code>.</p>
     @endforelse
   </div>
 
   @foreach (table in tables)
-    <section class="mt-10">
-      <h2 class="mb-3">{{ $table.title }}</h2>
-      <div class="overflow-x-auto rounded-lg border border-hairline bg-white">
-        <table class="w-full border-collapse">
+    <section class="ig-card mt-8 p-0">
+      <h2 class="px-6 pt-6 pb-4">{{ $table.title }}</h2>
+      <div class="overflow-x-auto">
+        <table class="ig-table">
           <thead>
             <tr>
               @foreach (head in table.headers)
-                <th class="border-b border-hairline px-3 py-2.5 text-left align-top font-semibold text-heading">{{ $head.label }}</th>
+                <th>{{ $head.label }}</th>
               @endforeach
             </tr>
           </thead>
@@ -48,11 +54,11 @@
             @forelse (row in table.rows)
               <tr>
                 @foreach (cell in row.cells)
-                  <td class="border-b border-hairline px-3 py-2.5 text-left align-top">{{ $cell.text }}</td>
+                  <td>{{ $cell.text }}</td>
                 @endforeach
               </tr>
             @empty
-              <tr><td class="px-3 py-2.5 text-[#5b6070]">No records yet.</td></tr>
+              <tr><td class="text-text">No records yet.</td></tr>
             @endforelse
           </tbody>
         </table>

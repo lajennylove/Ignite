@@ -1,17 +1,21 @@
 @if (signed_in)
-<aside class="border-b border-hairline bg-header px-4 py-4 md:w-56 md:shrink-0 md:border-b-0 md:border-r">
-  <nav class="flex flex-col gap-3" aria-label="Main">
+<input id="ig-nav" type="checkbox" class="peer sr-only">
+<aside class="fixed inset-y-0 left-0 z-30 flex w-[270px] -translate-x-full flex-col overflow-y-auto border-r border-border bg-surface transition-transform duration-300 peer-checked:translate-x-0 xl:translate-x-0">
+  <a class="flex items-center gap-2.5 px-6 py-6 font-semibold text-heading no-underline" href="{{ $home_url }}">
+    <img src="{{ asset('ui::resources/images/ignite-mark.png') }}" alt="" class="h-9 w-auto">
+    <span class="text-xl">Ignite</span>
+  </a>
+  <nav class="flex flex-col gap-1 px-4 pb-6" aria-label="Main">
+    <p class="ig-caption mt-2">Menu</p>
     @foreach (group in nav)
-      <div class="flex flex-col gap-1">
-        @if (group.active)
-          <a class="rounded-md bg-white px-2.5 py-1.5 font-semibold text-heading no-underline shadow-sm" href="{{ $group.url }}" aria-current="page">{{ $group.title }}</a>
-        @else
-          <a class="rounded-md px-2.5 py-1.5 text-text no-underline hover:bg-white" href="{{ $group.url }}">{{ $group.title }}</a>
-        @endif
-        @if (group.has_add)
-          <a class="ml-2.5 border-l border-hairline py-0.5 pl-2.5 text-[14px] text-accent no-underline hover:underline" href="{{ $group.add_url }}">Add new</a>
-        @endif
-      </div>
+      @if (group.active)
+        <a class="ig-nav-link ig-nav-link-active" href="{{ $group.url }}" aria-current="page"><i class="ti {{ $group.icon }} text-lg"></i>{{ $group.title }}</a>
+      @else
+        <a class="ig-nav-link" href="{{ $group.url }}"><i class="ti {{ $group.icon }} text-lg"></i>{{ $group.title }}</a>
+      @endif
+      @if (group.has_add)
+        <a class="ig-nav-link py-1.5 pl-11 text-[13px]" href="{{ $group.add_url }}">Add new</a>
+      @endif
     @endforeach
   </nav>
 </aside>
