@@ -53,6 +53,11 @@ td form { display: inline; }
       <a href="{{ $link.url }}">{{ $link.title }}</a>
     @endforeach
   </nav>
+  @if (signed_in)
+    <form method="post" action="{{ $logout_url }}">
+      <button type="submit" class="secondary">Sign out</button>
+    </form>
+  @endif
 </header>
 <main>
   @include('ignite::partials.flash')

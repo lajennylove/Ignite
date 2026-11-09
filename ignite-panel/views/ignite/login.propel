@@ -1,0 +1,29 @@
+@extends('ignite::layouts.app')
+
+@section('title')
+  {{ $title }}
+@endsection
+
+@section('content')
+  <h1>{{ $title }}</h1>
+
+  <form class="form" method="post" action="{{ $action }}">
+    @if (has_error)
+      <p class="error" role="alert">{{ $error }}</p>
+    @endif
+
+    <div class="field">
+      <label for="email">Email</label>
+      <input id="email" name="email" type="email" value="{{ $email }}" autocomplete="username">
+    </div>
+
+    <div class="field">
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" autocomplete="current-password">
+    </div>
+
+    <div class="form-actions">
+      <button type="submit">Sign in</button>
+    </div>
+  </form>
+@endsection

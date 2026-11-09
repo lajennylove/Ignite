@@ -12,3 +12,15 @@ diesel = { version = "2", features = ["mysql", "r2d2", "chrono"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 form_urlencoded = "1"
+chrono = { version = "0.4", features = ["serde"] }
+diesel_migrations = "2"
+argon2 = "0.5"
+rand_core = { version = "0.6", features = ["getrandom"] }
+hmac = "0.12"
+sha2 = "0.10"
+base64 = "0.22"
+rpassword = "7"
+
+[[bin]]
+name = "ignite"
+path = "src/bin/ignite.rs"

@@ -4,10 +4,12 @@ use std::sync::Arc;
 
 use ignite_core::{build_pool, IgniteResource, Pool};
 use propel_rocket::register_namespace;
+use rocket::catchers;
 use rocket::fairing::AdHoc;
 
 use crate::erased::{Adapter, Erased};
 use crate::routes;
+use crate::session;
 
 /// The directory of the `ignite` view namespace, shipped with this crate.
 const VIEWS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/views/ignite");
@@ -20,6 +22,8 @@ pub(crate) struct Registry {
     /// The URL prefix, without a trailing slash, such as `/admin`.
     pub(crate) mount: String,
     pub(crate) resources: Vec<Arc<dyn Erased>>,
+    /// The key that signs the session and flash cookies.
+    pub(crate) secret: Vec<u8>,
 }
 
 impl Registry {
@@ -35,16 +39,18 @@ pub struct Ignite {
     pool: Pool,
     mount: String,
     resources: Vec<Arc<dyn Erased>>,
+    secret: Vec<u8>,
 }
 
 impl Ignite {
-    /// Reads `DATABASE_URL`, builds the connection pool and registers the
-    /// `ignite` view namespace.
+    /// Reads `DATABASE_URL` and `IGNITE_SECRET_KEY`, builds the connection pool
+    /// and registers the `ignite` view namespace.
     ///
     /// # Panics
     ///
-    /// Panics if `DATABASE_URL` is not set, or if the pool cannot connect.
-    /// Both are configuration errors that should stop the app at startup.
+    /// Panics if `DATABASE_URL` is not set, if the pool cannot connect, or if a
+    /// release build has no valid `IGNITE_SECRET_KEY`. These are configuration
+    /// errors that should stop the app at startup.
     // `new` reads the environment and can panic, so it is not a plain default.
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
@@ -57,6 +63,7 @@ impl Ignite {
             pool,
             mount: DEFAULT_MOUNT.to_string(),
             resources: Vec::new(),
+            secret: session::secret_from_env(),
         }
     }
 
@@ -89,15 +96,18 @@ impl Ignite {
             pool,
             mount,
             resources,
+            secret,
         } = self;
         AdHoc::on_ignite("Ignite", move |rocket| async move {
             let registry = Registry {
                 mount: mount.clone(),
                 resources,
+                secret,
             };
             rocket
                 .manage(pool)
                 .manage(registry)
+                .register("/", catchers![session::unauthorized])
                 .mount(mount, routes::all())
         })
     }

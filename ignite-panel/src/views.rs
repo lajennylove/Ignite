@@ -7,10 +7,12 @@ use serde_json::Value;
 
 use crate::ignite::Registry;
 
-/// The values every page shares: the navigation and the flash message.
+/// The values every page shares: the navigation, the sign-out link and the flash message.
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct Layout {
     pub(crate) home_url: String,
+    pub(crate) signed_in: bool,
+    pub(crate) logout_url: String,
     pub(crate) nav: Vec<NavLink>,
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
@@ -23,21 +25,41 @@ pub(crate) struct NavLink {
 }
 
 impl Layout {
-    pub(crate) fn new(registry: &Registry) -> Self {
-        Layout {
-            home_url: registry.mount.clone(),
-            nav: registry
+    /// The layout for a page. Signed-out pages show no navigation.
+    pub(crate) fn new(registry: &Registry, signed_in: bool, flash: Option<String>) -> Self {
+        let nav = if signed_in {
+            registry
                 .resources
                 .iter()
                 .map(|r| NavLink {
                     title: r.title(),
                     url: format!("{}/{}", registry.mount, r.slug()),
                 })
-                .collect(),
-            has_flash: false,
-            flash: String::new(),
+                .collect()
+        } else {
+            Vec::new()
+        };
+        Layout {
+            home_url: registry.mount.clone(),
+            signed_in,
+            logout_url: format!("{}/logout", registry.mount),
+            nav,
+            has_flash: flash.is_some(),
+            flash: flash.unwrap_or_default(),
         }
     }
+}
+
+/// The sign-in page.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct LoginPage {
+    #[serde(flatten)]
+    pub(crate) layout: Layout,
+    pub(crate) title: &'static str,
+    pub(crate) action: String,
+    pub(crate) email: String,
+    pub(crate) has_error: bool,
+    pub(crate) error: String,
 }
 
 /// The list view of a resource.

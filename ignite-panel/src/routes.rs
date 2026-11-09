@@ -1,13 +1,14 @@
 //! The admin routes. Each handler looks up the resource by its slug, runs the
-//! database work on a blocking thread, and renders a Propel view.
+//! database work on a blocking thread, and renders a Propel view. Every route
+//! except the sign-in and the sign-out needs a [`Session`].
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use ignite_core::{Conn, Direction, FieldErrors, FormInput, ListQuery, Pool};
 use propel_rocket::PropelView;
 use rocket::data::{Data, ToByteUnit};
-use rocket::http::Status;
+use rocket::http::{CookieJar, Status};
 use rocket::request::Request;
 use rocket::response::{self, Redirect, Responder};
 use rocket::{get, post, routes, Route, State};
@@ -15,8 +16,11 @@ use serde_json::Value;
 
 use crate::erased::Erased;
 use crate::ignite::Registry;
+use crate::session::{end_session, set_flash, start_session, take_flash, Session};
+use crate::users;
 use crate::views::{
-    cell_text, field_views, record_form, CellView, ColumnHead, FormPage, IndexPage, Layout, RowView,
+    cell_text, field_views, record_form, CellView, ColumnHead, FormPage, IndexPage, Layout,
+    LoginPage, RowView,
 };
 
 /// The largest form body the panel reads.
@@ -24,10 +28,21 @@ const MAX_FORM_BYTES: u64 = 64 * 1024;
 
 /// Every route the panel mounts.
 pub(crate) fn all() -> Vec<Route> {
-    routes![index, new_form, create, edit_form, update, destroy]
+    routes![
+        dashboard_redirect,
+        login_form,
+        login,
+        logout,
+        index,
+        new_form,
+        create,
+        edit_form,
+        update,
+        destroy
+    ]
 }
 
-/// What a write handler returns: a redirect on success, or the form again.
+/// What a write handler returns: a redirect on success, or a page again.
 enum Reply {
     Redirect(Box<Redirect>),
     Page(Status, PropelView),
@@ -42,6 +57,91 @@ impl<'r> Responder<'r, 'static> for Reply {
     }
 }
 
+/// The panel's root. It goes to the first resource until a dashboard exists.
+#[get("/")]
+fn dashboard_redirect(_session: Session, registry: &State<Registry>) -> Result<Redirect, Status> {
+    let first = registry.resources.first().ok_or(Status::NotFound)?;
+    Ok(Redirect::to(format!("{}/{}", registry.mount, first.slug())))
+}
+
+#[get("/login")]
+fn login_form(registry: &State<Registry>) -> PropelView {
+    PropelView::render("ignite::login", &login_page(registry, "", None))
+}
+
+fn login_page(registry: &Registry, email: &str, error: Option<&str>) -> LoginPage {
+    LoginPage {
+        layout: Layout::new(registry, false, None),
+        title: "Sign in",
+        action: format!("{}/login", registry.mount),
+        email: email.to_string(),
+        has_error: error.is_some(),
+        error: error.unwrap_or_default().to_string(),
+    }
+}
+
+#[post("/login", data = "<body>")]
+async fn login(
+    body: Data<'_>,
+    cookies: &CookieJar<'_>,
+    registry: &State<Registry>,
+    pool: &State<Pool>,
+) -> Result<Reply, Status> {
+    let form = read_form(body).await?;
+    let email = form.get("email").unwrap_or("").trim().to_string();
+    let password = form.get("password").unwrap_or("").to_string();
+
+    let lookup = email.clone();
+    let user_id = blocking(pool, move |conn| {
+        let user = users::find_by_email(conn, &lookup).map_err(db_status)?;
+        // Check a password even when there is no such user, so the response time
+        // does not show which emails are registered.
+        let matched = match &user {
+            Some(user) => users::verify_password(&user.password_hash, &password),
+            None => {
+                users::verify_password(dummy_hash(), &password);
+                false
+            }
+        };
+        Ok(user.filter(|_| matched).map(|u| u.id))
+    })
+    .await?;
+
+    match user_id {
+        Some(id) => {
+            start_session(cookies, &registry.secret, id);
+            Ok(Reply::Redirect(Box::new(Redirect::to(
+                registry.mount.clone(),
+            ))))
+        }
+        None => Ok(Reply::Page(
+            Status::UnprocessableEntity,
+            PropelView::render(
+                "ignite::login",
+                &login_page(
+                    registry,
+                    &email,
+                    Some("The email or password is incorrect."),
+                ),
+            ),
+        )),
+    }
+}
+
+/// A hash that matches no password, used to spend the same time on an unknown email.
+fn dummy_hash() -> &'static str {
+    static HASH: OnceLock<String> = OnceLock::new();
+    HASH.get_or_init(|| users::hash_password("not-a-real-password").expect("argon2 hashes"))
+}
+
+#[post("/logout")]
+fn logout(cookies: &CookieJar<'_>, registry: &State<Registry>) -> Redirect {
+    end_session(cookies);
+    Redirect::to(format!("{}/login", registry.mount))
+}
+
+// Rocket takes each query parameter as an argument, so the list has many.
+#[allow(clippy::too_many_arguments)]
 #[get("/<slug>?<q>&<sort>&<dir>&<page>")]
 async fn index(
     slug: &str,
@@ -49,12 +149,15 @@ async fn index(
     sort: Option<String>,
     dir: Option<String>,
     page: Option<String>,
+    _session: Session,
+    cookies: &CookieJar<'_>,
     registry: &State<Registry>,
     pool: &State<Pool>,
 ) -> Result<PropelView, Status> {
     let resource = registry.find(slug).ok_or(Status::NotFound)?;
     let columns = resource.columns();
     let index_url = format!("{}/{}", registry.mount, resource.slug());
+    let flash = take_flash(cookies, &registry.secret);
 
     let search = q.unwrap_or_default().trim().to_string();
     // Only a sortable column can be sorted by; anything else is ignored.
@@ -119,7 +222,7 @@ async fn index(
     };
     let sort_pair = sort.as_deref().map(|key| (key, dir_name));
     let page_view = IndexPage {
-        layout: Layout::new(registry),
+        layout: Layout::new(registry, true, flash),
         title: resource.title(),
         new_url: format!("{index_url}/new"),
         index_url: index_url.clone(),
@@ -139,11 +242,16 @@ async fn index(
 }
 
 #[get("/<slug>/new")]
-async fn new_form(slug: &str, registry: &State<Registry>) -> Result<PropelView, Status> {
+async fn new_form(
+    slug: &str,
+    _session: Session,
+    cookies: &CookieJar<'_>,
+    registry: &State<Registry>,
+) -> Result<PropelView, Status> {
     let resource = registry.find(slug).ok_or(Status::NotFound)?;
     let index_url = format!("{}/{}", registry.mount, resource.slug());
     let page = FormPage {
-        layout: Layout::new(registry),
+        layout: Layout::new(registry, true, take_flash(cookies, &registry.secret)),
         title: resource.title(),
         heading: format!("New {}", resource.title()),
         action: index_url.clone(),
@@ -162,6 +270,8 @@ async fn new_form(slug: &str, registry: &State<Registry>) -> Result<PropelView, 
 async fn create(
     slug: &str,
     body: Data<'_>,
+    _session: Session,
+    cookies: &CookieJar<'_>,
     registry: &State<Registry>,
     pool: &State<Pool>,
 ) -> Result<Reply, Status> {
@@ -177,7 +287,10 @@ async fn create(
     .await?;
 
     match outcome {
-        Ok(_) => Ok(Reply::Redirect(Box::new(Redirect::to(index_url)))),
+        Ok(_) => {
+            set_flash(cookies, &registry.secret, "Record created.");
+            Ok(Reply::Redirect(Box::new(Redirect::to(index_url))))
+        }
         Err(errors) => Ok(form_page(
             registry,
             &resource,
@@ -194,6 +307,8 @@ async fn create(
 async fn edit_form(
     slug: &str,
     id: &str,
+    _session: Session,
+    cookies: &CookieJar<'_>,
     registry: &State<Registry>,
     pool: &State<Pool>,
 ) -> Result<PropelView, Status> {
@@ -208,7 +323,7 @@ async fn edit_form(
     let form = record_form(resource.fields(), &record);
 
     let page = FormPage {
-        layout: Layout::new(registry),
+        layout: Layout::new(registry, true, take_flash(cookies, &registry.secret)),
         title: resource.title(),
         heading: format!("Edit #{id}"),
         action: format!("{index_url}/{id}"),
@@ -224,6 +339,8 @@ async fn update(
     slug: &str,
     id: &str,
     body: Data<'_>,
+    _session: Session,
+    cookies: &CookieJar<'_>,
     registry: &State<Registry>,
     pool: &State<Pool>,
 ) -> Result<Reply, Status> {
@@ -240,7 +357,10 @@ async fn update(
     .await?;
 
     match outcome {
-        Ok(_) => Ok(Reply::Redirect(Box::new(Redirect::to(index_url)))),
+        Ok(_) => {
+            set_flash(cookies, &registry.secret, "Changes saved.");
+            Ok(Reply::Redirect(Box::new(Redirect::to(index_url))))
+        }
         Err(errors) => Ok(form_page(
             registry,
             &resource,
@@ -257,6 +377,8 @@ async fn update(
 async fn destroy(
     slug: &str,
     id: &str,
+    _session: Session,
+    cookies: &CookieJar<'_>,
     registry: &State<Registry>,
     pool: &State<Pool>,
 ) -> Result<Redirect, Status> {
@@ -269,6 +391,7 @@ async fn destroy(
     if deleted == 0 {
         return Err(Status::NotFound);
     }
+    set_flash(cookies, &registry.secret, "Record deleted.");
     Ok(Redirect::to(index_url))
 }
 
@@ -284,7 +407,7 @@ fn form_page(
     submit_label: &'static str,
 ) -> Reply {
     let page = FormPage {
-        layout: Layout::new(registry),
+        layout: Layout::new(registry, true, None),
         title: resource.title(),
         heading,
         action,
