@@ -17,7 +17,7 @@
 @section('content')
   <div class="page-head">
     <h1>{{ $title }}</h1>
-    <a class="button" href="{{ $new_url }}">New {{ $title }}</a>
+    <a class="button" href="{{ $new_url }}">New {{ $singular }}</a>
   </div>
 
   <form class="search" method="get" action="{{ $index_url }}">

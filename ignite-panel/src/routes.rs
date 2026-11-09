@@ -241,6 +241,7 @@ async fn index(
     let page_view = IndexPage {
         layout: Layout::new(registry, true, flash),
         title: resource.title(),
+        singular: resource.singular(),
         new_url: format!("{index_url}/new"),
         index_url: index_url.clone(),
         search: search.clone(),
@@ -270,7 +271,8 @@ async fn new_form(
     let page = FormPage {
         layout: Layout::new(registry, true, take_flash(cookies, &registry.secret)),
         title: resource.title(),
-        heading: format!("New {}", resource.title()),
+        singular: resource.singular(),
+        heading: format!("New {}", resource.singular()),
         action: index_url.clone(),
         submit_label: "Create",
         back_url: index_url,
@@ -313,7 +315,7 @@ async fn create(
             &resource,
             &form,
             &errors,
-            format!("New {}", resource.title()),
+            format!("New {}", resource.singular()),
             index_url,
             "Create",
         )),
@@ -342,7 +344,8 @@ async fn edit_form(
     let page = FormPage {
         layout: Layout::new(registry, true, take_flash(cookies, &registry.secret)),
         title: resource.title(),
-        heading: format!("Edit #{id}"),
+        singular: resource.singular(),
+        heading: format!("Edit {} #{id}", resource.singular()),
         action: format!("{index_url}/{id}"),
         submit_label: "Save",
         back_url: index_url,
@@ -383,7 +386,7 @@ async fn update(
             &resource,
             &form,
             &errors,
-            format!("Edit #{id}"),
+            format!("Edit {} #{id}", resource.singular()),
             format!("{index_url}/{id}"),
             "Save",
         )),
@@ -426,6 +429,7 @@ fn form_page(
     let page = FormPage {
         layout: Layout::new(registry, true, None),
         title: resource.title(),
+        singular: resource.singular(),
         heading,
         action,
         submit_label,

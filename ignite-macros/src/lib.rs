@@ -21,6 +21,7 @@ use syn::{
 /// Struct attributes:
 /// - `#[ignite(table = widgets)]`: the Diesel table module, required. Its name is the URL slug.
 /// - `#[ignite(title = "Widgets")]`: the heading and nav label. Defaults to the table name, capitalized.
+/// - `#[ignite(singular = "Widget")]`: the name of one record, for "New Widget". Defaults to the title without a trailing `s`.
 ///
 /// Field attributes:
 /// - `primary_key`: the key column. Defaults to a field named `id`.
@@ -99,13 +100,15 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
         }
     };
 
-    let (table, title) = struct_attrs(input)?;
+    let (table, title, singular) = struct_attrs(input)?;
     let table_name = table
         .segments
         .last()
         .map(|s| s.ident.to_string())
         .unwrap_or_default();
     let title = title.unwrap_or_else(|| capitalize(&table_name));
+    let singular =
+        singular.unwrap_or_else(|| title.strip_suffix('s').unwrap_or(&title).to_string());
 
     let mut fields = Vec::new();
     for field in fields_data {
@@ -259,6 +262,7 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
 
             const SLUG: &'static str = #table_name;
             const TITLE: &'static str = #title;
+            const SINGULAR: &'static str = #singular;
 
             fn fields() -> &'static [::ignite_core::Field] {
                 &[#(#field_defs),*]
@@ -410,9 +414,10 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
 }
 
 /// Reads `#[ignite(table = ..., title = ...)]` on the struct.
-fn struct_attrs(input: &DeriveInput) -> syn::Result<(syn::Path, Option<String>)> {
+fn struct_attrs(input: &DeriveInput) -> syn::Result<(syn::Path, Option<String>, Option<String>)> {
     let mut table = None;
     let mut title = None;
+    let mut singular = None;
     for attr in input.attrs.iter().filter(|a| a.path().is_ident("ignite")) {
         attr.parse_nested_meta(|meta| {
             if meta.path.is_ident("table") {
@@ -421,9 +426,13 @@ fn struct_attrs(input: &DeriveInput) -> syn::Result<(syn::Path, Option<String>)>
             } else if meta.path.is_ident("title") {
                 title = Some(meta.value()?.parse::<LitStr>()?.value());
                 Ok(())
+            } else if meta.path.is_ident("singular") {
+                singular = Some(meta.value()?.parse::<LitStr>()?.value());
+                Ok(())
             } else {
-                Err(meta
-                    .error("unknown ignite attribute on the struct; expected `table` or `title`"))
+                Err(meta.error(
+                    "unknown ignite attribute on the struct; expected `table`, `title` or `singular`",
+                ))
             }
         })?;
     }
@@ -433,7 +442,7 @@ fn struct_attrs(input: &DeriveInput) -> syn::Result<(syn::Path, Option<String>)>
             "IgniteResource needs #[ignite(table = <diesel table module>)]",
         )
     })?;
-    Ok((table, title))
+    Ok((table, title, singular))
 }
 
 /// Reads the `#[ignite(...)]` attributes of a field and resolves its defaults.

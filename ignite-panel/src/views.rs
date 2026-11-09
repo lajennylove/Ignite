@@ -1,6 +1,7 @@
 //! The view models the Propel templates read. Propel expressions can only read
 //! a path, so every condition, URL and label is computed here first.
 
+use chrono::{DateTime, NaiveDate, NaiveDateTime};
 use ignite_core::{Field, FieldErrors, FieldKind, FormInput};
 use serde::Serialize;
 use serde_json::Value;
@@ -84,6 +85,7 @@ pub(crate) struct IndexPage {
     #[serde(flatten)]
     pub(crate) layout: Layout,
     pub(crate) title: &'static str,
+    pub(crate) singular: &'static str,
     pub(crate) index_url: String,
     pub(crate) new_url: String,
     pub(crate) search: String,
@@ -125,6 +127,7 @@ pub(crate) struct FormPage {
     #[serde(flatten)]
     pub(crate) layout: Layout,
     pub(crate) title: &'static str,
+    pub(crate) singular: &'static str,
     pub(crate) heading: String,
     pub(crate) action: String,
     pub(crate) submit_label: &'static str,
@@ -202,11 +205,12 @@ impl FieldView {
     }
 }
 
-/// Turns a JSON cell into the text a table shows.
+/// Turns a JSON cell into the text a table shows. A date or date-time in ISO
+/// form shows as a readable date. The form keeps the ISO value.
 pub(crate) fn cell_text(value: Option<&Value>) -> String {
     match value {
         None | Some(Value::Null) => String::new(),
-        Some(Value::String(s)) => s.clone(),
+        Some(Value::String(s)) => readable_date(s).unwrap_or_else(|| s.clone()),
         Some(Value::Bool(true)) => "Yes".to_string(),
         Some(Value::Bool(false)) => "No".to_string(),
         Some(other) => other.to_string(),
@@ -240,4 +244,51 @@ pub(crate) fn field_views(
         .iter()
         .map(|f| FieldView::new(f, form, errors))
         .collect()
+}
+
+/// Formats an ISO date ("2026-03-01"), a date-time ("2026-11-08T19:32:05") or an
+/// RFC 3339 timestamp as "1 Mar 2026" or "8 Nov 2026, 19:32". Other text returns `None`.
+fn readable_date(text: &str) -> Option<String> {
+    if let Ok(stamp) = DateTime::parse_from_rfc3339(text) {
+        return Some(stamp.naive_local().format("%-d %b %Y, %H:%M").to_string());
+    }
+    for format in ["%Y-%m-%dT%H:%M:%S%.f", "%Y-%m-%d %H:%M:%S%.f"] {
+        if let Ok(stamp) = NaiveDateTime::parse_from_str(text, format) {
+            return Some(stamp.format("%-d %b %Y, %H:%M").to_string());
+        }
+    }
+    NaiveDate::parse_from_str(text, "%Y-%m-%d")
+        .ok()
+        .map(|date| date.format("%-d %b %Y").to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn iso_dates_and_timestamps_show_readably() {
+        assert_eq!(cell_text(Some(&json!("2026-03-01"))), "1 Mar 2026");
+        assert_eq!(
+            cell_text(Some(&json!("2026-11-08T19:32:05"))),
+            "8 Nov 2026, 19:32"
+        );
+        assert_eq!(
+            cell_text(Some(&json!("2026-11-08 19:32:05"))),
+            "8 Nov 2026, 19:32"
+        );
+        assert_eq!(
+            cell_text(Some(&json!("2026-11-08T19:32:05Z"))),
+            "8 Nov 2026, 19:32"
+        );
+    }
+
+    #[test]
+    fn other_text_is_unchanged() {
+        assert_eq!(cell_text(Some(&json!("Anchor"))), "Anchor");
+        assert_eq!(cell_text(Some(&json!("2026-13-40"))), "2026-13-40");
+        assert_eq!(cell_text(Some(&json!(true))), "Yes");
+        assert_eq!(cell_text(None), "");
+    }
 }

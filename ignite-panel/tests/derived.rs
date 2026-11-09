@@ -334,3 +334,43 @@ fn a_duplicate_name_on_edit_is_a_field_error_not_a_server_error() {
         .unwrap()
         .contains("Name is already taken."));
 }
+
+#[test]
+fn headings_use_the_singular_name_and_dates_read_readably() {
+    let _guard = setup();
+    let client = signed_in();
+
+    let new_form = client
+        .get("/admin/gadgets/new")
+        .dispatch()
+        .into_string()
+        .unwrap();
+    assert!(new_form.contains("New Gadget"), "singular heading expected");
+    assert!(!new_form.contains("New Gadgets"));
+
+    let list = client
+        .get("/admin/gadgets")
+        .dispatch()
+        .into_string()
+        .unwrap();
+    assert!(list.contains("New Gadget"));
+    assert!(
+        list.contains("1 Mar 2026"),
+        "the due date shows readably in the list"
+    );
+    assert!(
+        !list.contains("2026-03-01"),
+        "the list does not show the ISO value"
+    );
+
+    let edit = client
+        .get("/admin/gadgets/2/edit")
+        .dispatch()
+        .into_string()
+        .unwrap();
+    assert!(
+        edit.contains(r#"value="2026-03-01""#),
+        "the form keeps the ISO value"
+    );
+    assert!(edit.contains("Edit Gadget #2"));
+}

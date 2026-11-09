@@ -13,6 +13,7 @@ use serde_json::Value;
 pub(crate) trait Erased: Send + Sync {
     fn slug(&self) -> &'static str;
     fn title(&self) -> &'static str;
+    fn singular(&self) -> &'static str;
     fn per_page(&self) -> i64;
     fn fields(&self) -> &'static [Field];
     fn columns(&self) -> &'static [Column];
@@ -53,6 +54,10 @@ impl<R: IgniteResource> Erased for Adapter<R> {
 
     fn title(&self) -> &'static str {
         R::TITLE
+    }
+
+    fn singular(&self) -> &'static str {
+        R::SINGULAR
     }
 
     fn per_page(&self) -> i64 {

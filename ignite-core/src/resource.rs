@@ -25,6 +25,8 @@ pub trait IgniteResource: Send + Sync + 'static {
     const SLUG: &'static str;
     /// Heading and navigation label: `"Users"`.
     const TITLE: &'static str;
+    /// The name of one record, for headings such as "New User" (added in v1).
+    const SINGULAR: &'static str = "Record";
     /// Rows per page on the list view.
     const PER_PAGE: i64 = 20;
 
