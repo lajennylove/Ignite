@@ -3,6 +3,8 @@ name = "ignite-panel"
 version = "0.0.0"
 edition = "2021"
 publish = false
+# Lets an app's build script read the views directory from DEP_IGNITE_PANEL_VIEWS_DIR.
+links = "ignite_panel"
 
 [dependencies]
 ignite-core = { path = "../ignite-core" }
