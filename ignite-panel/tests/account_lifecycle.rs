@@ -303,21 +303,24 @@ fn deleting_a_user_deletes_their_session_rows() {
     );
 }
 
+/// The migrations that ran before the account lifecycle migration.
+const BEFORE_LIFECYCLE: [&str; 7] = [
+    "20261108000000_create_users",
+    "20261108010000_create_sessions",
+    "20261108020000_create_login_throttles",
+    "20261110000000_add_user_theme",
+    "20261111000000_profile",
+    "20261112000000_login_throttles_window_index",
+    "20261113000000_roles_permissions",
+];
+
 #[test]
 fn the_migration_removes_session_rows_that_have_no_user_and_then_keeps_new_ones_out() {
     let _guard = reset();
     let mut conn = connection();
-    // Revert the password reset table, then the account lifecycle migration, so the test can
-    // leave an orphan row the way an old database has one.
-    let reset_table = ignite(&["migrate:rollback"], "");
-    assert_eq!(reset_table.status.code(), Some(0));
-    let rolled = ignite(&["migrate:rollback"], "");
-    assert_eq!(
-        rolled.status.code(),
-        Some(0),
-        "stderr: {}",
-        text(&rolled.stderr)
-    );
+    // Rewind to the state before the account lifecycle migration, so the test can leave an
+    // orphan row the way an old database has one.
+    common::rewind_to(&BEFORE_LIFECYCLE);
     sql_query(
         "INSERT INTO sessions (id, user_id, expires_at) VALUES ('orphan-session', 999999, NOW() + INTERVAL 1 DAY)",
     )

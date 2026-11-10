@@ -70,7 +70,11 @@ To see where the database is:
 ignite migrate:status
 ```
 
-lists each migration as `Applied` or `Pending`. To undo the most recent migration, run `ignite migrate:rollback`. It runs that migration's `down.sql` and reverts one step per run. It says so in its output, and changes nothing else.
+lists each migration as `Applied` or `Pending`.
+
+To undo the last batch, run `ignite migrate:rollback`. A batch is the set of migrations that one `ignite migrate` applied, so a run reverts all of them, last first, each with its `down.sql`. After a `migrate` that applied one migration, a rollback reverts that one. It is not one step per run: when a batch has several migrations, one run reverts all of them. It says so in its output, and changes nothing else.
+
+**After the move from Diesel.** The first `ignite migrate` that runs with Orbit records the migrations that Diesel had applied as one batch, without running them. A later `ignite migrate:rollback` then reverts that whole batch, which drops the panel's tables. Back up the database before you roll back past that batch.
 
 **If a migration fails.** MySQL and MariaDB commit each schema statement as it runs, and a failed migration does not roll back the statements before it. A failed `ignite migrate` can therefore leave the database part way through a migration. To recover:
 

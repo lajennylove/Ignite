@@ -3,8 +3,8 @@
 //! - `ignite migrate` runs the panel's pending migrations, and prints what it applied.
 //!   Run it as a deploy step, before the first start. The app never migrates on boot.
 //! - `ignite migrate:status` lists each migration as Applied or Pending.
-//! - `ignite migrate:rollback` reverts the most recently applied migration with its
-//!   `down.sql`. One step per run.
+//! - `ignite migrate:rollback` reverts the most recently applied batch, the migrations that
+//!   one `ignite migrate` applied, each with its `down.sql`, last first.
 //! - `ignite user create --email <email> [--name <name>]` creates a user. It does not
 //!   migrate: when migrations are pending it stops and says to run `ignite migrate`.
 //! - `ignite role create <name>` creates a role.
@@ -30,6 +30,8 @@ use std::process::exit;
 
 use diesel::mysql::MysqlConnection;
 use diesel::prelude::*;
+use orbit_orm::Database;
+use rocket::tokio::runtime::Runtime;
 
 use crate::authz::{self, AuthzError};
 use crate::{migrate, migration_status as status, pending_migrations, rollback, users};
@@ -50,7 +52,8 @@ const USAGE: &str = "usage:
 
 `migrate` runs the panel's pending migrations. Run it before the first start.
 `migrate:status` lists each migration as Applied or Pending. `migrate:rollback`
-reverts the most recently applied migration, one step per run.
+reverts the last batch: every migration that the last `migrate` applied, last first.
+It is not one step: after a `migrate` that applied three migrations, it reverts all three.
 `user create` reads DATABASE_URL and asks for the password without echoing it, or
 reads it from standard input when standard input is not a terminal or with
 --password-stdin. It does not migrate; run `ignite migrate` first.
@@ -100,11 +103,11 @@ pub fn main() {
 
 /// Connects with `DATABASE_URL` and runs the pending migrations. Returns the exit code.
 fn migrate_database() -> i32 {
-    let mut conn = match connect() {
-        Ok(conn) => conn,
+    let (runtime, db) = match connect_orbit() {
+        Ok(connection) => connection,
         Err(code) => return code,
     };
-    match migrate(&mut conn) {
+    match runtime.block_on(migrate(&db)) {
         Ok(applied) if applied.is_empty() => {
             println!("Nothing to migrate.");
             0
@@ -124,11 +127,11 @@ fn migrate_database() -> i32 {
 
 /// Lists each migration as Applied or Pending. Returns the exit code.
 fn migration_status() -> i32 {
-    let mut conn = match connect() {
-        Ok(conn) => conn,
+    let (runtime, db) = match connect_orbit() {
+        Ok(connection) => connection,
         Err(code) => return code,
     };
-    match status(&mut conn) {
+    match runtime.block_on(status(&db)) {
         Ok(rows) => {
             for (name, applied) in rows {
                 let state = if applied { "Applied" } else { "Pending" };
@@ -143,20 +146,23 @@ fn migration_status() -> i32 {
     }
 }
 
-/// Reverts the most recently applied migration, one step. Returns the exit code.
+/// Reverts the most recently applied batch of migrations. Returns the exit code.
 fn rollback_migration() -> i32 {
-    let mut conn = match connect() {
-        Ok(conn) => conn,
+    let (runtime, db) = match connect_orbit() {
+        Ok(connection) => connection,
         Err(code) => return code,
     };
-    match rollback(&mut conn) {
-        Ok(Some(name)) => {
-            println!("Rolled back one migration: reverted {name}.");
-            println!("Run `ignite migrate:rollback` again to revert the next one.");
+    match runtime.block_on(rollback(&db)) {
+        Ok(names) if names.is_empty() => {
+            println!("Nothing to roll back.");
             0
         }
-        Ok(None) => {
-            println!("Nothing to roll back.");
+        Ok(names) => {
+            println!("Rolled back the last batch: {} migrations.", names.len());
+            for name in &names {
+                println!("reverted {name}.");
+            }
+            println!("Run `ignite migrate:rollback` again to revert the batch before it.");
             0
         }
         Err(error) => {
@@ -166,20 +172,59 @@ fn rollback_migration() -> i32 {
     }
 }
 
+/// Reads `DATABASE_URL`. Prints the problem and returns the exit code when it is not set.
+fn database_url() -> Result<String, i32> {
+    std::env::var("DATABASE_URL").map_err(|_| {
+        eprintln!("DATABASE_URL must be set.");
+        1
+    })
+}
+
 /// Connects to the database named by `DATABASE_URL`. Prints the problem and returns the
 /// exit code when it cannot.
 fn connect() -> Result<MysqlConnection, i32> {
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(url) => url,
-        Err(_) => {
-            eprintln!("DATABASE_URL must be set.");
-            return Err(1);
-        }
-    };
+    let url = database_url()?;
     MysqlConnection::establish(&url).map_err(|error| {
         eprintln!("Could not connect to DATABASE_URL: {error}");
         1
     })
+}
+
+/// Connects Orbit to `DATABASE_URL`. The commands drive it with `block_on` on the runtime that
+/// is returned, so the CLI stays synchronous. Prints the problem and returns the exit code when
+/// it cannot connect.
+fn connect_orbit() -> Result<(Runtime, Database), i32> {
+    let url = database_url()?;
+    let runtime = Runtime::new().map_err(|error| {
+        eprintln!("Could not start the runtime: {error}");
+        1
+    })?;
+    let db = runtime.block_on(Database::connect(&url)).map_err(|error| {
+        eprintln!("Could not connect to DATABASE_URL: {error}");
+        1
+    })?;
+    Ok((runtime, db))
+}
+
+/// Refuses to continue when migrations are pending, and says to run `ignite migrate`. It reads
+/// only. On failure it prints the problem and returns the exit code.
+fn check_migrated() -> Result<(), i32> {
+    let (runtime, db) = connect_orbit()?;
+    match runtime.block_on(pending_migrations(&db)) {
+        Ok(pending) if pending.is_empty() => Ok(()),
+        Ok(pending) => {
+            eprintln!(
+                "The panel's tables are not set up: these migrations have not run: {}. \
+                 Run `ignite migrate` first.",
+                pending.join(", ")
+            );
+            Err(1)
+        }
+        Err(error) => {
+            eprintln!("Could not read the migration table: {error}");
+            Err(1)
+        }
+    }
 }
 
 /// Parses `--email` and `--name`, then creates the user. Returns the exit code.
@@ -220,26 +265,14 @@ fn create_user(args: &[String]) -> i32 {
     };
     let name = name.unwrap_or_default();
 
+    // The command never migrates. A schema that is behind is refused, with the fix.
+    if let Err(code) = check_migrated() {
+        return code;
+    }
     let mut conn = match connect() {
         Ok(conn) => conn,
         Err(code) => return code,
     };
-    // The command never migrates. A schema that is behind is refused, with the fix.
-    match pending_migrations(&mut conn) {
-        Ok(pending) if pending.is_empty() => {}
-        Ok(pending) => {
-            eprintln!(
-                "The panel's tables are not set up: these migrations have not run: {}. \
-                 Run `ignite migrate` first.",
-                pending.join(", ")
-            );
-            return 1;
-        }
-        Err(error) => {
-            eprintln!("Could not read the migration table: {error}");
-            return 1;
-        }
-    }
     // Everything that can fail without a password runs before the prompt.
     match users::find_by_email(&mut conn, &email) {
         Ok(Some(_)) => {
@@ -324,22 +357,8 @@ fn check_length(password: String) -> Result<String, String> {
 /// Connects and checks that every migration has run, which needs `ignite migrate` first when
 /// one is pending. On failure it prints the problem and returns the exit code.
 fn connect_with_roles() -> Result<MysqlConnection, i32> {
-    let mut conn = connect()?;
-    match pending_migrations(&mut conn) {
-        Ok(pending) if pending.is_empty() => Ok(conn),
-        Ok(pending) => {
-            eprintln!(
-                "The panel's tables are not set up: these migrations have not run: {}. \
-                 Run `ignite migrate` first.",
-                pending.join(", ")
-            );
-            Err(1)
-        }
-        Err(error) => {
-            eprintln!("Could not read the migration table: {error}");
-            Err(1)
-        }
-    }
+    check_migrated()?;
+    connect()
 }
 
 /// Prints the outcome of a role command: the message on success, or the problem and exit 1.

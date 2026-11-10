@@ -15,7 +15,7 @@ use ignite_core::{
     LatestRecords, ListQuery, Page, StatWidget,
 };
 use ignite_panel::authz::{self, SUPER_ADMIN};
-use ignite_panel::{run_migrations, users, Ignite, RecordingMailer};
+use ignite_panel::{rollback, run_migrations, users, Ignite, RecordingMailer};
 use rocket::http::{ContentType, Status};
 use rocket::local::blocking::Client;
 use serde::Serialize;
@@ -209,6 +209,39 @@ impl IgniteResource for Widgets {
     }
 }
 
+/// Runs `future` to completion on a runtime of its own, for the Orbit calls the tests make.
+pub fn block_on<F: std::future::Future>(future: F) -> F::Output {
+    rocket::tokio::runtime::Runtime::new()
+        .expect("a runtime for the test")
+        .block_on(future)
+}
+
+/// Puts the test database into the state where exactly `applied` are applied: every panel
+/// migration is rolled back, the `applied` ones run their `up.sql` through Diesel, and Orbit's
+/// table records them as one batch. The remaining migrations are left for `migrate` to run.
+/// Hold the guard from `reset` while calling this.
+pub fn rewind_to(applied: &[&str]) {
+    use diesel::connection::SimpleConnection;
+    block_on(async {
+        let db = orbit_orm::Database::connect(&database_url())
+            .await
+            .expect("connect to ignite_test through Orbit");
+        while !rollback(&db).await.expect("rollback").is_empty() {}
+        db.close().await;
+    });
+    let root = concat!(env!("CARGO_MANIFEST_DIR"), "/migrations/");
+    let mut conn = MysqlConnection::establish(&database_url()).expect("connect to ignite_test");
+    for name in applied {
+        let up = std::fs::read_to_string(format!("{root}{name}/up.sql")).expect("read up.sql");
+        conn.batch_execute(&up).expect("apply up.sql");
+        sql_query(format!(
+            "INSERT INTO migrations (migration, batch) VALUES ('{name}', 1)"
+        ))
+        .execute(&mut conn)
+        .expect("record the migration");
+    }
+}
+
 pub fn database_url() -> String {
     std::env::var("DATABASE_URL")
         .expect("set DATABASE_URL to the test database, such as mysql://user@localhost/ignite_test")
@@ -231,7 +264,15 @@ pub fn reset() -> MutexGuard<'static, ()> {
         .execute(&mut conn)
         .unwrap();
 
-    run_migrations(&mut conn).expect("migrations");
+    // Roll the panel back to nothing, then apply every migration: one batch, the same each time.
+    block_on(async {
+        let db = orbit_orm::Database::connect(&database_url())
+            .await
+            .expect("connect to ignite_test through Orbit");
+        while !rollback(&db).await.expect("rollback").is_empty() {}
+        run_migrations(&db).await.expect("migrations");
+        db.close().await;
+    });
     sql_query("DELETE FROM users").execute(&mut conn).unwrap();
     sql_query("DELETE FROM sessions")
         .execute(&mut conn)

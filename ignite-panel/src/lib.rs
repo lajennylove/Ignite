@@ -25,14 +25,10 @@ mod throttle;
 pub mod users;
 mod views;
 
-use std::error::Error;
+use std::collections::HashSet;
 
-use diesel::migration::MigrationSource;
-use diesel::mysql::{Mysql, MysqlConnection};
-use diesel::prelude::*;
-use diesel::sql_query;
-use diesel::sql_types::{BigInt, Text};
-use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
+use orbit_orm::__sqlx as sqlx;
+use orbit_orm::{Database, Error as OrbitError, Migrator};
 
 pub use csrf::{CsrfForm, CsrfToken};
 pub use embedded::EmbeddedViews;
@@ -56,38 +52,53 @@ pub fn load_env() {
     }
 }
 
-/// The panel's migrations, embedded in the crate.
-const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations");
+/// The panel's migrations, embedded in the crate at build time. Each name is a folder in
+/// `migrations/`. A new migration is added here, in order, as well as in that folder: Orbit
+/// embeds the files by name, and a missing folder is a build error.
+fn migrator() -> Result<Migrator, OrbitError> {
+    orbit_orm::migrations!(
+        "migrations",
+        "20261108000000_create_users",
+        "20261108010000_create_sessions",
+        "20261108020000_create_login_throttles",
+        "20261110000000_add_user_theme",
+        "20261111000000_profile",
+        "20261112000000_login_throttles_window_index",
+        "20261113000000_roles_permissions",
+        "20261114000000_account_lifecycle",
+        "20261115000000_password_reset_tokens",
+    )
+}
+
+/// The table that Diesel recorded the applied migrations in, before the panel moved to Orbit.
+const DIESEL_TABLE: &str = "__diesel_schema_migrations";
+
+/// The table that Orbit records the applied migrations in.
+const ORBIT_TABLE: &str = "migrations";
 
 /// Runs the panel's pending migrations and returns the names of the ones it applied, such
 /// as `20261112000000_login_throttles_window_index`. Running them again applies nothing.
 /// `ignite migrate` calls this. An app that prefers to migrate itself can call it too.
-pub fn migrate(conn: &mut MysqlConnection) -> Result<Vec<String>, Box<dyn Error + Send + Sync>> {
-    let names: Vec<(String, String)> = migration_names()?;
-    let applied = conn.run_pending_migrations(MIGRATIONS)?;
-    Ok(applied
-        .iter()
-        .map(|version| {
-            names
-                .iter()
-                .find(|(v, _)| v == &version.to_string())
-                .map_or_else(|| version.to_string(), |(_, name)| name.clone())
-        })
-        .collect())
+///
+/// The first time a database is migrated with Orbit, the migrations that Diesel had applied
+/// are recorded as applied first, without running them, so nothing runs twice.
+pub async fn migrate(db: &Database) -> Result<Vec<String>, OrbitError> {
+    let migrator = migrator()?;
+    import_diesel_history(db, &migrator).await?;
+    migrator.run(db).await
 }
 
 /// Runs the panel's pending migrations. Use [`migrate`] to learn what was applied.
-pub fn run_migrations(conn: &mut MysqlConnection) -> Result<(), Box<dyn Error + Send + Sync>> {
-    migrate(conn).map(|_| ())
+pub async fn run_migrations(db: &Database) -> Result<(), OrbitError> {
+    migrate(db).await.map(|_| ())
 }
 
 /// The names of the panel's migrations that have not run yet, in order. It reads the
 /// migration table and changes nothing, so it is safe to call before the database is
 /// migrated, and `ignite user create` uses it to refuse to run on an old schema.
-pub fn pending_migrations(
-    conn: &mut MysqlConnection,
-) -> Result<Vec<String>, Box<dyn Error + Send + Sync>> {
-    Ok(migration_status(conn)?
+pub async fn pending_migrations(db: &Database) -> Result<Vec<String>, OrbitError> {
+    Ok(migration_status(db)
+        .await?
         .into_iter()
         .filter(|(_, applied)| !applied)
         .map(|(name, _)| name)
@@ -96,94 +107,68 @@ pub fn pending_migrations(
 
 /// Every migration of the panel, in order, as `(name, applied)`. Reads only. `ignite
 /// migrate:status` prints it.
-pub fn migration_status(
-    conn: &mut MysqlConnection,
-) -> Result<Vec<(String, bool)>, Box<dyn Error + Send + Sync>> {
-    let applied = applied_versions(conn)?;
-    Ok(migration_names()?
-        .into_iter()
-        .map(|(version, name)| {
-            let is_applied = applied.contains(&version);
-            (name, is_applied)
-        })
+pub async fn migration_status(db: &Database) -> Result<Vec<(String, bool)>, OrbitError> {
+    let migrator = migrator()?;
+    let applied = applied_names(db, &migrator).await?;
+    Ok(migrator
+        .migrations()
+        .iter()
+        .map(|migration| (migration.name.clone(), applied.contains(&migration.name)))
         .collect())
 }
 
-/// Reverts the most recently applied migration of the panel, by running its `down.sql`,
-/// and returns its name. Only one step is reverted per call. Returns `None` when no
-/// migration of the panel is applied. Other migrations in the same database are not touched.
-pub fn rollback(
-    conn: &mut MysqlConnection,
-) -> Result<Option<String>, Box<dyn Error + Send + Sync>> {
-    let applied = applied_versions(conn)?;
-    let names = migration_names()?;
-    let Some((version, name)) = names
-        .iter()
-        .rev()
-        .find(|(version, _)| applied.contains(version))
-    else {
-        return Ok(None);
-    };
-    let migrations = <EmbeddedMigrations as MigrationSource<Mysql>>::migrations(&MIGRATIONS)?;
-    let migration = migrations
-        .iter()
-        .find(|migration| migration.name().version().to_string() == *version)
-        .ok_or_else(|| format!("migration {name} is recorded as applied but is not embedded"))?;
-    conn.revert_migration(migration.as_ref())?;
-    Ok(Some(name.clone()))
+/// Reverts the most recently applied batch of the panel's migrations, running each `down.sql`
+/// in reverse order, and returns the names it reverted, last first. A batch is the set of
+/// migrations that one `migrate` run applied. Other migrations in the same database are not
+/// touched. Returns nothing when no migration of the panel is applied.
+pub async fn rollback(db: &Database) -> Result<Vec<String>, OrbitError> {
+    let migrator = migrator()?;
+    import_diesel_history(db, &migrator).await?;
+    migrator.rollback(db).await
 }
 
-/// The versions the migration table records as applied. Empty when there is no table.
-fn applied_versions(
-    conn: &mut MysqlConnection,
-) -> Result<Vec<String>, Box<dyn Error + Send + Sync>> {
-    if !table_exists(conn, "__diesel_schema_migrations")? {
-        return Ok(Vec::new());
+/// Records the migrations that Diesel applied, once. It runs only while Orbit's table does not
+/// exist yet. After that, a rollback may revert the imported batch, and importing again would
+/// record those migrations as applied without running them.
+async fn import_diesel_history(db: &Database, migrator: &Migrator) -> Result<(), OrbitError> {
+    if !table_exists(db, ORBIT_TABLE).await? {
+        migrator.import_diesel_history(db).await?;
     }
-    Ok(sql_query("SELECT version FROM __diesel_schema_migrations")
-        .load::<VersionRow>(conn)?
-        .into_iter()
-        .map(|row| row.version)
-        .collect())
+    Ok(())
 }
 
-/// Every embedded migration as `(version, name)`, in version order, such as
-/// `("20261108000000", "20261108000000_create_users")`.
-fn migration_names() -> Result<Vec<(String, String)>, Box<dyn Error + Send + Sync>> {
-    let migrations = <EmbeddedMigrations as MigrationSource<Mysql>>::migrations(&MIGRATIONS)?;
-    let mut names: Vec<(String, String)> = migrations
+/// The names of the migrations that are applied. It reads only. Before Orbit has a table,
+/// the Diesel history stands in for it, as the import would record it.
+async fn applied_names(db: &Database, migrator: &Migrator) -> Result<HashSet<String>, OrbitError> {
+    if table_exists(db, ORBIT_TABLE).await? {
+        let names: Vec<String> = sqlx::query_scalar("SELECT migration FROM migrations")
+            .fetch_all(db.pool())
+            .await?;
+        return Ok(names.into_iter().collect());
+    }
+    if !table_exists(db, DIESEL_TABLE).await? {
+        return Ok(HashSet::new());
+    }
+    let versions: Vec<String> =
+        sqlx::query_scalar("SELECT version FROM __diesel_schema_migrations")
+            .fetch_all(db.pool())
+            .await?;
+    Ok(migrator
+        .migrations()
         .iter()
-        .map(|migration| {
-            let name = migration.name();
-            (name.version().to_string(), name.to_string())
-        })
-        .collect();
-    names.sort();
-    Ok(names)
-}
-
-#[derive(QueryableByName)]
-struct VersionRow {
-    #[diesel(sql_type = Text)]
-    version: String,
-}
-
-#[derive(QueryableByName)]
-struct CountRow {
-    #[diesel(sql_type = BigInt)]
-    count: i64,
+        .filter(|migration| versions.iter().any(|v| v == &migration.name[..14]))
+        .map(|migration| migration.name.clone())
+        .collect())
 }
 
 /// Whether a table of the connected database exists. Reads `information_schema` only.
-fn table_exists(
-    conn: &mut MysqlConnection,
-    table: &str,
-) -> Result<bool, Box<dyn Error + Send + Sync>> {
-    let rows: Vec<CountRow> = sql_query(
-        "SELECT COUNT(*) AS count FROM information_schema.tables \
+async fn table_exists(db: &Database, table: &str) -> Result<bool, OrbitError> {
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM information_schema.tables \
          WHERE table_schema = DATABASE() AND table_name = ?",
     )
-    .bind::<Text, _>(table)
-    .load(conn)?;
-    Ok(rows.first().is_some_and(|row| row.count > 0))
+    .bind(table)
+    .fetch_one(db.pool())
+    .await?;
+    Ok(count > 0)
 }
