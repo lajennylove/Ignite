@@ -151,9 +151,10 @@ impl Ignite {
 
     /// Paths the app's CSRF guard (`CsrfForm`) does not check, such as a payment
     /// webhook that the provider posts to. A path ends with `/*` to match everything
-    /// under it. The panel's own routes are always checked.
+    /// under it. The panel's own routes are always checked. Each call adds to the
+    /// list; a later call does not replace an earlier one.
     pub fn csrf_exempt(mut self, paths: &[&str]) -> Self {
-        self.csrf_exempt = paths.iter().map(|p| p.to_string()).collect();
+        self.csrf_exempt.extend(paths.iter().map(|p| p.to_string()));
         self
     }
 
