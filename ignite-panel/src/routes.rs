@@ -463,7 +463,12 @@ async fn profile_form(
     pool: &State<Pool>,
 ) -> Result<PropelView, Status> {
     let row = load_user(pool, session.user_id()).await?;
-    let values = profile::form_values(&row.name, &row.email, row.profile.as_deref());
+    let values = profile::form_values(
+        &profile::profile_fields(registry),
+        &row.name,
+        &row.email,
+        row.profile.as_deref(),
+    );
     Ok(render_profile(
         registry,
         &session,
@@ -486,7 +491,8 @@ async fn save_profile(
     let form = read_form(body).await?;
     check_csrf(cookies, &registry.secret, form.get("_token"))?;
     let fields = profile::profile_fields(registry);
-    let saved = match profile::validate(&fields, &form) {
+    let row = load_user(pool, session.user_id()).await?;
+    let saved = match profile::validate(&fields, &form, row.profile.as_deref()) {
         Ok(saved) => saved,
         Err(errors) => {
             return Ok(Reply::Page(
@@ -561,7 +567,12 @@ async fn change_password(
     })
     .await?;
     if let Some(seconds) = waiting {
-        let values = profile::form_values(&row.name, &row.email, row.profile.as_deref());
+        let values = profile::form_values(
+            &profile::profile_fields(registry),
+            &row.name,
+            &row.email,
+            row.profile.as_deref(),
+        );
         let mut errors = FieldErrors::new();
         errors.insert(
             "current_password",
@@ -591,7 +602,12 @@ async fn change_password(
     }
     let errors = profile::password_errors(current_ok, &new, confirm);
     if !errors.is_empty() {
-        let values = profile::form_values(&row.name, &row.email, row.profile.as_deref());
+        let values = profile::form_values(
+            &profile::profile_fields(registry),
+            &row.name,
+            &row.email,
+            row.profile.as_deref(),
+        );
         return Ok(Reply::Page(
             Status::UnprocessableEntity,
             render_profile(

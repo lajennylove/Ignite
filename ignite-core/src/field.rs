@@ -1,5 +1,9 @@
 //! Form fields and table columns, as the panel renders them.
 
+use std::str::FromStr;
+
+use chrono::NaiveDate;
+
 use crate::form::{FieldErrors, FormInput};
 
 /// The kind of input a form field renders as, and how its value is read.
@@ -47,6 +51,34 @@ impl Field {
             Some(value) if !value.is_empty() => Some(value),
             _ => {
                 errors.insert(self.name, format!("{} is required.", self.label));
+                None
+            }
+        }
+    }
+
+    /// Parses `text` as a whole number of type `T`. If it does not parse, records
+    /// "<label> must be a whole number." in `errors` and returns `None`. Resources and
+    /// profile fields both check numbers this way.
+    pub fn check_whole_number<T: FromStr>(&self, text: &str, errors: &mut FieldErrors) -> Option<T> {
+        match text.parse::<T>() {
+            Ok(value) => Some(value),
+            Err(_) => {
+                errors.insert(self.name, format!("{} must be a whole number.", self.label));
+                None
+            }
+        }
+    }
+
+    /// Parses `text` as a `YYYY-MM-DD` date. If it does not parse, records
+    /// "<label> must be a date, as YYYY-MM-DD." in `errors` and returns `None`.
+    pub fn check_date(&self, text: &str, errors: &mut FieldErrors) -> Option<NaiveDate> {
+        match NaiveDate::parse_from_str(text, "%Y-%m-%d") {
+            Ok(value) => Some(value),
+            Err(_) => {
+                errors.insert(
+                    self.name,
+                    format!("{} must be a date, as YYYY-MM-DD.", self.label),
+                );
                 None
             }
         }

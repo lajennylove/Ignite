@@ -738,29 +738,9 @@ fn validate_expr(field: &Field) -> TokenStream2 {
         Base::Bool => quote! { ::core::option::Option::Some(form.checkbox(#name)) },
         Base::Integer => {
             let ty = &field.inner;
-            let message = format!("{label} must be a whole number.");
-            quote! {
-                match text.parse::<#ty>() {
-                    Ok(value) => ::core::option::Option::Some(value),
-                    Err(_) => {
-                        errors.insert(#name, #message.to_string());
-                        ::core::option::Option::None
-                    }
-                }
-            }
+            quote! { field.check_whole_number::<#ty>(text, &mut errors) }
         }
-        Base::Date => {
-            let message = format!("{label} must be a date, as YYYY-MM-DD.");
-            quote! {
-                match ::chrono::NaiveDate::parse_from_str(text, "%Y-%m-%d") {
-                    Ok(value) => ::core::option::Option::Some(value),
-                    Err(_) => {
-                        errors.insert(#name, #message.to_string());
-                        ::core::option::Option::None
-                    }
-                }
-            }
-        }
+        Base::Date => quote! { field.check_date(text, &mut errors) },
     };
 
     // Booleans are never blank: an unticked checkbox is false.
@@ -772,8 +752,8 @@ fn validate_expr(field: &Field) -> TokenStream2 {
     // keeps the stored hash.
     quote! {
         let #ident = {
+            let field = ::ignite_core::Field { name: #name, label: #label, kind: #kind, required: #required };
             let present = if #required && (creating || !#is_password) {
-                let field = ::ignite_core::Field { name: #name, label: #label, kind: #kind, required: true };
                 field.check_required(form, &mut errors)
             } else {
                 form.get(#name)

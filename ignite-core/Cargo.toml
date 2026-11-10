@@ -9,6 +9,7 @@ diesel = { git = "https://github.com/lajennylove/diesel", rev = "a07c4b2c20a466e
 serde = { version = "1", features = ["derive"] }
 ignite-macros = { path = "../ignite-macros" }
 argon2 = "0.5"
+chrono = "0.4"
 rand_core = { version = "0.6", features = ["getrandom"] }
 
 [dev-dependencies]
