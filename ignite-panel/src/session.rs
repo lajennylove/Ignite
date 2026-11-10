@@ -314,25 +314,60 @@ impl<'r> FromRequest<'r> for AdminUser {
         };
         let pool = pool.clone();
         let lookup = sid.clone();
-        let user = rocket::tokio::task::spawn_blocking(move || {
-            let mut conn = pool.get().ok()?;
-            let user_id = sessions::user_for(&mut conn, &lookup).ok().flatten()?;
-            users::find_by_id(&mut conn, user_id).ok().flatten()
-        })
-        .await
-        .ok()
-        .flatten();
-        match user {
-            Some(user) => Outcome::Success(AdminUser {
+        let joined = rocket::tokio::task::spawn_blocking(move || lookup_user(&pool, &lookup)).await;
+        let found = match joined {
+            Ok(result) => classify(result),
+            Err(error) => classify::<users::User, _>(Err(error)),
+        };
+        match found {
+            Lookup::Unknown => Outcome::Error((Status::Unauthorized, ())),
+            // A database outage is not a sign-out, so it must not reach the 401 catcher,
+            // which redirects to the login page.
+            Lookup::Unavailable => Outcome::Error((Status::ServiceUnavailable, ())),
+            Lookup::Found(user) => Outcome::Success(AdminUser {
                 user_id: user.id,
                 name: user.name,
                 email: user.email,
                 theme: user.theme,
                 has_avatar: user.avatar_mime.is_some(),
             }),
-            None => Outcome::Error((Status::Unauthorized, ())),
         }
     }
+}
+
+/// What a session lookup found. `Unknown` is a missing or ended session (401, the
+/// login redirect). `Unavailable` is a database error (503): the user may still be
+/// signed in, so the panel must not send them to the login page.
+enum Lookup<T> {
+    Found(T),
+    Unknown,
+    Unavailable,
+}
+
+/// Sorts the result of a session lookup. A database error is logged here, with the
+/// error, so an outage shows in the server log and not as a sign-out.
+fn classify<T, E: std::fmt::Display>(result: Result<Option<T>, E>) -> Lookup<T> {
+    match result {
+        Ok(Some(user)) => Lookup::Found(user),
+        Ok(None) => Lookup::Unknown,
+        Err(error) => {
+            rocket::error!("ignite: session lookup failed: {error}");
+            Lookup::Unavailable
+        }
+    }
+}
+
+/// Reads the user of a session on a blocking thread. The error covers both a failed
+/// pool checkout and a failed query.
+fn lookup_user(
+    pool: &Pool,
+    sid: &str,
+) -> Result<Option<users::User>, Box<dyn std::error::Error + Send + Sync>> {
+    let mut conn = pool.get()?;
+    let Some(user_id) = sessions::user_for(&mut conn, sid)? else {
+        return Ok(None);
+    };
+    Ok(users::find_by_id(&mut conn, user_id)?)
 }
 
 /// Answers a request that failed the CSRF check: the form expired or its token did not match.
@@ -380,6 +415,30 @@ mod tests {
     use super::*;
 
     const KEY: &[u8] = b"0123456789abcdef0123456789abcdef";
+
+    #[test]
+    fn a_found_user_is_found() {
+        assert!(matches!(
+            classify(Ok::<_, String>(Some(7))),
+            Lookup::Found(7)
+        ));
+    }
+
+    #[test]
+    fn an_unknown_session_is_unknown_not_unavailable() {
+        assert!(matches!(
+            classify(Ok::<Option<i64>, String>(None)),
+            Lookup::Unknown
+        ));
+    }
+
+    #[test]
+    fn a_pool_or_query_error_is_unavailable_not_a_sign_out() {
+        // The pool and the query errors both reach `classify` as a boxed error, so one
+        // message stands for either.
+        let pool_error: Result<Option<i64>, String> = Err("connection timed out".to_string());
+        assert!(matches!(classify(pool_error), Lookup::Unavailable));
+    }
 
     #[test]
     fn a_sealed_payload_opens_with_its_key_and_kind() {
