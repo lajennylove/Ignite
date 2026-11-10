@@ -336,7 +336,7 @@ impl<'r> FromRequest<'r> for AdminUser {
 }
 
 /// What a session lookup found. `Unknown` is a missing or ended session (401, the
-/// login redirect). `Unavailable` is a database error (500, as Laravel's auth guard): the user may still be
+/// login redirect). `Unavailable` is a database error (500): the user may still be
 /// signed in, so the panel must not send them to the login page.
 enum Lookup<T> {
     Found(T),
