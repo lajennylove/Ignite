@@ -3,3 +3,6 @@
 
 # Internal notes (kept locally, not in the repository)
 /docs/
+
+# Local agent worktrees and Claude Code state (not part of the repository)
+/.claude/
