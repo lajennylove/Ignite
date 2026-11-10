@@ -976,9 +976,10 @@ dependencies = [
 
 [[package]]
 name = "ignite-core"
-version = "0.0.0"
+version = "0.2.0"
 dependencies = [
  "argon2",
+ "chrono",
  "diesel",
  "ignite-macros",
  "rand_core 0.6.4",
@@ -987,7 +988,7 @@ dependencies = [
 
 [[package]]
 name = "ignite-macros"
-version = "0.0.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "diesel",
@@ -1001,7 +1002,7 @@ dependencies = [
 
 [[package]]
 name = "ignite-panel"
-version = "0.0.0"
+version = "0.2.0"
 dependencies = [
  "argon2",
  "base64",

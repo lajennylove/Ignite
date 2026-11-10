@@ -11,9 +11,10 @@ pub type Conn = PooledConnection<ConnectionManager<MysqlConnection>>;
 
 /// Builds a pool for a `mysql://user:pass@host:port/db` URL.
 ///
-/// The pool does not open connections until the first borrow fails or
-/// succeeds, so an unreachable database surfaces on the first request, or
-/// here if `r2d2` can check the connection at build time.
+/// The builder uses r2d2's defaults: up to 10 connections, all opened before
+/// `build` returns, because the minimum idle count defaults to the maximum. So
+/// an unreachable database makes this return an error, after r2d2's 30-second
+/// connection timeout, rather than surfacing on the first request.
 pub fn build_pool(url: &str) -> Result<Pool, diesel::r2d2::PoolError> {
     let manager = ConnectionManager::<MysqlConnection>::new(url);
     R2d2Pool::builder().build(manager)

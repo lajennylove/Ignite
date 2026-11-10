@@ -751,7 +751,8 @@ async fn index(
         Direction::Asc
     };
     let page_no = page.and_then(|p| p.parse::<i64>().ok()).unwrap_or(1).max(1);
-    let per_page = resource.per_page();
+    // A resource that declares 0 rows per page would divide by zero below, so it shows 1.
+    let per_page = resource.per_page().max(1);
     let query = ListQuery {
         page: page_no,
         per_page,
