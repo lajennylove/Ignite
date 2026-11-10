@@ -14,6 +14,8 @@ mod csrf;
 mod embedded;
 mod erased;
 mod ignite;
+pub mod mail;
+mod password_reset;
 mod profile;
 mod proxy;
 mod routes;
@@ -36,6 +38,7 @@ pub use csrf::{CsrfForm, CsrfToken};
 pub use embedded::EmbeddedViews;
 pub use ignite::Ignite;
 pub use ignite_core;
+pub use mail::{EmailitMailer, MailError, Mailer, Message, NotConfigured, RecordingMailer};
 pub use session::AdminUser;
 
 /// Loads the `.env` file in the working directory into the process environment, without

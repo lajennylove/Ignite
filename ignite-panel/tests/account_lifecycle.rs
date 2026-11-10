@@ -307,7 +307,10 @@ fn deleting_a_user_deletes_their_session_rows() {
 fn the_migration_removes_session_rows_that_have_no_user_and_then_keeps_new_ones_out() {
     let _guard = reset();
     let mut conn = connection();
-    // Revert the migration, so the test can leave an orphan row the way an old database has one.
+    // Revert the password reset table, then the account lifecycle migration, so the test can
+    // leave an orphan row the way an old database has one.
+    let reset_table = ignite(&["migrate:rollback"], "");
+    assert_eq!(reset_table.status.code(), Some(0));
     let rolled = ignite(&["migrate:rollback"], "");
     assert_eq!(
         rolled.status.code(),

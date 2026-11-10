@@ -63,7 +63,7 @@ fn up() -> RawHtml<&'static str> {
 
 /// Every route the panel mounts under its prefix.
 pub(crate) fn all() -> Vec<Route> {
-    routes![
+    let mut all = routes![
         build_asset,
         dashboard,
         login_form,
@@ -83,11 +83,13 @@ pub(crate) fn all() -> Vec<Route> {
         edit_form,
         update,
         destroy
-    ]
+    ];
+    all.extend(crate::password_reset::all());
+    all
 }
 
 /// What a write handler returns: a redirect on success, or a page again.
-enum Reply {
+pub(crate) enum Reply {
     Redirect(Box<Redirect>),
     Page(Status, PropelView),
     /// A page refused because of too many attempts, with the seconds to wait.
@@ -229,6 +231,7 @@ fn login_page(
         flash: layout.flash,
         title: "Sign in",
         action: format!("{}/login", registry.mount),
+        forgot_url: format!("{}/password/forgot", registry.mount),
         email: email.to_string(),
         has_error: error.is_some(),
         error: error.unwrap_or_default().to_string(),
@@ -326,7 +329,7 @@ async fn login(
 /// when Rocket has no socket address for the request.
 ///
 /// This never calls `Request::client_ip`, which reads `X-Real-IP` from any client.
-struct ClientIp(Option<IpAddr>);
+pub(crate) struct ClientIp(pub(crate) Option<IpAddr>);
 
 #[rocket::async_trait]
 impl<'r> FromRequest<'r> for ClientIp {
@@ -1182,7 +1185,7 @@ fn authorize(
 }
 
 /// Runs `work` on a blocking thread with a connection from the pool.
-async fn blocking<T, F>(pool: &State<Pool>, work: F) -> Result<T, Status>
+pub(crate) async fn blocking<T, F>(pool: &State<Pool>, work: F) -> Result<T, Status>
 where
     T: Send + 'static,
     F: FnOnce(&mut Conn) -> Result<T, Status> + Send + 'static,
@@ -1201,7 +1204,7 @@ where
 
 /// Maps a database error to a status. A missing row is a 404; anything else is
 /// logged and answered with a 500.
-fn db_status(error: diesel::result::Error) -> Status {
+pub(crate) fn db_status(error: diesel::result::Error) -> Status {
     match error {
         diesel::result::Error::NotFound => Status::NotFound,
         other => {
@@ -1244,7 +1247,7 @@ fn list_url(base: &str, search: &str, sort: Option<(&str, &str)>, page: i64) -> 
 }
 
 /// Reads an urlencoded form body into a [`FormInput`].
-async fn read_form(data: Data<'_>) -> Result<FormInput, Status> {
+pub(crate) async fn read_form(data: Data<'_>) -> Result<FormInput, Status> {
     let body = data
         .open(MAX_FORM_BYTES.bytes())
         .into_string()

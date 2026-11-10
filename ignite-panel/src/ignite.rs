@@ -9,6 +9,7 @@ use rocket::fairing::{self, AdHoc, Fairing, Info, Kind};
 use rocket::{Build, Request, Response, Rocket};
 
 use crate::erased::{Adapter, Erased};
+use crate::mail::{Mailer, NotConfigured};
 use crate::proxy::TrustedProxies;
 use crate::routes;
 use crate::session;
@@ -21,6 +22,10 @@ pub const VIEWS_DIR_ENV: &str = "IGNITE_VIEWS_DIR";
 /// The environment variable that lists the proxies whose forwarded headers the panel
 /// believes, as IP addresses and CIDR ranges. See [`crate::proxy`].
 pub const TRUSTED_PROXIES_ENV: &str = "IGNITE_TRUSTED_PROXIES";
+
+/// The environment variable that holds the app's own URL, such as `https://app.example.test`.
+/// Password reset links are built from it. See [`crate::password_reset`].
+pub const APP_URL_ENV: &str = "IGNITE_APP_URL";
 
 /// The default URL prefix of the admin panel.
 const DEFAULT_MOUNT: &str = "/admin";
@@ -37,6 +42,7 @@ const RESERVED_SLUGS: &[&str] = &[
     "profile",
     "theme",
     "build",
+    "password",
 ];
 
 /// The panel's state, shared by every route. Rocket manages it as state.
@@ -52,6 +58,10 @@ pub(crate) struct Registry {
     pub(crate) csrf_exempt: Vec<String>,
     /// The proxies whose forwarded headers name the client (see `IGNITE_TRUSTED_PROXIES`).
     pub(crate) trusted_proxies: TrustedProxies,
+    /// Sends the panel's email, such as a password reset link. See [`Ignite::mailer`].
+    pub(crate) mailer: Arc<dyn Mailer>,
+    /// The app's own URL without a trailing slash, for the links in email (see `IGNITE_APP_URL`).
+    pub(crate) app_url: Option<String>,
 }
 
 impl Registry {
@@ -72,12 +82,14 @@ pub struct Ignite {
     views: Option<PathBuf>,
     csrf_exempt: Vec<String>,
     trusted_proxies: TrustedProxies,
+    mailer: Arc<dyn Mailer>,
+    app_url: Option<String>,
 }
 
 impl Ignite {
     /// Loads a `.env` file from the working directory, if there is one, then reads
-    /// `DATABASE_URL`, `IGNITE_SECRET_KEY`, `IGNITE_TRUSTED_PROXIES` and `IGNITE_VIEWS_DIR`
-    /// and builds the connection pool. Variables already set in the environment win
+    /// `DATABASE_URL`, `IGNITE_SECRET_KEY`, `IGNITE_TRUSTED_PROXIES`, `IGNITE_APP_URL` and
+    /// `IGNITE_VIEWS_DIR` and builds the connection pool. Variables already set in the environment win
     /// over the `.env` file, as in Laravel. The `ignite` view namespace is registered
     /// when the fairing is built.
     ///
@@ -86,8 +98,9 @@ impl Ignite {
     /// # Panics
     ///
     /// Panics if `DATABASE_URL` is not set, if the pool cannot connect, if
-    /// `IGNITE_TRUSTED_PROXIES` has an entry that is not an address or a range, or if a
-    /// release build has no valid `IGNITE_SECRET_KEY`. These are configuration errors
+    /// `IGNITE_TRUSTED_PROXIES` has an entry that is not an address or a range, if
+    /// `IGNITE_APP_URL` is not an `http://` or `https://` URL, or if a release build has no
+    /// valid `IGNITE_SECRET_KEY`. These are configuration errors
     /// that should stop the app at startup.
     // `new` reads the environment and can panic, so it is not a plain default.
     #[allow(clippy::new_without_default)]
@@ -106,6 +119,17 @@ impl Ignite {
             Err(_) => TrustedProxies::default(),
         };
 
+        let app_url = std::env::var(APP_URL_ENV)
+            .ok()
+            .map(|url| url.trim().trim_end_matches('/').to_string())
+            .filter(|url| !url.is_empty());
+        if let Some(url) = &app_url {
+            assert!(
+                url.starts_with("http://") || url.starts_with("https://"),
+                "{APP_URL_ENV} must start with http:// or https://"
+            );
+        }
+
         Ignite {
             pool,
             mount: DEFAULT_MOUNT.to_string(),
@@ -115,6 +139,8 @@ impl Ignite {
             views,
             csrf_exempt: Vec::new(),
             trusted_proxies,
+            mailer: Arc::new(NotConfigured),
+            app_url,
         }
     }
 
@@ -178,6 +204,14 @@ impl Ignite {
         self
     }
 
+    /// Sets the mailer the panel sends email with, such as [`EmailitMailer`](crate::EmailitMailer).
+    /// Without a call, the panel has [`NotConfigured`], which refuses to send and logs why, so
+    /// the password reset does not send anything until the app sets a mailer.
+    pub fn mailer(mut self, mailer: impl Mailer + 'static) -> Self {
+        self.mailer = Arc::new(mailer);
+        self
+    }
+
     /// Changes the URL prefix of the panel. The default is `/admin`.
     pub fn mount(mut self, path: &str) -> Self {
         self.mount = path.trim_end_matches('/').to_string();
@@ -199,6 +233,8 @@ impl Ignite {
             views,
             csrf_exempt,
             trusted_proxies,
+            mailer,
+            app_url,
         } = self;
         // The panel registers its own assets, so an app adds nothing for its styling.
         crate::assets::register(&mount);
@@ -214,6 +250,8 @@ impl Ignite {
                 secret,
                 csrf_exempt,
                 trusted_proxies,
+                mailer,
+                app_url,
             };
             rocket
                 .manage(pool)

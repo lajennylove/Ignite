@@ -15,7 +15,7 @@ use ignite_core::{
     LatestRecords, ListQuery, Page, StatWidget,
 };
 use ignite_panel::authz::{self, SUPER_ADMIN};
-use ignite_panel::{run_migrations, users, Ignite};
+use ignite_panel::{run_migrations, users, Ignite, RecordingMailer};
 use rocket::http::{ContentType, Status};
 use rocket::local::blocking::Client;
 use serde::Serialize;
@@ -239,6 +239,9 @@ pub fn reset() -> MutexGuard<'static, ()> {
     sql_query("DELETE FROM login_throttles")
         .execute(&mut conn)
         .unwrap();
+    sql_query("DELETE FROM password_reset_tokens")
+        .execute(&mut conn)
+        .unwrap();
     for table in ["role_user", "role_permission", "permissions", "roles"] {
         sql_query(format!("DELETE FROM {table}"))
             .execute(&mut conn)
@@ -281,6 +284,19 @@ pub fn client(mount: Option<&str>) -> Client {
 /// A client for the panel built on `rocket`, such as one with a TLS configuration.
 pub fn client_on(mount: Option<&str>, rocket: rocket::Rocket<rocket::Build>) -> Client {
     ensure_secret();
+    Client::tracked(rocket.attach(builder(mount).fairing())).expect("valid rocket")
+}
+
+/// A client for the panel whose mail goes to `mailer`. Keep a clone of the recorder to read
+/// the messages the panel sent.
+pub fn client_with_mailer(mount: Option<&str>, mailer: RecordingMailer) -> Client {
+    ensure_secret();
+    let ignite = builder(mount).mailer(mailer);
+    Client::tracked(rocket::build().attach(ignite.fairing())).expect("valid rocket")
+}
+
+/// The panel with the `Widgets` resource and the app's profile field, under `mount`.
+fn builder(mount: Option<&str>) -> Ignite {
     // An app's own profile field, declared the way the developer declares it.
     let mut ignite = Ignite::new()
         .resource::<Widgets>()
@@ -293,7 +309,7 @@ pub fn client_on(mount: Option<&str>, rocket: rocket::Rocket<rocket::Build>) -> 
     if let Some(mount) = mount {
         ignite = ignite.mount(mount);
     }
-    Client::tracked(rocket.attach(ignite.fairing())).expect("valid rocket")
+    ignite
 }
 
 /// The CSRF token of a client's browser session, read from its token cookie.

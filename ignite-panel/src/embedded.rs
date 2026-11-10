@@ -17,6 +17,7 @@ pub(crate) const VIEWS: &[(&str, &str)] = &[
         "dashboard",
         include_str!("../views/ignite/dashboard.propel"),
     ),
+    ("forgot", include_str!("../views/ignite/forgot.propel")),
     ("form", include_str!("../views/ignite/form.propel")),
     ("index", include_str!("../views/ignite/index.propel")),
     ("login", include_str!("../views/ignite/login.propel")),
@@ -37,6 +38,7 @@ pub(crate) const VIEWS: &[(&str, &str)] = &[
         include_str!("../views/ignite/partials/topbar.propel"),
     ),
     ("profile", include_str!("../views/ignite/profile.propel")),
+    ("reset", include_str!("../views/ignite/reset.propel")),
 ];
 
 impl Loader for EmbeddedViews {

@@ -22,9 +22,11 @@ fn main() {
         .asset_namespace("ui")
         .view("dashboard", "crate::views::DashboardPage")
         .view("form", "crate::views::FormPage")
+        .view("forgot", "crate::views::ForgotPage")
         .view("index", "crate::views::IndexPage")
         .view("login", "crate::views::LoginPage")
         .view("profile", "crate::views::ProfilePage")
+        .view("reset", "crate::views::ResetPage")
         .build();
 }
 
