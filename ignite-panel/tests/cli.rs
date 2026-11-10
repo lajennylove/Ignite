@@ -162,3 +162,30 @@ fn a_duplicate_email_is_refused_before_the_password_is_read() {
     assert_eq!(second.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&second.stderr).contains("already exists"));
 }
+
+#[test]
+fn migrate_needs_database_url() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ignite"))
+        .arg("migrate")
+        .env_remove("DATABASE_URL")
+        .current_dir(std::env::temp_dir())
+        .stdin(Stdio::null())
+        .output()
+        .expect("run the ignite binary");
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("DATABASE_URL must be set."));
+}
+
+#[test]
+fn an_unknown_command_prints_the_usage_and_exits_2() {
+    let output = Command::new(env!("CARGO_BIN_EXE_ignite"))
+        .arg("launch")
+        .stdin(Stdio::null())
+        .output()
+        .expect("run the ignite binary");
+
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("ignite migrate"), "stderr: {stderr}");
+}

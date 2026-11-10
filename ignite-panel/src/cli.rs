@@ -1,24 +1,33 @@
-//! The `ignite` command line: `ignite user create --email <email> [--name <name>]`.
+//! The `ignite` command line:
 //!
-//! The command checks `DATABASE_URL`, connects, runs the panel's migrations and
-//! checks for an existing user before it reads the password. Interactively the
-//! password is read from the terminal without echoing, and asked for twice. When
-//! standard input is not a terminal, or with `--password-stdin`, the password is
-//! the first line of standard input, so a script can pipe it in. There is no
-//! environment variable for the password. Apps call [`main`] from a small binary
-//! of their own, after loading `.env` the way the workspace's `ignite` binary does.
+//! - `ignite migrate` runs the panel's pending migrations, and prints what it applied.
+//!   Run it as a deploy step, before the first start. The app never migrates on boot.
+//! - `ignite user create --email <email> [--name <name>]` creates a user. It does not
+//!   migrate: when migrations are pending it stops and says to run `ignite migrate`.
+//!
+//! The user command checks `DATABASE_URL`, connects and checks for an existing user
+//! before it reads the password. Interactively the password is read from the terminal
+//! without echoing, and asked for twice. When standard input is not a terminal, or with
+//! `--password-stdin`, the password is the first line of standard input, so a script can
+//! pipe it in. There is no environment variable for the password. Apps call [`main`]
+//! from a small binary of their own, after loading `.env` the way the workspace's
+//! `ignite` binary does.
 
 use std::process::exit;
 
 use diesel::mysql::MysqlConnection;
 use diesel::prelude::*;
 
-use crate::{run_migrations, users};
+use crate::{migrate, pending_migrations, users};
 
-const USAGE: &str = "usage: ignite user create --email <email> [--name <name>] [--password-stdin]
+const USAGE: &str = "usage:
+  ignite migrate
+  ignite user create --email <email> [--name <name>] [--password-stdin]
 
-Reads DATABASE_URL. Asks for the password without echoing it, or reads it from
-standard input when standard input is not a terminal or with --password-stdin.";
+`migrate` runs the panel's pending migrations. Run it before the first start.
+`user create` reads DATABASE_URL and asks for the password without echoing it, or
+reads it from standard input when standard input is not a terminal or with
+--password-stdin. It does not migrate; run `ignite migrate` first.";
 
 /// The shortest password the CLI accepts.
 const MIN_PASSWORD_CHARS: usize = 8;
@@ -27,6 +36,7 @@ const MIN_PASSWORD_CHARS: usize = 8;
 pub fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let exit_code = match args.as_slice() {
+        [migrate] if migrate == "migrate" => migrate_database(),
         [user, create, rest @ ..] if user == "user" && create == "create" => create_user(rest),
         _ => {
             eprintln!("{USAGE}");
@@ -34,6 +44,46 @@ pub fn main() {
         }
     };
     exit(exit_code);
+}
+
+/// Connects with `DATABASE_URL` and runs the pending migrations. Returns the exit code.
+fn migrate_database() -> i32 {
+    let mut conn = match connect() {
+        Ok(conn) => conn,
+        Err(code) => return code,
+    };
+    match migrate(&mut conn) {
+        Ok(applied) if applied.is_empty() => {
+            println!("Nothing to migrate.");
+            0
+        }
+        Ok(applied) => {
+            for name in applied {
+                println!("Applied {name}");
+            }
+            0
+        }
+        Err(error) => {
+            eprintln!("Migration failed: {error}");
+            1
+        }
+    }
+}
+
+/// Connects to the database named by `DATABASE_URL`. Prints the problem and returns the
+/// exit code when it cannot.
+fn connect() -> Result<MysqlConnection, i32> {
+    let url = match std::env::var("DATABASE_URL") {
+        Ok(url) => url,
+        Err(_) => {
+            eprintln!("DATABASE_URL must be set.");
+            return Err(1);
+        }
+    };
+    MysqlConnection::establish(&url).map_err(|error| {
+        eprintln!("Could not connect to DATABASE_URL: {error}");
+        1
+    })
 }
 
 /// Parses `--email` and `--name`, then creates the user. Returns the exit code.
@@ -74,23 +124,25 @@ fn create_user(args: &[String]) -> i32 {
     };
     let name = name.unwrap_or_default();
 
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(url) => url,
-        Err(_) => {
-            eprintln!("DATABASE_URL must be set.");
-            return 1;
-        }
-    };
-    let mut conn = match MysqlConnection::establish(&url) {
+    let mut conn = match connect() {
         Ok(conn) => conn,
-        Err(error) => {
-            eprintln!("Could not connect to DATABASE_URL: {error}");
+        Err(code) => return code,
+    };
+    // The command never migrates. A schema that is behind is refused, with the fix.
+    match pending_migrations(&mut conn) {
+        Ok(pending) if pending.is_empty() => {}
+        Ok(pending) => {
+            eprintln!(
+                "The panel's tables are not set up: these migrations have not run: {}. \
+                 Run `ignite migrate` first.",
+                pending.join(", ")
+            );
             return 1;
         }
-    };
-    if let Err(error) = run_migrations(&mut conn) {
-        eprintln!("Could not run the panel's migrations: {error}");
-        return 1;
+        Err(error) => {
+            eprintln!("Could not read the migration table: {error}");
+            return 1;
+        }
     }
     // Everything that can fail without a password runs before the prompt.
     match users::find_by_email(&mut conn, &email) {
@@ -100,7 +152,7 @@ fn create_user(args: &[String]) -> i32 {
         }
         Ok(None) => {}
         Err(error) => {
-            eprintln!("Could not check for an existing user: {error}");
+            eprintln!("Could not check for an existing user: {error}. Run `ignite migrate` if the users table is missing.");
             return 1;
         }
     }

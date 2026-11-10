@@ -1,0 +1,156 @@
+//! Migrations are a deploy step: `ignite migrate` applies them, `ignite user create` refuses
+//! to run on an old schema, and the app never migrates on start. Each test takes the
+//! database lock through `reset`, and sets the migration back to pending when it is done.
+
+mod common;
+
+use std::process::{Command, Stdio};
+
+use common::{database_url, reset};
+use diesel::mysql::MysqlConnection;
+use diesel::prelude::*;
+use diesel::sql_query;
+use diesel::sql_types::BigInt;
+use rocket::local::blocking::Client;
+
+/// The latest migration, which adds the index on `login_throttles(window_start)`.
+const VERSION: &str = "20261112000000";
+const INDEX: &str = "login_throttles_window_start_index";
+
+#[derive(QueryableByName)]
+struct CountRow {
+    #[diesel(sql_type = BigInt)]
+    count: i64,
+}
+
+fn connection() -> MysqlConnection {
+    MysqlConnection::establish(&database_url()).expect("connect to ignite_test")
+}
+
+fn count(conn: &mut MysqlConnection, sql: &str) -> i64 {
+    sql_query(sql)
+        .get_result::<CountRow>(conn)
+        .expect("count query")
+        .count
+}
+
+fn version_recorded(conn: &mut MysqlConnection) -> bool {
+    count(
+        conn,
+        &format!(
+            "SELECT COUNT(*) AS count FROM __diesel_schema_migrations WHERE version = '{VERSION}'"
+        ),
+    ) > 0
+}
+
+fn index_exists(conn: &mut MysqlConnection) -> bool {
+    count(
+        conn,
+        &format!(
+            "SELECT COUNT(*) AS count FROM information_schema.statistics \
+             WHERE table_schema = DATABASE() AND table_name = 'login_throttles' AND index_name = '{INDEX}'"
+        ),
+    ) > 0
+}
+
+/// Makes the latest migration pending again: no index, and no record that it ran.
+fn make_latest_pending(conn: &mut MysqlConnection) {
+    sql_query(format!("DROP INDEX IF EXISTS {INDEX} ON login_throttles"))
+        .execute(conn)
+        .unwrap();
+    sql_query(format!(
+        "DELETE FROM __diesel_schema_migrations WHERE version = '{VERSION}'"
+    ))
+    .execute(conn)
+    .unwrap();
+}
+
+/// Runs the `ignite` binary with the test database and the given arguments.
+fn ignite(args: &[&str], stdin: &str) -> std::process::Output {
+    use std::io::Write;
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ignite"))
+        .args(args)
+        .env("DATABASE_URL", database_url())
+        .current_dir(std::env::temp_dir())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("run the ignite binary");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(stdin.as_bytes())
+        .unwrap();
+    child.wait_with_output().expect("wait for ignite")
+}
+
+#[test]
+fn ignite_migrate_applies_what_is_pending_and_then_nothing() {
+    let _guard = reset();
+    let mut conn = connection();
+    make_latest_pending(&mut conn);
+
+    let first = ignite(&["migrate"], "");
+    assert_eq!(
+        first.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let out = String::from_utf8_lossy(&first.stdout);
+    assert!(
+        out.contains(&format!("Applied {VERSION}_login_throttles_window_index")),
+        "stdout: {out}"
+    );
+    assert!(version_recorded(&mut conn));
+    assert!(index_exists(&mut conn));
+
+    let second = ignite(&["migrate"], "");
+    assert_eq!(second.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&second.stdout).contains("Nothing to migrate."));
+}
+
+#[test]
+fn user_create_refuses_on_a_pending_schema_and_does_not_migrate() {
+    let _guard = reset();
+    let mut conn = connection();
+    make_latest_pending(&mut conn);
+
+    let output = ignite(
+        &[
+            "user",
+            "create",
+            "--email",
+            "pending@example.test",
+            "--password-stdin",
+        ],
+        "a-long-password\n",
+    );
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("ignite migrate"), "stderr: {stderr}");
+    assert!(!version_recorded(&mut conn), "user create must not migrate");
+    assert!(!index_exists(&mut conn), "user create must not migrate");
+}
+
+#[test]
+fn the_app_does_not_migrate_when_it_starts() {
+    let _guard = reset();
+    let mut conn = connection();
+    make_latest_pending(&mut conn);
+
+    // Launching the client runs the panel's fairing, which is what an app does at start.
+    let _client = Client::tracked(
+        rocket::build().attach(
+            ignite_panel::Ignite::new()
+                .resource::<common::Widgets>()
+                .fairing(),
+        ),
+    )
+    .expect("valid rocket");
+
+    assert!(!version_recorded(&mut conn), "the fairing must not migrate");
+    assert!(!index_exists(&mut conn), "the fairing must not migrate");
+}
