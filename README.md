@@ -34,18 +34,22 @@ propel_runtime = { git = "https://github.com/lajennylove/Propel", tag = "v0.2.0"
 
 ## Configure
 
-Ignite reads its settings from the environment. When a `.env` file is in the working directory, it is loaded first. Variables already set in the environment win over the file, as in Laravel. Keep `.env` files and secrets out of git.
+Ignite reads its settings from the environment. When a `.env` file is in the working directory, it is loaded first. Variables already set in the environment win over the file, as in Laravel. A missing `.env` is fine. A `.env` that exists but cannot be parsed stops the app with an error that names the file. Keep `.env` files and secrets out of git.
 
 | Variable | Required | What it does |
 | --- | --- | --- |
 | `DATABASE_URL` | Yes | `mysql://user:password@host:port/database`. |
 | `IGNITE_SECRET_KEY` | Yes in a release build | Signs the sign-in session and the flash messages. Generate one with `openssl rand -base64 32`. A debug build makes a random key for each run if it is unset, so every restart signs everyone out. A release build refuses to start without a valid key. |
-| `IGNITE_TRUSTED_PROXIES` | No | Comma-separated IP addresses and CIDR ranges of the proxies in front of the app, such as `10.0.0.0/8, 192.0.2.10`. See below. |
+| `IGNITE_TRUSTED_PROXIES` | No | Comma-separated IP addresses and CIDR ranges of the proxies in front of the app, such as `10.0.0.0/8, 192.0.2.10`. The panel believes their `X-Forwarded-For` and `X-Forwarded-Proto` headers. See below. |
 | `IGNITE_VIEWS_DIR` | No | Debug builds only: reads the panel's views from this directory, so they can be edited without a rebuild. |
 
 ### Client addresses and proxies
 
 The login throttle counts failed sign-ins per email and per client address. The client address is the socket address of the connection. Forwarded headers are believed only when the socket address is listed in `IGNITE_TRUSTED_PROXIES`. Then the panel uses the right-most `X-Forwarded-For` entry that is not itself a trusted proxy. `X-Real-IP` is never read. If the socket address is unknown, the panel counts those requests together under the key `unknown`.
+
+The same rule decides whether a request is secure. The panel's cookies get the `Secure` flag when the request was made over HTTPS: when every listener of the server is TLS, or when the socket is a trusted proxy whose right-most `X-Forwarded-Proto` is `https`. A plain HTTP request, such as a local development server, gets cookies without the flag, so the browser keeps them. `X-Forwarded-Host` is not read.
+
+Rocket does not report, for a single request, which listener it arrived on. A server with both an HTTP and an HTTPS listener is therefore treated as not direct TLS. Behind a proxy, that case is handled by `X-Forwarded-Proto`.
 
 ## Deploy and start
 
@@ -56,6 +60,22 @@ ignite migrate
 ```
 
 The command prints each migration it applies, or `Nothing to migrate.`. It exits with status 1 on failure. `ignite user create` refuses to run while migrations are pending, and says to run `ignite migrate` first.
+
+To see where the database is:
+
+```sh
+ignite migrate:status
+```
+
+lists each migration as `Applied` or `Pending`. To undo the most recent migration, run `ignite migrate:rollback`. It runs that migration's `down.sql` and reverts one step per run. It says so in its output, and changes nothing else.
+
+**If a migration fails.** MySQL and MariaDB commit each schema statement as it runs, and a failed migration does not roll back the statements before it. A failed `ignite migrate` can therefore leave the database part way through a migration. To recover:
+
+1. Read the error. Fix its cause, such as a duplicate value or a missing column the migration needs.
+2. Run `ignite migrate:status` to see which migrations are recorded as applied.
+3. Run `ignite migrate` again. A migration that was only partly applied can need its partial change removed first. Check the database by hand, and use `ignite migrate:rollback` when the last migration is the one that failed and its `down.sql` undoes what it did.
+
+Take a database backup before each deploy that migrates.
 
 To get the `ignite` command in your app, add a small binary that loads `.env` and calls the panel's command line:
 
@@ -83,7 +103,7 @@ rocket::build().attach(
 )
 ```
 
-The panel is served under `/admin`. Its health check is `GET /up`, at the application root. It answers `OK` with no sign-in. The documentation explains how to define a resource, its fields and columns, the profile fields an app adds, and how to extend the layout.
+The panel is served under `/admin`. Its health check is `GET /up`, at the application root. It answers with a minimal HTML page, "Application up", and needs no sign-in. The documentation explains how to define a resource, its fields and columns, the profile fields an app adds, and how to extend the layout.
 
 ## Tests
 

@@ -16,12 +16,15 @@ All notable changes to Ignite are listed here. The format follows
 - A light and dark theme for each user, saved with the user's account.
 - `ignite migrate`, a command that runs the panel's pending migrations as a deploy step.
   It prints what it applied, or "Nothing to migrate.", and exits 1 on failure.
+- `ignite migrate:status`, which lists each migration as Applied or Pending.
+- `ignite migrate:rollback`, which reverts the most recently applied migration with its
+  `down.sql`. It reverts one step per run and says so in its output.
 - `.env` loading. `Ignite::new()` reads a `.env` file from the working directory.
   Variables already set in the environment take precedence over the file.
 - `IGNITE_TRUSTED_PROXIES`, a comma-separated list of IP addresses and CIDR ranges
   whose forwarded headers the panel trusts.
-- `GET /up`, a health check that answers `OK` with status 200 at the application root.
-  It needs no sign-in.
+- `GET /up`, a health check that answers with status 200 and a minimal HTML page, "Application
+  up", at the application root. It needs no sign-in, as Laravel's `/up` does.
 - The `MIT` license (`LICENSE`), and `license = "MIT"` in each crate.
 - Continuous integration in `.github/workflows/ci.yml`.
 
@@ -37,7 +40,16 @@ All notable changes to Ignite are listed here. The format follows
 - The panel's fairing no longer runs migrations at startup. Run `ignite migrate` before
   the first start. `run_migrations` stays public for apps that want to call it.
 - The profile's "is required" message matches the resource form ("Name is required.").
-- The profile validates number and date fields with the same rules as resource fields.
+- Profile number fields accept decimals, as Laravel's `numeric` rule and Filament's numeric
+  inputs do. Resource integer fields still accept whole numbers only. Number inputs carry
+  `step="any"`, so browsers accept decimals.
+- Profile date fields are checked with the same rule as resource date fields.
+- Cookies of the panel get the `Secure` flag when the request was made over HTTPS: directly,
+  or through a proxy listed in `IGNITE_TRUSTED_PROXIES` that sends `X-Forwarded-Proto: https`.
+  Before, they got `Secure` in release builds only, whatever the scheme. A plain HTTP request,
+  such as a local development server, now gets cookies without the flag.
+- A `.env` file that exists but cannot be parsed stops the app with a clear message. A missing
+  `.env` is still fine.
 
 ### Fixed
 
@@ -48,8 +60,9 @@ All notable changes to Ignite are listed here. The format follows
   client can no longer choose its own bucket by sending a header.
 - The login throttle table deletes rows whose window has ended on each failure. It no
   longer grows with every email that was tried.
-- A password change is throttled. Wrong current passwords count against the same key as
-  sign-in, and a successful change clears the count.
+- A password change is throttled under its own key: the email and address, with the same limit
+  as sign-in. A wrong current password counts against it, and a successful change clears only
+  that key. It never clears the sign-in count.
 - A resource that declares zero rows per page no longer divides by zero on the list view.
 
 ### Migrations added since 0.1.0
