@@ -14,6 +14,7 @@ diesel::table! {
         email -> Text,
         password_hash -> Text,
         created_at -> Timestamp,
+        theme -> Text,
     }
 }
 
@@ -31,6 +32,18 @@ pub struct User {
     pub password_hash: String,
     /// When the row was created.
     pub created_at: NaiveDateTime,
+    /// The colour theme the panel shows this user: "light" or "dark".
+    pub theme: String,
+}
+
+/// The themes a user can choose.
+pub const THEMES: [&str; 2] = ["light", "dark"];
+
+/// Saves the theme `theme` for the user with `id`. The caller checks it is in [`THEMES`].
+pub fn set_theme(conn: &mut MysqlConnection, id: i64, theme: &str) -> QueryResult<usize> {
+    diesel::update(users::table.find(id))
+        .set(users::theme.eq(theme))
+        .execute(conn)
 }
 
 #[derive(Insertable)]

@@ -2,10 +2,16 @@
   @if (signed_in)
     <label for="ig-nav" class="ig-btn ig-btn-ghost h-10 w-10 px-0 xl:hidden" aria-label="Open the menu"><i class="ti ti-menu-2 text-xl"></i></label>
     <a class="flex items-center gap-2.5 font-semibold text-heading no-underline hover:underline" href="{{ $profile_url }}"><span class="flex h-9 w-9 items-center justify-center rounded-full bg-lightprimary text-sm font-semibold text-primary">{{ $user_initials }}</span>{{ $user_name }}</a>
-    <form class="ml-auto" method="post" action="{{ $logout_everywhere_url }}">
-      <input type="hidden" name="_token" value="{{ $csrf_token }}">
-      <button type="submit" class="ig-btn ig-btn-outline">Sign out</button>
-    </form>
+    <div class="ml-auto flex items-center gap-2">
+      <button type="button" class="ig-btn ig-btn-outline h-10 w-10 px-0" data-theme-toggle data-theme="{{ $theme }}" data-theme-url="{{ $theme_url }}" data-csrf="{{ $csrf_token }}" aria-label="Switch theme">
+        <i class="ti ti-moon ig-theme-moon text-lg"></i>
+        <i class="ti ti-sun ig-theme-sun text-lg"></i>
+      </button>
+      <form method="post" action="{{ $logout_everywhere_url }}">
+        <input type="hidden" name="_token" value="{{ $csrf_token }}">
+        <button type="submit" class="ig-btn ig-btn-outline">Sign out</button>
+      </form>
+    </div>
   @else
     <a class="flex items-center gap-2 font-semibold text-heading no-underline" href="{{ $home_url }}">
       <img src="{{ asset('ui::resources/images/ignite-mark.png') }}" alt="" class="h-9 w-auto">

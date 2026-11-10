@@ -373,3 +373,39 @@ fn the_profile_needs_a_session() {
     assert_eq!(response.status(), Status::SeeOther);
     assert_eq!(response.headers().get_one("Location"), Some("/admin/login"));
 }
+
+#[test]
+fn every_user_starts_on_the_light_theme() {
+    let _guard = reset();
+    let client = signed_in(None);
+    let body = client.get("/admin").dispatch().into_string().unwrap();
+    assert!(body.contains("data-theme=\"light\""));
+}
+
+#[test]
+fn a_saved_theme_is_shown_on_the_next_page() {
+    let _guard = reset();
+    let client = signed_in(None);
+
+    let response = client
+        .post("/admin/theme")
+        .header(ContentType::Form)
+        .body(with_token(&client, "theme=dark"))
+        .dispatch();
+    assert_eq!(response.status(), Status::NoContent);
+
+    let body = client.get("/admin").dispatch().into_string().unwrap();
+    assert!(body.contains("data-theme=\"dark\""));
+}
+
+#[test]
+fn an_unknown_theme_is_refused() {
+    let _guard = reset();
+    let client = signed_in(None);
+    let response = client
+        .post("/admin/theme")
+        .header(ContentType::Form)
+        .body(with_token(&client, "theme=purple"))
+        .dispatch();
+    assert_eq!(response.status(), Status::BadRequest);
+}

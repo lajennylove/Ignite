@@ -7,8 +7,8 @@
 
 /*
  * Design tokens, taken from the colours of the free Tailwind Admin template
- * (MIT licence, see NOTICE). The light values are on :root. The dark values below
- * apply when the page asks for a dark scheme, unless it sets data-theme="light".
+ * (MIT licence, see NOTICE). The light values are on :root. The dark values apply
+ * when the page is marked data-theme="dark", for a user who chose the dark theme.
  */
 @theme {
     --font-sans: "DM Sans Variable", ui-sans-serif, system-ui, sans-serif;
@@ -51,8 +51,8 @@
     --shadow-card: rgba(145, 158, 171, 0.2) 0px 0px 2px 0px, rgba(145, 158, 171, 0.12) 0px 12px 24px -4px;
 }
 
-@media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
+/* Dark values, applied by the page when the user has chosen the dark theme. */
+:root[data-theme="dark"] {
         --color-surface: oklch(27.84% 0.027 257.53);
         --color-page: oklch(21% 0.034 264.665);
         --color-heading: oklch(100% 0 0);
@@ -67,8 +67,11 @@
         --color-lighterror: oklch(34.83% 0.042 350.24);
         --color-code-bg: oklch(34% 0.03 262);
         --shadow-card: rgba(145, 158, 171, 0.3) 0px 0px 2px 0px, rgba(145, 158, 171, 0.02) 0px 12px 24px -4px;
-    }
 }
+
+/* The toggle shows the icon of the theme it switches to. */
+:root:not([data-theme="dark"]) .ig-theme-sun { display: none; }
+:root[data-theme="dark"] .ig-theme-moon { display: none; }
 
 @layer base {
     body {

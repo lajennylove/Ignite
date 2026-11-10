@@ -216,6 +216,7 @@ pub struct AdminUser {
     user_id: i64,
     name: String,
     email: String,
+    theme: String,
 }
 
 impl AdminUser {
@@ -232,6 +233,11 @@ impl AdminUser {
     /// The signed-in user's email.
     pub fn email(&self) -> &str {
         &self.email
+    }
+
+    /// The theme the user chose, "light" or "dark".
+    pub fn theme(&self) -> &str {
+        &self.theme
     }
 }
 
@@ -264,6 +270,7 @@ impl<'r> FromRequest<'r> for AdminUser {
                 user_id: user.id,
                 name: user.name,
                 email: user.email,
+                theme: user.theme,
             }),
             None => Outcome::Error((Status::Unauthorized, ())),
         }

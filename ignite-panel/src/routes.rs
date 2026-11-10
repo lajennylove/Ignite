@@ -46,6 +46,7 @@ pub(crate) fn all() -> Vec<Route> {
         logout,
         logout_everywhere,
         profile,
+        set_theme,
         index,
         new_form,
         create,
@@ -114,6 +115,8 @@ async fn dashboard(
         signed_in: layout.signed_in,
         user_name: layout.user_name,
         user_initials: layout.user_initials,
+        theme: layout.theme,
+        theme_url: layout.theme_url,
         profile_url: layout.profile_url,
         logout_everywhere_url: layout.logout_everywhere_url,
         csrf_token: layout.csrf_token,
@@ -172,6 +175,8 @@ fn login_page(
         signed_in: layout.signed_in,
         user_name: layout.user_name,
         user_initials: layout.user_initials,
+        theme: layout.theme,
+        theme_url: layout.theme_url,
         profile_url: layout.profile_url,
         logout_everywhere_url: layout.logout_everywhere_url,
         csrf_token: layout.csrf_token,
@@ -332,6 +337,30 @@ async fn logout_everywhere(
     Ok(Redirect::to(format!("{}/login", registry.mount)))
 }
 
+/// Saves the signed-in user's colour theme. The page switches at once, so the answer has no body.
+#[post("/theme", data = "<body>")]
+async fn set_theme(
+    body: Data<'_>,
+    user: AdminUser,
+    cookies: &CookieJar<'_>,
+    registry: &State<Registry>,
+    pool: &State<Pool>,
+) -> Result<Status, Status> {
+    let form = read_form(body).await?;
+    check_csrf(cookies, &registry.secret, form.get("_token"))?;
+    let theme = form
+        .get("theme")
+        .filter(|theme| users::THEMES.contains(theme))
+        .ok_or(Status::BadRequest)?
+        .to_string();
+    let id = user.user_id();
+    blocking(pool, move |conn| {
+        users::set_theme(conn, id, &theme).map_err(db_status)
+    })
+    .await?;
+    Ok(Status::NoContent)
+}
+
 /// The signed-in user's profile, linked from the top bar.
 #[get("/profile")]
 async fn profile(
@@ -347,6 +376,8 @@ async fn profile(
         signed_in: layout.signed_in,
         user_name: layout.user_name,
         user_initials: layout.user_initials,
+        theme: layout.theme,
+        theme_url: layout.theme_url,
         profile_url: layout.profile_url,
         logout_everywhere_url: layout.logout_everywhere_url,
         csrf_token: layout.csrf_token,
@@ -447,6 +478,8 @@ async fn index(
         signed_in: layout.signed_in,
         user_name: layout.user_name,
         user_initials: layout.user_initials,
+        theme: layout.theme,
+        theme_url: layout.theme_url,
         profile_url: layout.profile_url,
         logout_everywhere_url: layout.logout_everywhere_url,
         csrf_token: layout.csrf_token,
@@ -497,6 +530,8 @@ async fn new_form(
         signed_in: layout.signed_in,
         user_name: layout.user_name,
         user_initials: layout.user_initials,
+        theme: layout.theme,
+        theme_url: layout.theme_url,
         profile_url: layout.profile_url,
         logout_everywhere_url: layout.logout_everywhere_url,
         csrf_token: layout.csrf_token,
@@ -589,6 +624,8 @@ async fn edit_form(
         signed_in: layout.signed_in,
         user_name: layout.user_name,
         user_initials: layout.user_initials,
+        theme: layout.theme,
+        theme_url: layout.theme_url,
         profile_url: layout.profile_url,
         logout_everywhere_url: layout.logout_everywhere_url,
         csrf_token: layout.csrf_token,
@@ -693,6 +730,8 @@ fn form_page(
         signed_in: layout.signed_in,
         user_name: layout.user_name,
         user_initials: layout.user_initials,
+        theme: layout.theme,
+        theme_url: layout.theme_url,
         profile_url: layout.profile_url,
         logout_everywhere_url: layout.logout_everywhere_url,
         csrf_token: layout.csrf_token,
