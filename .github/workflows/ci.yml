@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # The test suite drops and rewrites tables, so it gets its own database.
+  DATABASE_URL: mysql://root@127.0.0.1:3306/ignite_test
+
+jobs:
+  test:
+    name: Format, lint, test and build
+    runs-on: ubuntu-latest
+
+    services:
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ALLOW_EMPTY_ROOT_PASSWORD: "yes"
+          MARIADB_DATABASE: ignite_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The mysqlclient-sys crate, behind Diesel's mysql feature, finds the client
+      # library with pkg-config (libmariadb.pc from libmariadb-dev) or mysql_config.
+      - name: Install the MariaDB client library
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libmariadb-dev
+
+      - name: Install the Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Lint
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace
+
+      - name: Build the panel in release mode
+        run: cargo build --release -p ignite-panel
