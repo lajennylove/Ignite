@@ -24,6 +24,7 @@ use serde_json::Value;
 use crate::erased::Erased;
 use crate::ignite::Registry;
 use crate::profile;
+use crate::proxy::{self, TrustedProxies};
 use crate::session::{
     check_csrf, csrf_token, end_session, session_id, set_flash, start_session, take_flash,
     AdminUser,
@@ -40,7 +41,19 @@ use crate::views::{
 /// The largest form body the panel reads.
 const MAX_FORM_BYTES: u64 = 64 * 1024;
 
-/// Every route the panel mounts.
+/// The health check, which Laravel ships as `/up`. It needs no sign-in, and the panel
+/// mounts it at the application root, not under the panel's prefix.
+pub(crate) fn health() -> Vec<Route> {
+    routes![up]
+}
+
+/// Answers 200 while the app is running.
+#[get("/up")]
+fn up() -> &'static str {
+    "OK"
+}
+
+/// Every route the panel mounts under its prefix.
 pub(crate) fn all() -> Vec<Route> {
     routes![
         build_asset,
@@ -216,17 +229,12 @@ async fn login(
     check_csrf(cookies, &registry.secret, form.get("_token"))?;
     let email = form.get("email").unwrap_or("").trim().to_string();
     let password = form.get("password").unwrap_or("").to_string();
-    let email_key = throttle::email_key(&email);
-    let ip_key = throttle::ip_key(client_ip.0);
+    let throttle_key = throttle::key(&email, client_ip.0);
 
-    // Refuse before checking the password while either count is at its limit.
-    let (check_email, check_ip) = (email_key.clone(), ip_key.clone());
+    // Refuse before checking the password while the key is at its limit.
+    let check = throttle_key.clone();
     let waiting = blocking(pool, move |conn| {
-        let by_email =
-            throttle::retry_after(conn, &check_email, throttle::EMAIL_LIMIT).map_err(db_status)?;
-        let by_ip =
-            throttle::retry_after(conn, &check_ip, throttle::IP_LIMIT).map_err(db_status)?;
-        Ok(by_email.into_iter().chain(by_ip).max())
+        throttle::retry_after(conn, &check, throttle::LIMIT).map_err(db_status)
     })
     .await?;
     if let Some(seconds) = waiting {
@@ -258,12 +266,11 @@ async fn login(
         };
         match user.filter(|_| matched) {
             Some(user) => {
-                throttle::clear(conn, &email_key).map_err(db_status)?;
+                throttle::clear(conn, &throttle_key).map_err(db_status)?;
                 sessions::create(conn, user.id).map(Some).map_err(db_status)
             }
             None => {
-                throttle::record_failure(conn, &email_key).map_err(db_status)?;
-                throttle::record_failure(conn, &ip_key).map_err(db_status)?;
+                throttle::record_failure(conn, &throttle_key).map_err(db_status)?;
                 Ok(None)
             }
         }
@@ -293,7 +300,11 @@ async fn login(
     }
 }
 
-/// The client's IP address, for the login throttle. Unknown when the request has none.
+/// The client's IP address, for the login throttle: the socket address, or the client
+/// named by `X-Forwarded-For` when the socket is a trusted proxy (see [`proxy`]). Unknown
+/// when Rocket has no socket address for the request.
+///
+/// This never calls `Request::client_ip`, which reads `X-Real-IP` from any client.
 struct ClientIp(Option<IpAddr>);
 
 #[rocket::async_trait]
@@ -301,7 +312,23 @@ impl<'r> FromRequest<'r> for ClientIp {
     type Error = ();
 
     async fn from_request(request: &'r Request<'_>) -> Outcome<Self, ()> {
-        Outcome::Success(ClientIp(request.client_ip()))
+        let socket = request.remote().and_then(|endpoint| endpoint.ip());
+        let forwarded = request
+            .headers()
+            .get("X-Forwarded-For")
+            .collect::<Vec<_>>()
+            .join(",");
+        let forwarded = (!forwarded.is_empty()).then_some(forwarded);
+        let fallback = TrustedProxies::default();
+        let trusted = request
+            .rocket()
+            .state::<Registry>()
+            .map_or(&fallback, |registry| &registry.trusted_proxies);
+        Outcome::Success(ClientIp(proxy::client_ip(
+            socket,
+            forwarded.as_deref(),
+            trusted,
+        )))
     }
 }
 
@@ -510,11 +537,14 @@ async fn save_profile(
 }
 
 /// Changes the password. The current password must match, and every other session of
-/// the user ends, so an old sign-in cannot keep working.
+/// the user ends, so an old sign-in cannot keep working. A wrong current password counts
+/// against the same email-and-address key as sign-in, with the same limit, so a live
+/// session cannot guess the password without limit. A successful change clears the count.
 #[post("/profile/password", data = "<body>")]
 async fn change_password(
     body: Data<'_>,
     session: AdminUser,
+    client_ip: ClientIp,
     cookies: &CookieJar<'_>,
     registry: &State<Registry>,
     pool: &State<Pool>,
@@ -522,14 +552,44 @@ async fn change_password(
     let form = read_form(body).await?;
     check_csrf(cookies, &registry.secret, form.get("_token"))?;
     let row = load_user(pool, session.user_id()).await?;
+    let key = throttle::key(&row.email, client_ip.0);
+
+    // Refuse before the current password is checked while the key is at its limit.
+    let check = key.clone();
+    let waiting = blocking(pool, move |conn| {
+        throttle::retry_after(conn, &check, throttle::LIMIT).map_err(db_status)
+    })
+    .await?;
+    if let Some(seconds) = waiting {
+        let values = profile::form_values(&row.name, &row.email, row.profile.as_deref());
+        let mut errors = FieldErrors::new();
+        errors.insert(
+            "current_password",
+            format!("Too many attempts. Try again in {seconds} seconds."),
+        );
+        let page = render_profile(
+            registry,
+            &session,
+            cookies,
+            &values,
+            &FieldErrors::new(),
+            &errors,
+        );
+        return Ok(Reply::Throttled(seconds, page));
+    }
+
     let current = form.get("current_password").unwrap_or("");
     let new = form.get("new_password").unwrap_or("").to_string();
     let confirm = form.get("confirm_password").unwrap_or("");
-    let errors = profile::password_errors(
-        users::verify_password(&row.password_hash, current),
-        &new,
-        confirm,
-    );
+    let current_ok = users::verify_password(&row.password_hash, current);
+    if !current_ok {
+        let count = key.clone();
+        blocking(pool, move |conn| {
+            throttle::record_failure(conn, &count).map_err(db_status)
+        })
+        .await?;
+    }
+    let errors = profile::password_errors(current_ok, &new, confirm);
     if !errors.is_empty() {
         let values = profile::form_values(&row.name, &row.email, row.profile.as_deref());
         return Ok(Reply::Page(
@@ -550,6 +610,7 @@ async fn change_password(
     blocking(pool, move |conn| {
         users::update_password(conn, id, &new).map_err(db_status)?;
         sessions::delete_others_for_user(conn, id, &keep).map_err(db_status)?;
+        throttle::clear(conn, &key).map_err(db_status)?;
         Ok(())
     })
     .await?;

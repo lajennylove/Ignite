@@ -1,9 +1,15 @@
-//! Failed sign-ins are limited per email and per IP, as Laravel's throttle does on
-//! the login route. A refused attempt gets 429 and a Retry-After header.
+//! Failed sign-ins are limited per email and address together, as Laravel's login
+//! throttle keys them: five failures in a window refuse that pair, and a refused
+//! attempt gets 429 and a Retry-After header.
 
 mod common;
 
+use chrono::{Duration, Utc};
 use common::{client, reset, with_token, EMAIL, PASSWORD};
+use diesel::mysql::MysqlConnection;
+use diesel::prelude::*;
+use diesel::sql_query;
+use diesel::sql_types::{Datetime, Text};
 use rocket::http::{ContentType, Status};
 use rocket::local::blocking::{Client, LocalResponse};
 
@@ -101,31 +107,75 @@ fn a_successful_sign_in_clears_the_email_count() {
 }
 
 #[test]
-fn an_address_is_limited_across_emails() {
+fn another_address_is_not_refused_for_the_same_email() {
+    let _guard = reset();
+    let client = client(None);
+    for _ in 0..5 {
+        attempt(&client, EMAIL, "wrong-password", HOME);
+    }
+
+    // The key is the email and the address, so the same email from elsewhere is allowed.
+    let elsewhere = attempt(&client, EMAIL, PASSWORD, "198.51.100.8:4000");
+    assert_eq!(elsewhere.status(), Status::SeeOther);
+}
+
+#[test]
+fn one_address_does_not_lock_out_other_emails() {
     let _guard = reset();
     let client = client(None);
     let busy = "198.51.100.7:4000";
-    for n in 0..20 {
-        let email = format!("user{n}@example.test");
-        assert_eq!(
-            attempt(&client, &email, "wrong-password", busy).status(),
-            Status::UnprocessableEntity
-        );
+    for _ in 0..5 {
+        attempt(&client, EMAIL, "wrong-password", busy);
     }
 
-    let refused = attempt(&client, "user99@example.test", "wrong-password", busy);
+    let other = attempt(&client, "someone.else@example.test", "wrong-password", busy);
     assert_eq!(
-        refused.status(),
-        Status::TooManyRequests,
-        "the address reached its limit"
+        other.status(),
+        Status::UnprocessableEntity,
+        "a different email from the same address is still allowed"
     );
+}
 
-    // Another address is unaffected.
-    let quiet = attempt(
-        &client,
-        "user99@example.test",
-        "wrong-password",
-        "198.51.100.8:4000",
+#[test]
+fn a_failure_deletes_the_rows_whose_window_has_ended() {
+    let _guard = reset();
+    let mut conn = MysqlConnection::establish(&common::database_url()).unwrap();
+    let long_ago = Utc::now().naive_utc() - Duration::hours(1);
+    let recent = Utc::now().naive_utc() - Duration::seconds(10);
+    for (key, start) in [
+        ("stale@example.test|203.0.113.1", long_ago),
+        ("live@example.test|203.0.113.1", recent),
+    ] {
+        sql_query(
+            "INSERT INTO login_throttles (throttle_key, hits, window_start) VALUES (?, 2, ?)",
+        )
+        .bind::<Text, _>(key)
+        .bind::<Datetime, _>(start)
+        .execute(&mut conn)
+        .unwrap();
+    }
+
+    let client = client(None);
+    attempt(&client, "random@example.test", "wrong-password", HOME);
+
+    let keys: Vec<String> = sql_query("SELECT throttle_key FROM login_throttles")
+        .load::<KeyRow>(&mut conn)
+        .unwrap()
+        .into_iter()
+        .map(|row| row.throttle_key)
+        .collect();
+    assert!(
+        !keys.iter().any(|k| k.starts_with("stale@")),
+        "stale row pruned: {keys:?}"
     );
-    assert_eq!(quiet.status(), Status::UnprocessableEntity);
+    assert!(
+        keys.iter().any(|k| k.starts_with("live@")),
+        "live row kept: {keys:?}"
+    );
+}
+
+#[derive(QueryableByName)]
+struct KeyRow {
+    #[diesel(sql_type = Text)]
+    throttle_key: String,
 }

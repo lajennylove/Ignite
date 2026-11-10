@@ -250,3 +250,12 @@ fn saving_an_unchanged_row_succeeds() {
 
     assert_eq!(response.status(), Status::SeeOther);
 }
+
+#[test]
+fn the_health_check_answers_ok_at_the_root_without_sign_in() {
+    let _guard = common::reset();
+    let client = common::client(None);
+    let response = client.get("/up").dispatch();
+    assert_eq!(response.status(), rocket::http::Status::Ok);
+    assert_eq!(response.into_string().unwrap(), "OK");
+}

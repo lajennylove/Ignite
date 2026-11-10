@@ -14,6 +14,7 @@ mod embedded;
 mod erased;
 mod ignite;
 mod profile;
+mod proxy;
 mod routes;
 mod session;
 mod sessions;

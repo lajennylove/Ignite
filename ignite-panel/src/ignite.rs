@@ -8,13 +8,18 @@ use rocket::catchers;
 use rocket::fairing::AdHoc;
 
 use crate::erased::{Adapter, Erased};
+use crate::proxy::TrustedProxies;
 use crate::routes;
 use crate::session;
 
-/// The directory of the `ignite` view namespace, shipped with this crate.
-///
-/// The environment variable that names the panel's view directory at run time.
+/// The environment variable that names the panel's view directory at run time: a
+/// directory of the `ignite` views, such as `ignite-panel/views/ignite`. It is read
+/// only by debug builds, and a `views_dir` call on the builder wins over it.
 pub const VIEWS_DIR_ENV: &str = "IGNITE_VIEWS_DIR";
+
+/// The environment variable that lists the proxies whose forwarded headers the panel
+/// believes, as IP addresses and CIDR ranges. See [`crate::proxy`].
+pub const TRUSTED_PROXIES_ENV: &str = "IGNITE_TRUSTED_PROXIES";
 
 /// The default URL prefix of the admin panel.
 const DEFAULT_MOUNT: &str = "/admin";
@@ -30,6 +35,8 @@ pub(crate) struct Registry {
     pub(crate) secret: Vec<u8>,
     /// Paths that the app's CSRF guard does not check (see `Ignite::csrf_exempt`).
     pub(crate) csrf_exempt: Vec<String>,
+    /// The proxies whose forwarded headers name the client (see `IGNITE_TRUSTED_PROXIES`).
+    pub(crate) trusted_proxies: TrustedProxies,
 }
 
 impl Registry {
@@ -49,20 +56,28 @@ pub struct Ignite {
     secret: Vec<u8>,
     views: Option<PathBuf>,
     csrf_exempt: Vec<String>,
+    trusted_proxies: TrustedProxies,
 }
 
 impl Ignite {
-    /// Reads `DATABASE_URL` and `IGNITE_SECRET_KEY` and builds the connection pool.
-    /// The `ignite` view namespace is registered when the fairing is built.
+    /// Loads a `.env` file from the working directory, if there is one, then reads
+    /// `DATABASE_URL`, `IGNITE_SECRET_KEY`, `IGNITE_TRUSTED_PROXIES` and `IGNITE_VIEWS_DIR`
+    /// and builds the connection pool. Variables already set in the environment win
+    /// over the `.env` file, as in Laravel. The `ignite` view namespace is registered
+    /// when the fairing is built.
+    ///
+    /// The panel does not run migrations here. Run `ignite migrate` before the first start.
     ///
     /// # Panics
     ///
-    /// Panics if `DATABASE_URL` is not set, if the pool cannot connect, or if a
-    /// release build has no valid `IGNITE_SECRET_KEY`. These are configuration
-    /// errors that should stop the app at startup.
+    /// Panics if `DATABASE_URL` is not set, if the pool cannot connect, if
+    /// `IGNITE_TRUSTED_PROXIES` has an entry that is not an address or a range, or if a
+    /// release build has no valid `IGNITE_SECRET_KEY`. These are configuration errors
+    /// that should stop the app at startup.
     // `new` reads the environment and can panic, so it is not a plain default.
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
+        dotenvy::dotenv().ok();
         let url = std::env::var("DATABASE_URL")
             .expect("DATABASE_URL must be set to a mysql:// URL for the Ignite panel");
         let pool = build_pool(&url).expect("Ignite could not connect to DATABASE_URL");
@@ -70,6 +85,11 @@ impl Ignite {
         // The override is read here and checked when the fairing is built, so a
         // builder call to `views_dir` can still replace it.
         let views = std::env::var(VIEWS_DIR_ENV).ok().map(PathBuf::from);
+        let trusted_proxies = match std::env::var(TRUSTED_PROXIES_ENV) {
+            Ok(list) => TrustedProxies::parse(&list)
+                .unwrap_or_else(|error| panic!("{TRUSTED_PROXIES_ENV}: {error}")),
+            Err(_) => TrustedProxies::default(),
+        };
 
         Ignite {
             pool,
@@ -79,6 +99,7 @@ impl Ignite {
             secret: session::secret_from_env(),
             views,
             csrf_exempt: Vec::new(),
+            trusted_proxies,
         }
     }
 
@@ -153,6 +174,7 @@ impl Ignite {
             secret,
             views,
             csrf_exempt,
+            trusted_proxies,
         } = self;
         // The panel registers its own assets, so an app adds nothing for its styling.
         crate::assets::register(&mount);
@@ -164,6 +186,7 @@ impl Ignite {
                 profile_fields,
                 secret,
                 csrf_exempt,
+                trusted_proxies,
             };
             rocket
                 .manage(pool)
@@ -172,6 +195,7 @@ impl Ignite {
                     "/",
                     catchers![session::unauthorized, session::csrf_mismatch],
                 )
+                .mount("/", routes::health())
                 .mount(mount, routes::all())
         })
     }

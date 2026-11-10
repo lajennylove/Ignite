@@ -1,8 +1,12 @@
-//! Limits failed sign-in attempts, as Laravel's `throttle` middleware does on the
-//! login route. Each failed attempt counts against its email and its IP. When
-//! either count reaches its limit inside the window, sign-in is refused with
-//! 429 until the window ends. The counts live in the `login_throttles` table, so
-//! they hold across restarts and across processes.
+//! Limits failed attempts, as Laravel's `throttle` middleware does on the login
+//! route. The key is the email and the client's IP together, as Laravel's login
+//! throttle keys it, so one address cannot lock out an email for everyone, and one
+//! email cannot be guessed without limit from one address. A failed sign-in and a
+//! wrong current password on the profile both count against the key. When the count
+//! reaches the limit inside the window, the attempt is refused with 429 until the
+//! window ends. The counts live in the `login_throttles` table, so they hold across
+//! restarts and across processes. Rows whose window has ended are deleted on each
+//! failure, so the table holds only live windows.
 
 use chrono::{Duration, NaiveDateTime, Utc};
 use diesel::mysql::MysqlConnection;
@@ -11,10 +15,8 @@ use diesel::result::QueryResult;
 use diesel::sql_query;
 use diesel::sql_types::{Datetime, Text};
 
-/// The failed attempts allowed per email in one window.
-pub(crate) const EMAIL_LIMIT: i64 = 5;
-/// The failed attempts allowed per IP address in one window.
-pub(crate) const IP_LIMIT: i64 = 20;
+/// The failed attempts allowed per key (an email and an IP) in one window.
+pub(crate) const LIMIT: i64 = 5;
 /// The length of a window, in seconds.
 pub(crate) const WINDOW_SECONDS: i64 = 60;
 
@@ -27,17 +29,15 @@ diesel::table! {
     }
 }
 
-/// The key for an email. Emails differ only in case, so they count as one.
-pub(crate) fn email_key(email: &str) -> String {
-    format!("email:{}", email.trim().to_lowercase())
-}
-
-/// The key for an IP address, or for requests whose address is unknown.
-pub(crate) fn ip_key(ip: Option<std::net::IpAddr>) -> String {
-    match ip {
-        Some(ip) => format!("ip:{ip}"),
-        None => "ip:unknown".to_string(),
-    }
+/// The key for an email and a client address: the lowercased, trimmed email, a `|`, and
+/// the IP address, as Laravel's login throttle builds it. Emails differ only in case, so
+/// they count as one. A request whose address is unknown shares the key `unknown`.
+pub(crate) fn key(email: &str, ip: Option<std::net::IpAddr>) -> String {
+    let ip = match ip {
+        Some(ip) => ip.to_string(),
+        None => "unknown".to_string(),
+    };
+    format!("{}|{ip}", email.trim().to_lowercase())
 }
 
 /// How many seconds until `key` may try again, if it is at its limit.
@@ -64,6 +64,8 @@ pub(crate) fn retry_after(
 }
 
 /// Counts one failed attempt against `key`. A window that has ended starts again at 1.
+/// Then deletes every row whose window has ended, for any key, so the table does not
+/// grow with every email that was ever tried.
 pub(crate) fn record_failure(conn: &mut MysqlConnection, key: &str) -> QueryResult<()> {
     let now = Utc::now().naive_utc();
     let cutoff = now - Duration::seconds(WINDOW_SECONDS);
@@ -78,11 +80,19 @@ pub(crate) fn record_failure(conn: &mut MysqlConnection, key: &str) -> QueryResu
     .bind::<Datetime, _>(cutoff)
     .bind::<Datetime, _>(cutoff)
     .bind::<Datetime, _>(now)
-    .execute(conn)
-    .map(|_| ())
+    .execute(conn)?;
+    prune(conn, cutoff)?;
+    Ok(())
 }
 
-/// Clears the count for `key`, after a successful sign-in.
+/// Deletes the rows whose window started before `cutoff`, which have ended. Uses the
+/// index on `window_start`.
+fn prune(conn: &mut MysqlConnection, cutoff: NaiveDateTime) -> QueryResult<usize> {
+    diesel::delete(login_throttles::table.filter(login_throttles::window_start.lt(cutoff)))
+        .execute(conn)
+}
+
+/// Clears the count for `key`, after a successful sign-in or password change.
 pub(crate) fn clear(conn: &mut MysqlConnection, key: &str) -> QueryResult<usize> {
     diesel::delete(login_throttles::table.filter(login_throttles::throttle_key.eq(key)))
         .execute(conn)
@@ -94,18 +104,18 @@ mod tests {
 
     #[test]
     fn emails_count_regardless_of_case_and_spacing() {
-        assert_eq!(
-            email_key(" Ada@Example.TEST "),
-            email_key("ada@example.test")
-        );
+        let ip = Some("203.0.113.9".parse().unwrap());
+        assert_eq!(key(" Ada@Example.TEST ", ip), key("ada@example.test", ip));
     }
 
     #[test]
-    fn unknown_addresses_share_one_key() {
-        assert_eq!(ip_key(None), "ip:unknown");
-        assert_eq!(
-            ip_key(Some("203.0.113.9".parse().unwrap())),
-            "ip:203.0.113.9"
+    fn the_key_pairs_the_email_with_the_address() {
+        let ip: Option<std::net::IpAddr> = Some("203.0.113.9".parse().unwrap());
+        assert_eq!(key("ada@example.test", ip), "ada@example.test|203.0.113.9");
+        assert_ne!(
+            key("ada@example.test", ip),
+            key("ada@example.test", Some("203.0.113.10".parse().unwrap()))
         );
+        assert_eq!(key("ada@example.test", None), "ada@example.test|unknown");
     }
 }

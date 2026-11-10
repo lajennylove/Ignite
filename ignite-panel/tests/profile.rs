@@ -179,3 +179,59 @@ fn a_file_that_is_not_a_picture_is_not_stored() {
         Status::NotFound
     );
 }
+
+/// Posts a password change with the given current password, from the signed-in client.
+fn change_with<'c>(
+    client: &'c rocket::local::blocking::Client,
+    current: &str,
+    new: &str,
+) -> rocket::local::blocking::LocalResponse<'c> {
+    let body = with_token(
+        client,
+        &format!("current_password={current}&new_password={new}&confirm_password={new}"),
+    );
+    client
+        .post("/admin/profile/password")
+        .header(ContentType::Form)
+        .body(body)
+        .dispatch()
+}
+
+#[test]
+fn a_password_change_is_refused_after_repeated_wrong_current_passwords() {
+    let _guard = reset();
+    let client = signed_in(None);
+    for _ in 0..5 {
+        assert_eq!(
+            change_with(&client, "wrong-one", "a-new-password").status(),
+            Status::UnprocessableEntity
+        );
+    }
+
+    // Even the right current password is refused while the limit holds.
+    let refused = change_with(&client, PASSWORD, "a-new-password");
+    assert_eq!(refused.status(), Status::TooManyRequests);
+    assert!(refused.headers().get_one("Retry-After").is_some());
+    assert!(refused.into_string().unwrap().contains("Too many attempts"));
+}
+
+#[test]
+fn a_successful_password_change_clears_the_count() {
+    let _guard = reset();
+    let client = signed_in(None);
+    for _ in 0..4 {
+        change_with(&client, "wrong-one", "a-new-password");
+    }
+    assert_eq!(
+        change_with(&client, PASSWORD, "a-new-password").status(),
+        Status::SeeOther
+    );
+
+    // The count started again, so four more wrong guesses are still allowed.
+    for _ in 0..4 {
+        assert_eq!(
+            change_with(&client, "wrong-one", "another-password").status(),
+            Status::UnprocessableEntity
+        );
+    }
+}

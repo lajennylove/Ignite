@@ -1,0 +1,1 @@
+DROP INDEX login_throttles_window_start_index ON login_throttles;
