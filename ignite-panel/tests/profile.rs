@@ -3,7 +3,9 @@
 mod common;
 
 use common::{reset, signed_in, with_token, PASSWORD};
+use diesel::mysql::MysqlConnection;
 use diesel::prelude::*;
+use diesel::sql_query;
 use rocket::http::{ContentType, Header, Status};
 
 const PNG: &[u8] = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR";
@@ -79,6 +81,40 @@ fn an_email_another_user_has_is_refused() {
         .header(ContentType::Form)
         .body(with_token(&client, "name=Admin&email=other%40example.test"))
         .dispatch();
+    assert_eq!(response.status(), Status::UnprocessableEntity);
+    let page = response.into_string().unwrap();
+    assert!(page.contains("Another user already has this email."));
+}
+
+/// Two saves race: the other user's email is not yet visible to the check, because
+/// that user's insert is still uncommitted on another connection. The save's update
+/// then waits on the unique index, and it fails with a duplicate key once the insert
+/// commits. That must be the same field error (422), not a server error.
+#[test]
+fn an_email_taken_between_the_check_and_the_update_is_a_field_error() {
+    let _guard = reset();
+    let client = signed_in(None);
+
+    let mut other =
+        MysqlConnection::establish(&common::database_url()).expect("connect to ignite_test");
+    sql_query("START TRANSACTION").execute(&mut other).unwrap();
+    sql_query(
+        "INSERT INTO users (name, email, password_hash) VALUES ('Racer', 'race@example.test', 'x')",
+    )
+    .execute(&mut other)
+    .unwrap();
+    let committer = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        sql_query("COMMIT").execute(&mut other).unwrap();
+    });
+
+    let response = client
+        .post("/admin/profile")
+        .header(ContentType::Form)
+        .body(with_token(&client, "name=Admin&email=race%40example.test"))
+        .dispatch();
+    committer.join().unwrap();
+
     assert_eq!(response.status(), Status::UnprocessableEntity);
     let page = response.into_string().unwrap();
     assert!(page.contains("Another user already has this email."));

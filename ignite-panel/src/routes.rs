@@ -22,7 +22,7 @@ use rocket::tokio::io::AsyncReadExt;
 use rocket::{get, post, routes, FromForm, Route, State};
 use serde_json::Value;
 
-use crate::erased::Erased;
+use crate::erased::{self, Erased};
 use crate::ignite::Registry;
 use crate::profile;
 use crate::proxy::{self, TrustedProxies};
@@ -519,7 +519,27 @@ async fn save_profile(
         users::email_taken(conn, &email, id).map_err(db_status)
     })
     .await?;
-    if taken {
+    // Two saves can both pass the check above. The unique index then refuses the
+    // second one, and that refusal is the same field error as a taken email.
+    let saved_ok = if taken {
+        false
+    } else {
+        blocking(pool, move |conn| {
+            match users::update_profile(conn, id, &saved.name, &saved.email, &saved.custom) {
+                Ok(_) => Ok(true),
+                Err(error)
+                    if erased::unique_index(&error).is_some_and(|index| {
+                        index == erased::unique_index_name("users", "email")
+                    }) =>
+                {
+                    Ok(false)
+                }
+                Err(error) => Err(db_status(error)),
+            }
+        })
+        .await?
+    };
+    if !saved_ok {
         let mut errors = FieldErrors::new();
         errors.insert("email", "Another user already has this email.".to_string());
         return Ok(Reply::Page(
@@ -535,10 +555,6 @@ async fn save_profile(
         ));
     }
 
-    blocking(pool, move |conn| {
-        users::update_profile(conn, id, &saved.name, &saved.email, &saved.custom).map_err(db_status)
-    })
-    .await?;
     set_flash(cookies, &registry.secret, "Profile saved.");
     Ok(Reply::Redirect(Box::new(Redirect::to(format!(
         "{}/profile",
