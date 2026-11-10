@@ -17,13 +17,13 @@ diesel = { git = "https://github.com/lajennylove/diesel", rev = "a07c4b2c20a466e
 diesel_migrations = { git = "https://github.com/lajennylove/diesel", rev = "a07c4b2c20a466ef34f50ca283790f4df20b0699" }
 ignite-core = { git = "https://github.com/lajennylove/Ignite", tag = "v0.2.0" }
 ignite-panel = { git = "https://github.com/lajennylove/Ignite", tag = "v0.2.0" }
-propel_rocket = { git = "https://github.com/lajennylove/Propel", tag = "v0.2.0" }
-propel_macros = { git = "https://github.com/lajennylove/Propel", tag = "v0.2.0" }
-propel_runtime = { git = "https://github.com/lajennylove/Propel", tag = "v0.2.0" }
+propel_rocket = { git = "https://github.com/lajennylove/Propel", rev = "09c8a02ba0f3ed75b02c7f3d36b5a0e6f4d047b7" }
+propel_macros = { git = "https://github.com/lajennylove/Propel", rev = "09c8a02ba0f3ed75b02c7f3d36b5a0e6f4d047b7" }
+propel_runtime = { git = "https://github.com/lajennylove/Propel", rev = "09c8a02ba0f3ed75b02c7f3d36b5a0e6f4d047b7" }
 ```
 
 - **Rocket** is pinned to revision `3a54d079`, the Rocket revision Ignite is built against. The panel uses Rocket APIs of this revision.
-- **Propel** is pinned to the `v0.2.0` tag, the same tag for all three crates, so they build together. `propel_rocket` is the Rocket integration that renders the views.
+- **Propel** is pinned to one revision, `09c8a02` (the commit of Propel's `v0.2.0` tag), for all the Propel crates. Pin the revision, not the tag: Cargo treats a tag and a revision as two different sources and would build Propel twice, and the panel's views would not be found. `propel_rocket` is the Rocket integration that renders the views.
 - **Why the Diesel fork.** Ignite uses Diesel `2.3.14` with one fix, on the `ignite-read-fix` branch of the fork. libmariadb 3.4.x zeroes text column lengths when a result is rebound after a truncated fetch, so the first row of a text query came back empty. The fork pins the same commit that the panel pins, so Cargo builds one copy. Remove the pin when a Diesel release contains the fix.
 
 ### Build requirements
