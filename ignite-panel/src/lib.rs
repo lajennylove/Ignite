@@ -37,6 +37,21 @@ pub use ignite::Ignite;
 pub use ignite_core;
 pub use session::AdminUser;
 
+/// Loads the `.env` file in the working directory into the process environment, without
+/// overriding variables already set. A missing file is fine. A file that exists but cannot
+/// be parsed stops the app with a clear message, as Laravel does for a malformed `.env`.
+///
+/// # Panics
+///
+/// Panics when the `.env` file exists and cannot be read or parsed.
+pub fn load_env() {
+    match dotenvy::dotenv() {
+        Ok(_) => {}
+        Err(dotenvy::Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => panic!("Ignite could not read .env: {error}"),
+    }
+}
+
 /// The panel's migrations, embedded in the crate.
 const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations");
 

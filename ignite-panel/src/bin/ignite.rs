@@ -3,6 +3,6 @@
 
 fn main() {
     // The app reads DATABASE_URL from .env, so the CLI does too.
-    let _ = dotenvy::dotenv();
+    ignite_panel::load_env();
     ignite_panel::cli::main();
 }

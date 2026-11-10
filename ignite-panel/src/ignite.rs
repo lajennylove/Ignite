@@ -78,7 +78,7 @@ impl Ignite {
     // `new` reads the environment and can panic, so it is not a plain default.
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
-        dotenvy::dotenv().ok();
+        crate::load_env();
         let url = std::env::var("DATABASE_URL")
             .expect("DATABASE_URL must be set to a mysql:// URL for the Ignite panel");
         let pool = build_pool(&url).expect("Ignite could not connect to DATABASE_URL");
