@@ -25,6 +25,7 @@ sha2 = "0.10"
 base64 = "0.22"
 rpassword = "7"
 dotenvy = "0.15"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 
 [build-dependencies]
 propel_compiler = "0.2.0"

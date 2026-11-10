@@ -25,6 +25,19 @@ All notable changes to Ignite are listed here. The format follows
 - The migration `20261114000000_account_lifecycle`, which adds `users.disabled_at` and a
   foreign key from `sessions.user_id` to `users.id` with `ON DELETE CASCADE`, so deleting a
   user deletes their sessions.
+- Sending email, behind the `Mailer` trait, with `Ignite::mailer` to choose the provider. The
+  default, `NotConfigured`, refuses to send. `RecordingMailer` keeps messages in memory for
+  tests. `EmailitMailer` sends through the Emailit API, and reads `EMAILIT_API_KEY` and
+  `IGNITE_MAIL_FROM` with `EmailitMailer::from_env`. Failures come back as a typed `MailError`.
+- Password reset by email, modelled on Laravel's password reset: `/admin/password/forgot`,
+  and the link `/admin/password/reset/<token>?email=`. A link works for 60 minutes and once.
+  The forgot page gives the same answer whether or not the email has an account. A disabled
+  user gets no link. A reset ends every session of the user. A link is not sent again within
+  60 seconds of the last one. The forgot requests are throttled like sign-in.
+- The `IGNITE_APP_URL` variable, which the reset links are built from.
+- The migration `20261115000000_password_reset_tokens`, which adds the table
+  `password_reset_tokens`. The token is stored as an argon2 hash.
+- A "Forgot password?" link on the sign-in page.
 
 ### Changed
 

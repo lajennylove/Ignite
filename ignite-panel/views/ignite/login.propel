@@ -38,6 +38,10 @@
 
         <button type="submit" class="ig-btn ig-btn-primary w-full py-3">Sign in</button>
       </form>
+
+      <p class="mt-5 text-center text-sm">
+        <a href="{{ $forgot_url }}">Forgot password?</a>
+      </p>
     </section>
   </div>
 @endsection

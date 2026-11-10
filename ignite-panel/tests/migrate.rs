@@ -182,8 +182,17 @@ fn rollback_reverts_one_step_and_migrate_restores_it() {
         "the latest migration is applied at the start"
     );
 
-    // The account lifecycle and roles migrations are newer than the index one, so the first
-    // two steps revert them, and the third step reverts the index migration this test is about.
+    // The password reset table, the account lifecycle and roles migrations are newer than the
+    // index one, so the first three steps revert them, and the fourth reverts the index
+    // migration this test is about.
+    let reset_table = ignite(&["migrate:rollback"], "");
+    assert_eq!(reset_table.status.code(), Some(0));
+    assert!(
+        String::from_utf8_lossy(&reset_table.stdout)
+            .contains("reverted 20261115000000_password_reset_tokens."),
+        "stdout: {}",
+        String::from_utf8_lossy(&reset_table.stdout)
+    );
     let lifecycle = ignite(&["migrate:rollback"], "");
     assert_eq!(lifecycle.status.code(), Some(0));
     assert!(
@@ -250,8 +259,8 @@ fn rollback_reverts_one_step_and_migrate_restores_it() {
 fn the_roles_migration_makes_existing_users_super_admins() {
     let _guard = reset();
     let mut conn = connection();
-    // Revert the account lifecycle migration, then the roles migration.
-    for _ in 0..2 {
+    // Revert the password reset table, the account lifecycle migration, then the roles migration.
+    for _ in 0..3 {
         let rolled = ignite(&["migrate:rollback"], "");
         assert_eq!(rolled.status.code(), Some(0));
     }

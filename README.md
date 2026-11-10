@@ -42,6 +42,9 @@ Ignite reads its settings from the environment. When a `.env` file is in the wor
 | `IGNITE_SECRET_KEY` | Yes in a release build | Signs the sign-in session and the flash messages. Generate one with `openssl rand -base64 32`. A debug build makes a random key for each run if it is unset, so every restart signs everyone out. A release build refuses to start without a valid key. |
 | `IGNITE_TRUSTED_PROXIES` | No | Comma-separated IP addresses and CIDR ranges of the proxies in front of the app, such as `10.0.0.0/8, 192.0.2.10`. The panel believes their `X-Forwarded-For` and `X-Forwarded-Proto` headers. See below. |
 | `IGNITE_VIEWS_DIR` | No | Debug builds only: reads the panel's views from this directory, so they can be edited without a rebuild. |
+| `IGNITE_APP_URL` | No | The app's own URL, such as `https://app.example.test`. Password reset links are built from it, as Laravel builds them from `APP_URL`. Without it, the links use the scheme and host of the request, which a client can set, so set it in production. |
+| `EMAILIT_API_KEY` | Only for Emailit | The Emailit API key, read by `EmailitMailer::from_env`. It is never logged. |
+| `IGNITE_MAIL_FROM` | Only for Emailit | The sender, such as `Ignite <hello@mail.example.test>`. The domain must be verified in Emailit. |
 
 ### Client addresses and proxies
 
@@ -152,6 +155,33 @@ ignite user password editor@example.com
 - The last enabled super-admin cannot be disabled, and a disabled super-admin does not count as one who keeps the panel open, so the role cannot be removed from the last enabled super-admin either.
 - `ignite user password` reads the new password the way `ignite user create` does: asked for twice in a terminal, or from standard input with `--password-stdin`. It ends the user's sessions, as the panel's change-password form does for other devices.
 - Deleting a user deletes their session rows too, through the foreign key on `sessions.user_id`. The sign-in throttle rows are keyed by email and address rather than by user, and they expire after one minute, so they need no cleanup.
+
+## Mail and password reset
+
+The panel sends email through a mailer that the app chooses. Until it does, the panel has no mailer, and a send is refused and logged, so nothing is sent by accident. To send with Emailit, read the key and the sender from the environment and give the mailer to the builder:
+
+```rust
+rocket::build().attach(
+    Ignite::new()
+        .mailer(EmailitMailer::from_env())
+        .resource::<Users>()
+        .fairing(),
+)
+```
+
+Set `EMAILIT_API_KEY` and `IGNITE_MAIL_FROM` in the `.env` file or the environment. `from_env` stops the app at start when either is missing. Emailit answers 401 or 403 for a key or a domain it does not accept, 402 when the account has no credits, 422 for a message it refuses, 429 with `retry_after` when it limits sends, and 404 for an unknown template. Each of these is a `MailError`. Another provider is added as one more implementation of the `Mailer` trait, and the password reset does not change.
+
+Password reset follows Laravel's:
+
+- `/admin/password/forgot` asks for an email. Every request gets the same answer, so the form does not show which emails have an account. A request counts against the same throttle as sign-in, five in a minute for each email and address.
+- A link is sent only to an account that is enabled. It carries a random token. The table keeps only a hash of it, and the link works for 60 minutes and once.
+- A link is not sent again within 60 seconds of the last one to the same email, as Laravel's `throttle` setting does. A double submit sends one message.
+- The reset form asks for the new password twice, with the same rules as the change-password form. A reset ends every session of the user, as a password change does.
+- The sign-in page links to the forgot page.
+
+A failed send is logged with the error and does not change the answer.
+
+The tests never send mail: they use `RecordingMailer`. One opt-in test, `tests/mail_live.rs`, sends a real message through Emailit. It runs only when `EMAILIT_API_KEY`, `IGNITE_MAIL_FROM` and `IGNITE_TEST_MAIL_TO` are all set, and prints a notice and passes otherwise. The email text follows Laravel's reset notification.
 
 ## Tests
 

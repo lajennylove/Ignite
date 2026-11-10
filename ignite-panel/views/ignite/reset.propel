@@ -1,0 +1,49 @@
+@extends('ignite::layouts.app')
+
+@section('ignite_bar')
+  <header class="flex items-center border-b border-border bg-page px-5 py-3">
+    @include('ignite::partials.topbar')
+  </header>
+@endsection
+
+@section('ignite_flash')
+  @include('ignite::partials.flash')
+@endsection
+
+@section('title')
+  {{ $title }}
+@endsection
+
+@section('content')
+  <div class="mx-auto mt-10 w-full max-w-md">
+    <section class="ig-card p-8">
+      <h1 class="mb-6 text-center text-2xl">{{ $title }}</h1>
+
+      <form class="grid gap-5" method="post" action="{{ $action }}">
+        <input type="hidden" name="_token" value="{{ $csrf_token }}">
+        <input type="hidden" name="token" value="{{ $token }}">
+
+        @if (has_error)
+          <p class="rounded-md border border-error bg-lighterror px-4 py-3 text-sm text-error-emphasis" role="alert">{{ $error }}</p>
+        @endif
+
+        <div>
+          <label class="ig-label" for="email">Email</label>
+          <input class="ig-input py-2.5" id="email" name="email" type="email" value="{{ $email }}" autocomplete="username">
+        </div>
+
+        <div>
+          <label class="ig-label" for="password">New password</label>
+          <input class="ig-input py-2.5" id="password" name="password" type="password" autocomplete="new-password">
+        </div>
+
+        <div>
+          <label class="ig-label" for="password_confirmation">Confirm new password</label>
+          <input class="ig-input py-2.5" id="password_confirmation" name="password_confirmation" type="password" autocomplete="new-password">
+        </div>
+
+        <button type="submit" class="ig-btn ig-btn-primary w-full py-3">Reset password</button>
+      </form>
+    </section>
+  </div>
+@endsection

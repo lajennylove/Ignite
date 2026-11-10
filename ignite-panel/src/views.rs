@@ -243,6 +243,60 @@ pub(crate) struct LoginPage {
     pub(crate) flash: String,
     pub(crate) title: &'static str,
     pub(crate) action: String,
+    pub(crate) forgot_url: String,
+    pub(crate) email: String,
+    pub(crate) has_error: bool,
+    pub(crate) error: String,
+}
+
+/// The page where a user asks for a password reset link. Its message is the flash of the
+/// last request, so it reads the same whether or not the email has an account.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct ForgotPage {
+    // The layout's values, flat: a compiled view reads each one as a field.
+    pub(crate) home_url: String,
+    pub(crate) signed_in: bool,
+    pub(crate) user_name: String,
+    pub(crate) user_initials: String,
+    pub(crate) has_avatar: bool,
+    pub(crate) avatar_url: String,
+    pub(crate) theme: String,
+    pub(crate) theme_url: String,
+    pub(crate) profile_url: String,
+    pub(crate) logout_everywhere_url: String,
+    pub(crate) csrf_token: String,
+    pub(crate) nav: Vec<NavGroup>,
+    pub(crate) has_flash: bool,
+    pub(crate) flash: String,
+    pub(crate) title: &'static str,
+    pub(crate) action: String,
+    pub(crate) login_url: String,
+    pub(crate) email: String,
+    pub(crate) has_error: bool,
+    pub(crate) error: String,
+}
+
+/// The page where a user sets a new password, opened from the reset link.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct ResetPage {
+    // The layout's values, flat: a compiled view reads each one as a field.
+    pub(crate) home_url: String,
+    pub(crate) signed_in: bool,
+    pub(crate) user_name: String,
+    pub(crate) user_initials: String,
+    pub(crate) has_avatar: bool,
+    pub(crate) avatar_url: String,
+    pub(crate) theme: String,
+    pub(crate) theme_url: String,
+    pub(crate) profile_url: String,
+    pub(crate) logout_everywhere_url: String,
+    pub(crate) csrf_token: String,
+    pub(crate) nav: Vec<NavGroup>,
+    pub(crate) has_flash: bool,
+    pub(crate) flash: String,
+    pub(crate) title: &'static str,
+    pub(crate) action: String,
+    pub(crate) token: String,
     pub(crate) email: String,
     pub(crate) has_error: bool,
     pub(crate) error: String,
