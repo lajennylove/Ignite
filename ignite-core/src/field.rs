@@ -15,7 +15,8 @@ pub enum FieldKind {
     Textarea,
     /// A password. The form never shows the stored value.
     Password,
-    /// A whole or decimal number, submitted as text.
+    /// A number, submitted as text. A resource's integer field is checked as a whole
+    /// number. A profile field accepts decimals as well (see [`Field::check_number`]).
     Number,
     /// A yes/no value. Read it with [`FormInput::checkbox`](crate::FormInput::checkbox).
     Checkbox,
@@ -68,6 +69,19 @@ impl Field {
             Ok(value) => Some(value),
             Err(_) => {
                 errors.insert(self.name, format!("{} must be a whole number.", self.label));
+                None
+            }
+        }
+    }
+
+    /// Parses `text` as a number, whole or decimal, such as `42` or `42.5`. Values that are
+    /// not finite (`inf`, `NaN`) are refused. If it does not parse, records
+    /// "<label> must be a number." in `errors` and returns `None`.
+    pub fn check_number(&self, text: &str, errors: &mut FieldErrors) -> Option<f64> {
+        match text.parse::<f64>() {
+            Ok(value) if value.is_finite() => Some(value),
+            _ => {
+                errors.insert(self.name, format!("{} must be a number.", self.label));
                 None
             }
         }

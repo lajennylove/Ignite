@@ -106,8 +106,8 @@ pub(crate) struct Saved {
 }
 
 /// Checks a submitted profile form. Each field is read as its kind says: required
-/// fields must not be blank, a number must be a whole number and a date must be
-/// `YYYY-MM-DD` (both checked with the same helpers as a resource's fields), a select
+/// fields must not be blank, a number must be a number (whole or decimal) and a date
+/// must be `YYYY-MM-DD` (checked with the same helpers as a resource's fields), a select
 /// must be one of its choices, and the email must look like an address. A password is
 /// hashed before it is stored. A blank password keeps the hash already stored in
 /// `stored`, the profile JSON the user has now. Returns the values to store, or the
@@ -152,7 +152,7 @@ pub(crate) fn validate(
         if !text.is_empty() {
             match field.kind {
                 FieldKind::Number => {
-                    field.check_whole_number::<i64>(&text, &mut errors);
+                    field.check_number(&text, &mut errors);
                 }
                 FieldKind::Date => {
                     field.check_date(&text, &mut errors);

@@ -50,7 +50,7 @@
                     @endforeach
                   </select>
                 @else
-                  <input class="ig-input" id="{{ $field.name }}" name="{{ $field.name }}" type="{{ $field.input_type }}" value="{{ $field.value }}">
+                  <input class="ig-input" id="{{ $field.name }}" name="{{ $field.name }}" type="{{ $field.input_type }}" @if (field.is_number)step="any" @endif value="{{ $field.value }}">
                 @endif
               @endif
               @if (field.has_error)

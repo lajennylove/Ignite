@@ -358,6 +358,8 @@ pub(crate) struct FieldView {
     pub(crate) is_textarea: bool,
     pub(crate) is_checkbox: bool,
     pub(crate) is_select: bool,
+    /// A number input accepts decimals, so the browser's step is "any".
+    pub(crate) is_number: bool,
     pub(crate) value: String,
     pub(crate) checked: bool,
     pub(crate) options: Vec<OptionView>,
@@ -410,6 +412,7 @@ impl FieldView {
             is_textarea,
             is_checkbox,
             is_select,
+            is_number: field.kind == FieldKind::Number,
             value,
             checked: is_checkbox && form.checkbox(field.name),
             options,
