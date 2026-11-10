@@ -123,13 +123,7 @@ pub(crate) fn request_is_secure(
         return false;
     }
     forwarded_proto
-        .and_then(|header| {
-            header
-                .split(',')
-                .map(str::trim)
-                .filter(|e| !e.is_empty())
-                .next_back()
-        })
+        .and_then(|header| header.split(',').map(str::trim).rfind(|e| !e.is_empty()))
         .is_some_and(|proto| proto.eq_ignore_ascii_case("https"))
 }
 

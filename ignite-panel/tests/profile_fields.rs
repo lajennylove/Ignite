@@ -129,7 +129,7 @@ fn a_number_and_a_date_are_checked_like_resource_fields() {
     // A decimal is a number too, as in Filament's numeric input and Laravel's numeric rule.
     let decimal = save(&client, "shoe_size=42.5&birthday=2020-12-31");
     assert_eq!(decimal.status(), Status::SeeOther);
-    assert_eq!(stored_profile().contains("\"shoe_size\":\"42.5\""), true);
+    assert!(stored_profile().contains("\"shoe_size\":\"42.5\""));
     let page = client
         .get("/admin/profile")
         .dispatch()
