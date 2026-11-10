@@ -235,3 +235,48 @@ fn a_successful_password_change_clears_the_count() {
         );
     }
 }
+
+#[test]
+fn a_password_change_does_not_clear_the_sign_in_count() {
+    let _guard = reset();
+    let client = signed_in(None);
+    // Four failed sign-ins from this client's address leave the sign-in count at four.
+    for _ in 0..4 {
+        client.get("/admin/login").dispatch();
+        let body = with_token(
+            &client,
+            &format!("email={}&password=wrong-one", common::EMAIL),
+        );
+        assert_eq!(
+            client
+                .post("/admin/login")
+                .header(ContentType::Form)
+                .body(body)
+                .dispatch()
+                .status(),
+            Status::UnprocessableEntity
+        );
+    }
+
+    assert_eq!(
+        change_with(&client, PASSWORD, "a-new-password").status(),
+        Status::SeeOther
+    );
+
+    // The sign-in count is still four: one more failure is the fifth, and the next is refused.
+    let sign_in = |password: &str| {
+        client.get("/admin/login").dispatch();
+        let body = with_token(
+            &client,
+            &format!("email={}&password={password}", common::EMAIL),
+        );
+        client
+            .post("/admin/login")
+            .header(ContentType::Form)
+            .body(body)
+            .dispatch()
+            .status()
+    };
+    assert_eq!(sign_in("wrong-one"), Status::UnprocessableEntity);
+    assert_eq!(sign_in("wrong-one"), Status::TooManyRequests);
+}

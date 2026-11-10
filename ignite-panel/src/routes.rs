@@ -544,8 +544,9 @@ async fn save_profile(
 
 /// Changes the password. The current password must match, and every other session of
 /// the user ends, so an old sign-in cannot keep working. A wrong current password counts
-/// against the same email-and-address key as sign-in, with the same limit, so a live
-/// session cannot guess the password without limit. A successful change clears the count.
+/// against its own key (the email and address, as sign-in, with the same limit), so a live
+/// session cannot guess the password without limit. A successful change clears only that
+/// key, never the sign-in count.
 #[post("/profile/password", data = "<body>")]
 async fn change_password(
     body: Data<'_>,
@@ -558,7 +559,7 @@ async fn change_password(
     let form = read_form(body).await?;
     check_csrf(cookies, &registry.secret, form.get("_token"))?;
     let row = load_user(pool, session.user_id()).await?;
-    let key = throttle::key(&row.email, client_ip.0);
+    let key = throttle::password_key(&row.email, client_ip.0);
 
     // Refuse before the current password is checked while the key is at its limit.
     let check = key.clone();

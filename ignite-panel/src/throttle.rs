@@ -40,6 +40,12 @@ pub(crate) fn key(email: &str, ip: Option<std::net::IpAddr>) -> String {
     format!("{}|{ip}", email.trim().to_lowercase())
 }
 
+/// The key for a password change: the same email and address as sign-in, under its own
+/// prefix. A successful change clears only this key, so it never clears the sign-in count.
+pub(crate) fn password_key(email: &str, ip: Option<std::net::IpAddr>) -> String {
+    format!("password|{}", key(email, ip))
+}
+
 /// How many seconds until `key` may try again, if it is at its limit.
 pub(crate) fn retry_after(
     conn: &mut MysqlConnection,
@@ -106,6 +112,19 @@ mod tests {
     fn emails_count_regardless_of_case_and_spacing() {
         let ip = Some("203.0.113.9".parse().unwrap());
         assert_eq!(key(" Ada@Example.TEST ", ip), key("ada@example.test", ip));
+    }
+
+    #[test]
+    fn the_password_key_is_separate_from_the_sign_in_key() {
+        let ip: Option<std::net::IpAddr> = Some("203.0.113.9".parse().unwrap());
+        assert_ne!(
+            password_key("ada@example.test", ip),
+            key("ada@example.test", ip)
+        );
+        assert_eq!(
+            password_key("Ada@example.test", ip),
+            "password|ada@example.test|203.0.113.9"
+        );
     }
 
     #[test]
