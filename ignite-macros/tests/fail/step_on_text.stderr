@@ -1,0 +1,5 @@
+error: step applies to an f32 or f64 field
+  --> tests/fail/step_on_text.rs:17:11
+   |
+17 |     name: String,
+   |           ^^^^^^

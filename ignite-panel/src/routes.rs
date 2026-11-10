@@ -7,8 +7,10 @@ use std::net::IpAddr;
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 
+use diesel::mysql::MysqlConnection;
+use diesel::result::QueryResult;
 use ignite_core::{
-    Column, Conn, Direction, FieldErrors, FormInput, LatestRecords, ListQuery, Pool,
+    Column, Conn, Direction, FieldErrors, FieldKind, FormInput, LatestRecords, ListQuery, Pool,
 };
 use propel_rocket::PropelView;
 use rocket::data::{Data, ToByteUnit};
@@ -36,9 +38,9 @@ use crate::sessions;
 use crate::throttle;
 use crate::users;
 use crate::views::{
-    cell_text, compiled, field_views, record_form, render_page, CardView, CellView, ColumnHead,
-    DashboardPage, FormPage, HeaderView, IndexPage, LatestRow, LatestTable, Layout, LoginPage,
-    ProfilePage, RowView,
+    cell_text, compiled, field_views, field_views_with, record_form, render_page, CardView,
+    CellView, ColumnHead, DashboardPage, FormPage, HeaderView, IndexPage, LatestRow, LatestTable,
+    Layout, LoginPage, ProfilePage, RowView,
 };
 
 /// The largest form body the panel reads.
@@ -132,7 +134,9 @@ async fn dashboard(
             if let Some(declared) = resource.latest_records() {
                 let limit = declared.limit.max(1);
                 let records = resource.latest(conn, limit).map_err(db_status)?;
-                tables.push((declared, resource.columns(), records));
+                let lookups =
+                    lookup_choices(conn, resource.as_ref(), declared.columns).map_err(db_status)?;
+                tables.push((declared, resource.columns(), records, lookups));
             }
         }
         Ok((widgets, tables))
@@ -140,7 +144,9 @@ async fn dashboard(
     .await?;
     let tables = tables
         .into_iter()
-        .map(|(declared, columns, records)| latest_table(&declared, columns, &records))
+        .map(|(declared, columns, records, lookups)| {
+            latest_table(&declared, columns, &records, &lookups)
+        })
         .collect();
 
     let layout = Layout::new(registry, Some(&session), "", flash, token.clone());
@@ -794,8 +800,11 @@ async fn index(
     };
 
     let worker = resource.clone();
-    let (records, total) = blocking(pool, move |conn| {
-        worker.list(conn, &query).map_err(db_status)
+    let keys: Vec<&str> = columns.iter().map(|c| c.key).collect();
+    let (records, total, lookups) = blocking(pool, move |conn| {
+        let (records, total) = worker.list(conn, &query).map_err(db_status)?;
+        let lookups = lookup_choices(conn, worker.as_ref(), &keys).map_err(db_status)?;
+        Ok((records, total, lookups))
     })
     .await?;
 
@@ -806,7 +815,7 @@ async fn index(
             cells: columns
                 .iter()
                 .map(|c| CellView {
-                    text: cell_text(record.get(c.key)),
+                    text: choice_text(record.get(c.key), lookups.get(c.key)),
                 })
                 .collect(),
             edit_url: format!("{index_url}/{id}/edit"),
@@ -886,10 +895,16 @@ async fn new_form(
     session: AdminUser,
     cookies: &CookieJar<'_>,
     registry: &State<Registry>,
+    pool: &State<Pool>,
 ) -> Result<PropelView, Status> {
     authorize(registry, &session, slug, Action::Create)?;
     let resource = registry.find(slug).ok_or(Status::NotFound)?;
     let index_url = format!("{}/{}", registry.mount, resource.slug());
+    let worker = resource.clone();
+    let lookups = blocking(pool, move |conn| {
+        lookup_choices(conn, worker.as_ref(), &field_names(worker.as_ref())).map_err(db_status)
+    })
+    .await?;
     let layout = Layout::new(
         registry,
         Some(&session),
@@ -918,10 +933,11 @@ async fn new_form(
         action: index_url.clone(),
         submit_label: "Create",
         back_url: index_url,
-        fields: field_views(
+        fields: field_views_with(
             resource.fields(),
             &FormInput::default(),
             &FieldErrors::new(),
+            &lookups,
         ),
     };
     Ok(render_page("ignite::form", &page, compiled::form::render))
@@ -954,17 +970,21 @@ async fn create(
             set_flash(cookies, &registry.secret, "Record created.");
             Ok(Reply::Redirect(Box::new(Redirect::to(index_url))))
         }
-        Err(errors) => Ok(form_page(
-            registry,
-            &session,
-            &resource,
-            &form,
-            &errors,
-            format!("New {}", resource.singular()),
-            index_url,
-            "Create",
-            csrf_token(cookies, &registry.secret),
-        )),
+        Err(errors) => {
+            let lookups = form_lookups(pool, &resource).await?;
+            Ok(form_page(
+                registry,
+                &session,
+                &resource,
+                &form,
+                &errors,
+                &lookups,
+                format!("New {}", resource.singular()),
+                index_url,
+                "Create",
+                csrf_token(cookies, &registry.secret),
+            ))
+        }
     }
 }
 
@@ -983,9 +1003,14 @@ async fn edit_form(
     let index_url = format!("{}/{}", registry.mount, resource.slug());
 
     let worker = resource.clone();
-    let record = blocking(pool, move |conn| worker.find(conn, id).map_err(db_status))
-        .await?
-        .ok_or(Status::NotFound)?;
+    let (record, lookups) = blocking(pool, move |conn| {
+        let record = worker.find(conn, id).map_err(db_status)?;
+        let lookups = lookup_choices(conn, worker.as_ref(), &field_names(worker.as_ref()))
+            .map_err(db_status)?;
+        Ok((record, lookups))
+    })
+    .await?;
+    let record = record.ok_or(Status::NotFound)?;
     let form = record_form(resource.fields(), &record);
 
     let layout = Layout::new(
@@ -1016,7 +1041,7 @@ async fn edit_form(
         action: format!("{index_url}/{id}"),
         submit_label: "Save",
         back_url: index_url,
-        fields: field_views(resource.fields(), &form, &FieldErrors::new()),
+        fields: field_views_with(resource.fields(), &form, &FieldErrors::new(), &lookups),
     };
     Ok(render_page("ignite::form", &page, compiled::form::render))
 }
@@ -1050,17 +1075,21 @@ async fn update(
             set_flash(cookies, &registry.secret, "Changes saved.");
             Ok(Reply::Redirect(Box::new(Redirect::to(index_url))))
         }
-        Err(errors) => Ok(form_page(
-            registry,
-            &session,
-            &resource,
-            &form,
-            &errors,
-            format!("Edit {} #{id}", resource.singular()),
-            format!("{index_url}/{id}"),
-            "Save",
-            csrf_token(cookies, &registry.secret),
-        )),
+        Err(errors) => {
+            let lookups = form_lookups(pool, &resource).await?;
+            Ok(form_page(
+                registry,
+                &session,
+                &resource,
+                &form,
+                &errors,
+                &lookups,
+                format!("Edit {} #{id}", resource.singular()),
+                format!("{index_url}/{id}"),
+                "Save",
+                csrf_token(cookies, &registry.secret),
+            ))
+        }
     }
 }
 
@@ -1099,6 +1128,7 @@ fn form_page(
     resource: &Arc<dyn Erased>,
     form: &FormInput,
     errors: &FieldErrors,
+    lookups: &HashMap<&'static str, Vec<(String, String)>>,
     heading: String,
     action: String,
     submit_label: &'static str,
@@ -1126,7 +1156,7 @@ fn form_page(
         action,
         submit_label,
         back_url: format!("{}/{}", registry.mount, resource.slug()),
-        fields: field_views(resource.fields(), form, errors),
+        fields: field_views_with(resource.fields(), form, errors, lookups),
     };
     Reply::Page(
         Status::UnprocessableEntity,
@@ -1229,9 +1259,66 @@ async fn read_form(data: Data<'_>) -> Result<FormInput, Status> {
     Ok(FormInput::new(values))
 }
 
+/// The names of a resource's form fields.
+fn field_names(resource: &dyn Erased) -> Vec<&'static str> {
+    resource.fields().iter().map(|f| f.name).collect()
+}
+
+/// The choices of the lookup fields among `names`, by field name, as the panel shows
+/// them. A field that is not a lookup is skipped, so a list loads only what it shows.
+fn lookup_choices(
+    conn: &mut MysqlConnection,
+    resource: &dyn Erased,
+    names: &[&str],
+) -> QueryResult<HashMap<&'static str, Vec<(String, String)>>> {
+    let mut choices = HashMap::new();
+    for field in resource.fields() {
+        if field.kind == FieldKind::Lookup && names.contains(&field.name) {
+            choices.insert(field.name, resource.options(conn, field.name)?);
+        }
+    }
+    Ok(choices)
+}
+
+/// The choices of a form's lookup fields, read from the database for a form that is
+/// shown again with its errors.
+async fn form_lookups(
+    pool: &State<Pool>,
+    resource: &Arc<dyn Erased>,
+) -> Result<HashMap<&'static str, Vec<(String, String)>>, Status> {
+    let worker = resource.clone();
+    blocking(pool, move |conn| {
+        lookup_choices(conn, worker.as_ref(), &field_names(worker.as_ref())).map_err(db_status)
+    })
+    .await
+}
+
+/// The text a cell shows for a stored value. A lookup field shows the label of its
+/// choice, and any other value shows as `cell_text` shows it.
+fn choice_text(value: Option<&Value>, choices: Option<&Vec<(String, String)>>) -> String {
+    let Some(choices) = choices else {
+        return cell_text(value);
+    };
+    let stored = match value {
+        Some(Value::Number(number)) => number.to_string(),
+        Some(Value::String(text)) => text.clone(),
+        _ => return cell_text(value),
+    };
+    choices
+        .iter()
+        .find(|(value, _)| *value == stored)
+        .map(|(_, label)| label.clone())
+        .unwrap_or(stored)
+}
+
 /// Builds a dashboard table from a resource's declaration and its newest records.
 /// A declared key that is not a column shows its key as the heading.
-fn latest_table(declared: &LatestRecords, columns: &[Column], records: &[Value]) -> LatestTable {
+fn latest_table(
+    declared: &LatestRecords,
+    columns: &[Column],
+    records: &[Value],
+    lookups: &HashMap<&'static str, Vec<(String, String)>>,
+) -> LatestTable {
     let headers = declared
         .columns
         .iter()
@@ -1250,7 +1337,7 @@ fn latest_table(declared: &LatestRecords, columns: &[Column], records: &[Value])
                 .columns
                 .iter()
                 .map(|key| CellView {
-                    text: cell_text(record.get(*key)),
+                    text: choice_text(record.get(*key), lookups.get(*key)),
                 })
                 .collect(),
         })

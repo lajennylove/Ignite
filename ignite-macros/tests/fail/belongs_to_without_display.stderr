@@ -1,0 +1,5 @@
+error: belongs_to and display go together: belongs_to = <table module>, display = <column>
+  --> tests/fail/belongs_to_without_display.rs:17:18
+   |
+17 |     category_id: i32,
+   |                  ^^^

@@ -2,7 +2,7 @@
 
 use std::str::FromStr;
 
-use chrono::NaiveDate;
+use chrono::{NaiveDate, NaiveDateTime};
 
 use crate::form::{FieldErrors, FormInput};
 
@@ -15,15 +15,24 @@ pub enum FieldKind {
     Textarea,
     /// A password. The form never shows the stored value.
     Password,
-    /// A number, submitted as text. A resource's integer field is checked as a whole
+    /// A whole number, submitted as text. A resource's integer field is checked as a whole
     /// number. A profile field accepts decimals as well (see [`Field::check_number`]).
     Number,
+    /// A decimal number, submitted as text, such as `9.5`. The string is the browser's
+    /// step for the input: `"any"` accepts every value, and `"0.01"` steps by cents.
+    Decimal(&'static str),
     /// A yes/no value. Read it with [`FormInput::checkbox`](crate::FormInput::checkbox).
     Checkbox,
     /// One choice from a list of `(value, label)` pairs.
     Select(&'static [(&'static str, &'static str)]),
+    /// One choice from options that the resource loads from the database each time its
+    /// form is shown, such as the rows of a related table. See
+    /// [`IgniteResource::options`](crate::IgniteResource::options).
+    Lookup,
     /// A calendar date, as `YYYY-MM-DD`.
     Date,
+    /// A date and time, as `YYYY-MM-DDTHH:MM`, with seconds when given.
+    DateTime,
 }
 
 /// One input on a create or edit form.
@@ -85,6 +94,64 @@ impl Field {
                 None
             }
         }
+    }
+
+    /// Parses `text` as a decimal number of type `T` (`f32` or `f64`), such as `9.5`. A
+    /// value that is not finite (`inf`, `NaN`, or an `f32` too large) is refused. If it
+    /// does not parse, records "<label> must be a number." in `errors` and returns `None`.
+    pub fn check_decimal<T: FromStr + Into<f64> + Copy>(
+        &self,
+        text: &str,
+        errors: &mut FieldErrors,
+    ) -> Option<T> {
+        match text.parse::<T>() {
+            Ok(value) if Into::<f64>::into(value).is_finite() => Some(value),
+            _ => {
+                errors.insert(self.name, format!("{} must be a number.", self.label));
+                None
+            }
+        }
+    }
+
+    /// Parses `text` as a date and time: `YYYY-MM-DDTHH:MM` as a date-time input sends it,
+    /// or with a space in place of the `T`, and with seconds when given. If it does not
+    /// parse, records "<label> must be a date and time, as YYYY-MM-DD HH:MM." in `errors`
+    /// and returns `None`.
+    pub fn check_datetime(&self, text: &str, errors: &mut FieldErrors) -> Option<NaiveDateTime> {
+        const FORMATS: [&str; 4] = [
+            "%Y-%m-%dT%H:%M",
+            "%Y-%m-%dT%H:%M:%S",
+            "%Y-%m-%d %H:%M",
+            "%Y-%m-%d %H:%M:%S",
+        ];
+        let parsed = FORMATS
+            .iter()
+            .find_map(|format| NaiveDateTime::parse_from_str(text, format).ok());
+        if parsed.is_none() {
+            errors.insert(
+                self.name,
+                format!(
+                    "{} must be a date and time, as YYYY-MM-DD HH:MM.",
+                    self.label
+                ),
+            );
+        }
+        parsed
+    }
+
+    /// Checks that `text` is the value of one of `choices`. If it is not, records
+    /// "Choose one of the options." in `errors` and returns false.
+    pub fn check_choice(
+        &self,
+        text: &str,
+        choices: &[(&str, &str)],
+        errors: &mut FieldErrors,
+    ) -> bool {
+        if choices.iter().any(|(value, _)| *value == text) {
+            return true;
+        }
+        errors.insert(self.name, "Choose one of the options.".to_string());
+        false
     }
 
     /// Parses `text` as a `YYYY-MM-DD` date. If it does not parse, records
@@ -154,6 +221,96 @@ mod tests {
         assert_eq!(
             errors.get("title").map(String::as_str),
             Some("Title is required.")
+        );
+    }
+
+    const PRICE: Field = Field {
+        name: "price",
+        label: "Price",
+        kind: FieldKind::Decimal("any"),
+        required: true,
+    };
+
+    const LAUNCH: Field = Field {
+        name: "launch",
+        label: "Launch",
+        kind: FieldKind::DateTime,
+        required: true,
+    };
+
+    #[test]
+    fn a_decimal_accepts_whole_and_fractional_numbers() {
+        let mut errors = FieldErrors::new();
+
+        assert_eq!(PRICE.check_decimal::<f64>("9.5", &mut errors), Some(9.5));
+        assert_eq!(PRICE.check_decimal::<f64>("-3", &mut errors), Some(-3.0));
+        assert_eq!(PRICE.check_decimal::<f32>("0.25", &mut errors), Some(0.25));
+        assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn a_decimal_refuses_text_and_values_that_are_not_finite() {
+        for text in ["abc", "9,5", "NaN", "inf", ""] {
+            let mut errors = FieldErrors::new();
+            assert_eq!(
+                PRICE.check_decimal::<f64>(text, &mut errors),
+                None,
+                "{text}"
+            );
+            assert_eq!(
+                errors.get("price").map(String::as_str),
+                Some("Price must be a number."),
+                "{text}"
+            );
+        }
+        let mut errors = FieldErrors::new();
+        assert_eq!(PRICE.check_decimal::<f32>("1e300", &mut errors), None);
+        assert!(errors.contains_key("price"));
+    }
+
+    #[test]
+    fn a_datetime_accepts_the_input_format_with_or_without_seconds() {
+        let mut errors = FieldErrors::new();
+        let expected = chrono::NaiveDate::from_ymd_opt(2026, 11, 10)
+            .unwrap()
+            .and_hms_opt(14, 30, 0)
+            .unwrap();
+
+        assert_eq!(
+            LAUNCH.check_datetime("2026-11-10T14:30", &mut errors),
+            Some(expected)
+        );
+        assert_eq!(
+            LAUNCH.check_datetime("2026-11-10 14:30:00", &mut errors),
+            Some(expected)
+        );
+        assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn a_datetime_refuses_what_is_not_a_date_and_time() {
+        for text in ["soon", "2026-11-10", "2026-13-40T10:00", "10/11/2026 14:30"] {
+            let mut errors = FieldErrors::new();
+            assert_eq!(LAUNCH.check_datetime(text, &mut errors), None, "{text}");
+            assert_eq!(
+                errors.get("launch").map(String::as_str),
+                Some("Launch must be a date and time, as YYYY-MM-DD HH:MM."),
+                "{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_choice_must_be_one_of_the_choices() {
+        let choices = [("draft", "Draft"), ("published", "Published")];
+        let mut errors = FieldErrors::new();
+
+        assert!(TITLE.check_choice("draft", &choices, &mut errors));
+        assert!(errors.is_empty());
+        assert!(!TITLE.check_choice("archived", &choices, &mut errors));
+        assert_eq!(
+            errors.get("title").map(String::as_str),
+            Some("Choose one of the options.")
         );
     }
 

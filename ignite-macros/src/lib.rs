@@ -27,12 +27,19 @@ use syn::{
 /// - `primary_key`: the key column. Defaults to a field named `id`.
 /// - `label = "..."`: the label. Defaults to the field name, capitalized and spaced.
 /// - `form_type = "text" | "textarea" | "password" | "number" | "checkbox" | "date"`: the input. Defaults from the type.
+/// - `options = [("draft", "Draft"), ...]`: a select with a fixed list of choices. The field must be a `String`.
+/// - `options = load_choices`: a select whose choices come from a function, `fn(&mut MysqlConnection) -> QueryResult<Vec<(String, String)>>`, called each time the form is shown. The field must be a `String` or an integer.
+/// - `belongs_to = schema::categories, display = name`: a relation. The field stores the related row's `id`, the select lists the related table's rows by `display`, and the list shows that name. The field must be an `i32` or `i64`, and the related table's key must be `id`.
+/// - `step = "0.01"`: the browser's step for an `f32` or `f64` input. The default is `"any"`.
 /// - `required` or `required = false`: whether a blank value is rejected. Non-`Option` fields are required by default.
 /// - `searchable`, `sortable`: the list's search and sort columns.
 /// - `hidden_on_index`: leaves the column out of the list.
 ///
-/// Supported field types: `String`, `i32`, `i64`, `bool`, `chrono::NaiveDate`,
-/// and `Option` of any of them. The primary key must be `i32` or `i64`.
+/// Supported field types: `String`, `i16`, `i32`, `i64`, `f32`, `f64`, `bool`,
+/// `chrono::NaiveDate`, `chrono::NaiveDateTime`, and `Option` of any of them. The primary
+/// key must be `i32` or `i64`. A `String` field is a text input (or a textarea, a password
+/// or a select, by attribute); an `f32` or `f64` is a decimal input; a `NaiveDateTime` is a
+/// date-and-time input; a `bool` is a checkbox.
 #[proc_macro_derive(IgniteResource, attributes(ignite))]
 pub fn derive_ignite_resource(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
@@ -48,6 +55,8 @@ struct Field {
     ty: Type,
     /// The inner type, for `Option<T>`; otherwise the type itself.
     inner: Type,
+    /// What the inner type parses from form text.
+    base: Base,
     optional: bool,
     kind: Kind,
     label: String,
@@ -58,6 +67,12 @@ struct Field {
     hidden_on_index: bool,
     /// A password: hashed on save, and blank on an edit keeps the stored hash.
     is_password: bool,
+    /// The choices of a static select.
+    choices: Vec<(String, String)>,
+    /// Where a lookup field's choices come from.
+    lookup: Option<Lookup>,
+    /// The step of a decimal input, as written.
+    step: Option<String>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -66,8 +81,12 @@ enum Kind {
     Textarea,
     Password,
     Number,
+    Decimal,
     Checkbox,
+    Select,
+    Lookup,
     Date,
+    DateTime,
 }
 
 /// The Rust base type the field parses from form text.
@@ -75,8 +94,27 @@ enum Kind {
 enum Base {
     Text,
     Integer,
+    Decimal,
     Bool,
     Date,
+    DateTime,
+}
+
+/// The `options` attribute: fixed choices, or a function that loads them.
+enum OptionsSpec {
+    Static(Vec<(String, String)>),
+    Dynamic(syn::Path),
+}
+
+/// Where a lookup field's choices come from.
+enum Lookup {
+    /// A function that returns the choices.
+    Dynamic(syn::Path),
+    /// The rows of a related table: `id` as the value, the `display` column as the label.
+    Related {
+        table: syn::Path,
+        display: syn::Ident,
+    },
 }
 
 fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
@@ -120,7 +158,7 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
         .find(|f| f.primary_key)
         .or_else(|| fields.iter().find(|f| f.ident == "id"))
         .ok_or_else(|| syn::Error::new_spanned(name, "IgniteResource needs a primary key: a field named `id` or one marked `primary_key`"))?;
-    if base_of(&primary.inner) != Some(Base::Integer) {
+    if !is_key_type(&primary.inner) {
         return Err(syn::Error::new_spanned(
             &primary.ty,
             "the primary key must be an i32 or i64",
@@ -138,19 +176,13 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
     let input_name = format_ident!("{}Input", name);
 
     for f in &form_fields {
-        if f.is_password && base_of(&f.inner) != Some(Base::Text) {
+        if f.is_password && f.base != Base::Text {
             return Err(syn::Error::new_spanned(
                 &f.ty,
                 "a password field must be a String (or Option<String>), so the derive can hash it",
             ));
         }
-        if base_of(&f.inner).is_none() {
-            return Err(syn::Error::new_spanned(
-                &f.ty,
-                "unsupported field type: use String, i32, i64, bool, chrono::NaiveDate, or Option of one",
-            ));
-        }
-        if !f.optional && !f.required && base_of(&f.inner) != Some(Base::Bool) {
+        if !f.optional && !f.required && f.base != Base::Bool {
             return Err(syn::Error::new_spanned(
                 &f.ty,
                 "a field that is not an Option is required; remove `required = false` or make the field an Option",
@@ -179,10 +211,17 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
         }
     };
 
+    let lookup_fields: Vec<&Field> = form_fields
+        .iter()
+        .copied()
+        .filter(|f| f.lookup.is_some())
+        .collect();
+    let options_fn = options_method(&lookup_fields);
+
     let field_defs = form_fields.iter().map(|f| {
         let name_lit = f.ident.to_string();
         let label = &f.label;
-        let kind = kind_tokens(f.kind);
+        let kind = kind_tokens(f);
         let required = f.required;
         quote! {
             ::ignite_core::Field {
@@ -412,6 +451,8 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
             ) -> ::core::result::Result<#input_name, ::ignite_core::FieldErrors> {
                 #name::__ignite_validate(form, false)
             }
+
+            #options_fn
         }
 
         impl #name {
@@ -589,6 +630,12 @@ fn field_attrs(field: &syn::Field) -> syn::Result<Field> {
         Some(inner) => (true, inner.clone()),
         None => (false, ty.clone()),
     };
+    let base = base_of(&inner).ok_or_else(|| {
+        syn::Error::new_spanned(
+            &ty,
+            "unsupported field type: use String, i16, i32, i64, f32, f64, bool, chrono::NaiveDate, chrono::NaiveDateTime, or Option of one",
+        )
+    })?;
 
     let mut label = None;
     let mut form_type = None;
@@ -597,6 +644,10 @@ fn field_attrs(field: &syn::Field) -> syn::Result<Field> {
     let mut searchable = false;
     let mut sortable = false;
     let mut hidden_on_index = false;
+    let mut options = None;
+    let mut belongs_to = None;
+    let mut display = None;
+    let mut step = None;
     for attr in field.attrs.iter().filter(|a| a.path().is_ident("ignite")) {
         attr.parse_nested_meta(|meta| {
             if meta.path.is_ident("label") {
@@ -618,28 +669,99 @@ fn field_attrs(field: &syn::Field) -> syn::Result<Field> {
                 sortable = true;
             } else if meta.path.is_ident("hidden_on_index") {
                 hidden_on_index = true;
+            } else if meta.path.is_ident("options") {
+                let expr: syn::Expr = meta.value()?.parse()?;
+                options = Some(options_of(&expr)?);
+            } else if meta.path.is_ident("belongs_to") {
+                belongs_to = Some(meta.value()?.parse::<syn::Path>()?);
+            } else if meta.path.is_ident("display") {
+                display = Some(meta.value()?.parse::<syn::Ident>()?);
+            } else if meta.path.is_ident("step") {
+                step = Some(meta.value()?.parse::<LitStr>()?);
             } else {
                 return Err(meta.error(
-                    "unknown ignite attribute; expected label, form_type, required, primary_key, searchable, sortable or hidden_on_index",
+                    "unknown ignite attribute; expected label, form_type, required, primary_key, searchable, sortable, hidden_on_index, options, belongs_to, display or step",
                 ));
             }
             Ok(())
         })?;
     }
 
-    let base = base_of(&inner);
-    let kind =
+    // Options and a relation both make a select, so neither takes a form_type of its own.
+    let lookup_attr = options.is_some() || belongs_to.is_some();
+    if lookup_attr && form_type.is_some() {
+        return Err(syn::Error::new_spanned(
+            &ty,
+            "a field with options or belongs_to is a select: remove form_type",
+        ));
+    }
+    if belongs_to.is_some() != display.is_some() {
+        return Err(syn::Error::new_spanned(
+            &ty,
+            "belongs_to and display go together: belongs_to = <table module>, display = <column>",
+        ));
+    }
+    if options.is_some() && belongs_to.is_some() {
+        return Err(syn::Error::new_spanned(
+            &ty,
+            "a field takes options or belongs_to, not both",
+        ));
+    }
+
+    let mut choices = Vec::new();
+    let mut lookup = None;
+    let kind = if let Some(spec) = options {
+        match spec {
+            OptionsSpec::Static(pairs) => {
+                if base != Base::Text {
+                    return Err(syn::Error::new_spanned(
+                        &ty,
+                        "a field with a list of options must be a String (or Option<String>)",
+                    ));
+                }
+                choices = pairs;
+                Kind::Select
+            }
+            OptionsSpec::Dynamic(path) => {
+                if !matches!(base, Base::Text | Base::Integer) {
+                    return Err(syn::Error::new_spanned(
+                        &ty,
+                        "a field with options from a function must be a String or an integer",
+                    ));
+                }
+                lookup = Some(Lookup::Dynamic(path));
+                Kind::Lookup
+            }
+        }
+    } else if let Some(table) = belongs_to {
+        if base != Base::Integer {
+            return Err(syn::Error::new_spanned(
+                &ty,
+                "a belongs_to field stores the related row's id, so it must be an i32 or i64",
+            ));
+        }
+        lookup = Some(Lookup::Related {
+            table,
+            display: display
+                .clone()
+                .expect("checked: display is set with belongs_to"),
+        });
+        Kind::Lookup
+    } else {
         match form_type.as_ref().map(|s| s.value()) {
             None => match base {
-                Some(Base::Bool) => Kind::Checkbox,
-                Some(Base::Integer) => Kind::Number,
-                Some(Base::Date) => Kind::Date,
-                _ => Kind::Text,
+                Base::Bool => Kind::Checkbox,
+                Base::Integer => Kind::Number,
+                Base::Decimal => Kind::Decimal,
+                Base::Date => Kind::Date,
+                Base::DateTime => Kind::DateTime,
+                Base::Text => Kind::Text,
             },
             Some(value) => match value.as_str() {
                 "text" => Kind::Text,
                 "textarea" => Kind::Textarea,
                 "password" => Kind::Password,
+                "number" if base == Base::Decimal => Kind::Decimal,
                 "number" => Kind::Number,
                 "checkbox" => Kind::Checkbox,
                 "date" => Kind::Date,
@@ -648,16 +770,25 @@ fn field_attrs(field: &syn::Field) -> syn::Result<Field> {
                     "form_type must be one of text, textarea, password, number, checkbox or date",
                 )),
             },
-        };
+        }
+    };
+
+    if step.is_some() && base != Base::Decimal {
+        return Err(syn::Error::new_spanned(
+            &ty,
+            "step applies to an f32 or f64 field",
+        ));
+    }
 
     // A checkbox is never blank, so it is not required unless asked.
-    let required = required_attr.unwrap_or(!optional && base != Some(Base::Bool));
+    let required = required_attr.unwrap_or(!optional && base != Base::Bool);
     let label = label.unwrap_or_else(|| capitalize(&ident.to_string().replace('_', " ")));
 
     Ok(Field {
         ident,
         ty,
         inner,
+        base,
         optional,
         kind,
         label,
@@ -667,7 +798,52 @@ fn field_attrs(field: &syn::Field) -> syn::Result<Field> {
         sortable,
         hidden_on_index,
         is_password: kind == Kind::Password,
+        choices,
+        lookup,
+        step: step.map(|s| s.value()),
     })
+}
+
+/// The `options = ...` attribute: a list of `("value", "Label")` pairs, or the path of a
+/// function that returns the choices from the database.
+fn options_of(expr: &syn::Expr) -> syn::Result<OptionsSpec> {
+    match expr {
+        syn::Expr::Array(array) => {
+            let mut pairs = Vec::new();
+            for element in &array.elems {
+                let syn::Expr::Tuple(tuple) = element else {
+                    return Err(syn::Error::new_spanned(
+                        element,
+                        "each option is a pair, such as (\"draft\", \"Draft\")",
+                    ));
+                };
+                let [value, label] = tuple.elems.iter().collect::<Vec<_>>()[..] else {
+                    return Err(syn::Error::new_spanned(
+                        tuple,
+                        "each option is a pair, such as (\"draft\", \"Draft\")",
+                    ));
+                };
+                pairs.push((string_literal(value)?, string_literal(label)?));
+            }
+            Ok(OptionsSpec::Static(pairs))
+        }
+        syn::Expr::Path(path) => Ok(OptionsSpec::Dynamic(path.path.clone())),
+        _ => Err(syn::Error::new_spanned(
+            expr,
+            "options is a list of (\"value\", \"Label\") pairs, or the path of a function that returns them",
+        )),
+    }
+}
+
+/// The text of a string literal, or an error at the expression.
+fn string_literal(expr: &syn::Expr) -> syn::Result<String> {
+    match expr {
+        syn::Expr::Lit(syn::ExprLit {
+            lit: syn::Lit::Str(text),
+            ..
+        }) => Ok(text.value()),
+        _ => Err(syn::Error::new_spanned(expr, "expected a string literal")),
+    }
 }
 
 /// The type inside `Option<T>`, if the type is one.
@@ -692,22 +868,52 @@ fn base_of(ty: &Type) -> Option<Base> {
     let ident = path.path.segments.last()?.ident.to_string();
     match ident.as_str() {
         "String" => Some(Base::Text),
-        "i32" | "i64" => Some(Base::Integer),
+        "i16" | "i32" | "i64" => Some(Base::Integer),
+        "f32" | "f64" => Some(Base::Decimal),
         "bool" => Some(Base::Bool),
         "NaiveDate" => Some(Base::Date),
+        "NaiveDateTime" => Some(Base::DateTime),
         _ => None,
     }
 }
 
-fn kind_tokens(kind: Kind) -> TokenStream2 {
-    match kind {
+/// Whether a primary key has a type the query methods accept: `i32` or `i64`.
+fn is_key_type(ty: &Type) -> bool {
+    let Type::Path(path) = ty else { return false };
+    path.path
+        .segments
+        .last()
+        .is_some_and(|s| matches!(s.ident.to_string().as_str(), "i32" | "i64"))
+}
+
+/// The `FieldKind` a field's form input has, as tokens.
+fn kind_tokens(field: &Field) -> TokenStream2 {
+    match field.kind {
         Kind::Text => quote! { ::ignite_core::FieldKind::Text },
         Kind::Textarea => quote! { ::ignite_core::FieldKind::Textarea },
         Kind::Password => quote! { ::ignite_core::FieldKind::Password },
         Kind::Number => quote! { ::ignite_core::FieldKind::Number },
+        Kind::Decimal => {
+            let step = field.step.as_deref().unwrap_or("any");
+            quote! { ::ignite_core::FieldKind::Decimal(#step) }
+        }
         Kind::Checkbox => quote! { ::ignite_core::FieldKind::Checkbox },
+        Kind::Select => {
+            let pairs = choice_pairs(&field.choices);
+            quote! { ::ignite_core::FieldKind::Select(&[#(#pairs),*]) }
+        }
+        Kind::Lookup => quote! { ::ignite_core::FieldKind::Lookup },
         Kind::Date => quote! { ::ignite_core::FieldKind::Date },
+        Kind::DateTime => quote! { ::ignite_core::FieldKind::DateTime },
     }
+}
+
+/// The `(value, label)` tuples of a static list of options.
+fn choice_pairs(choices: &[(String, String)]) -> Vec<TokenStream2> {
+    choices
+        .iter()
+        .map(|(value, label)| quote! { (#value, #label) })
+        .collect()
 }
 
 /// One `let` in `validate`: reads the field from the form into an `Option` of its base value,
@@ -716,10 +922,11 @@ fn validate_expr(field: &Field) -> TokenStream2 {
     let ident = &field.ident;
     let name = ident.to_string();
     let label = &field.label;
-    let kind = kind_tokens(field.kind);
+    let kind = kind_tokens(field);
     let required = field.required;
-    let base = base_of(&field.inner).expect("checked before expansion");
+    let base = field.base;
     let is_password = field.is_password;
+    let ty = &field.inner;
 
     let convert = match base {
         Base::Text if is_password => {
@@ -734,13 +941,26 @@ fn validate_expr(field: &Field) -> TokenStream2 {
                 }
             }
         }
+        Base::Text if field.kind == Kind::Select => {
+            let pairs = choice_pairs(&field.choices);
+            quote! {
+                {
+                    let text = text.trim();
+                    let choices: &[(&str, &str)] = &[#(#pairs),*];
+                    if field.check_choice(text, choices, &mut errors) {
+                        ::core::option::Option::Some(text.to_string())
+                    } else {
+                        ::core::option::Option::None
+                    }
+                }
+            }
+        }
         Base::Text => quote! { ::core::option::Option::Some(text.to_string()) },
         Base::Bool => quote! { ::core::option::Option::Some(form.checkbox(#name)) },
-        Base::Integer => {
-            let ty = &field.inner;
-            quote! { field.check_whole_number::<#ty>(text, &mut errors) }
-        }
+        Base::Integer => quote! { field.check_whole_number::<#ty>(text, &mut errors) },
+        Base::Decimal => quote! { field.check_decimal::<#ty>(text, &mut errors) },
         Base::Date => quote! { field.check_date(text, &mut errors) },
+        Base::DateTime => quote! { field.check_datetime(text, &mut errors) },
     };
 
     // Booleans are never blank: an unticked checkbox is false.
@@ -763,6 +983,49 @@ fn validate_expr(field: &Field) -> TokenStream2 {
                 ::core::option::Option::None => ::core::option::Option::None,
             }
         };
+    }
+}
+
+/// The `options` method, which the panel calls for each lookup field. It is written
+/// only when the model has one, so the trait's default serves the rest.
+fn options_method(lookups: &[&Field]) -> TokenStream2 {
+    if lookups.is_empty() {
+        return quote! {};
+    }
+    let arms = lookups.iter().map(|f| {
+        let name_lit = f.ident.to_string();
+        match f.lookup.as_ref().expect("checked: a lookup field") {
+            Lookup::Dynamic(path) => quote! { #name_lit => #path(conn), },
+            Lookup::Related { table, display } => {
+                let key_ty = &f.inner;
+                quote! {
+                    #name_lit => {
+                        #[allow(unused_imports)]
+                        use #table as __related;
+                        let rows: ::std::vec::Vec<(#key_ty, ::std::string::String)> = __related::table
+                            .select((__related::id, __related::#display))
+                            .order(__related::#display.asc())
+                            .load(conn)?;
+                        ::core::result::Result::Ok(
+                            rows.into_iter().map(|(id, label)| (id.to_string(), label)).collect(),
+                        )
+                    }
+                }
+            }
+        }
+    });
+    quote! {
+        fn options(
+            conn: &mut ::diesel::mysql::MysqlConnection,
+            field: &str,
+        ) -> ::diesel::result::QueryResult<::std::vec::Vec<(::std::string::String, ::std::string::String)>> {
+            #[allow(unused_imports)]
+            use ::diesel::prelude::*;
+            match field {
+                #(#arms)*
+                _ => ::core::result::Result::Ok(::std::vec::Vec::new()),
+            }
+        }
     }
 }
 

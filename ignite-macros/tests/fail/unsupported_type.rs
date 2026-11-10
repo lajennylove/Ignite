@@ -13,7 +13,7 @@ mod schema {
 #[ignite(table = schema::widgets)]
 pub struct Widget {
     id: i32,
-    weight: f64,
+    weight: u64,
 }
 
 fn main() {}

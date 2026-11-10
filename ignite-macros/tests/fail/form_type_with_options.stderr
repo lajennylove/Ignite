@@ -1,0 +1,5 @@
+error: a field with options or belongs_to is a select: remove form_type
+  --> tests/fail/form_type_with_options.rs:17:13
+   |
+17 |     status: String,
+   |             ^^^^^^

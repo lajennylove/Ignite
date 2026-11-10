@@ -1,0 +1,5 @@
+error: the primary key must be an i32 or i64
+  --> tests/fail/key_not_i32_or_i64.rs:15:9
+   |
+15 |     id: i16,
+   |         ^^^

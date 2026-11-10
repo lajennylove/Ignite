@@ -6,7 +6,8 @@ use std::marker::PhantomData;
 use diesel::mysql::MysqlConnection;
 use diesel::result::{DatabaseErrorKind, Error as DieselError, QueryResult};
 use ignite_core::{
-    Column, Field, FieldErrors, FormInput, IgniteResource, LatestRecords, ListQuery, StatWidget,
+    Column, Field, FieldErrors, FieldKind, FormInput, IgniteResource, LatestRecords, ListQuery,
+    StatWidget,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -42,6 +43,12 @@ pub(crate) trait Erased: Send + Sync {
     fn latest_records(&self) -> Option<LatestRecords>;
     /// The newest records as JSON, up to `limit`.
     fn latest(&self, conn: &mut MysqlConnection, limit: i64) -> QueryResult<Vec<Value>>;
+    /// The choices of a lookup field, as `(value, label)` pairs.
+    fn options(
+        &self,
+        conn: &mut MysqlConnection,
+        field: &str,
+    ) -> QueryResult<Vec<(String, String)>>;
 }
 
 /// Wraps an [`IgniteResource`] type as an [`Erased`] value.
@@ -101,7 +108,7 @@ impl<R: IgniteResource> Erased for Adapter<R> {
         conn: &mut MysqlConnection,
         form: &FormInput,
     ) -> QueryResult<Result<Value, FieldErrors>> {
-        match R::validate(form) {
+        match checked::<R>(conn, form, R::validate(form))? {
             Ok(input) => match R::create(conn, input) {
                 Ok(record) => to_json(record).map(Ok),
                 Err(error) => unique_violation(error, R::SLUG, R::fields()).map(Err),
@@ -116,7 +123,7 @@ impl<R: IgniteResource> Erased for Adapter<R> {
         id: i64,
         form: &FormInput,
     ) -> QueryResult<Result<Value, FieldErrors>> {
-        match R::validate_update(form) {
+        match checked::<R>(conn, form, R::validate_update(form))? {
             Ok(input) => match R::update(conn, id, input) {
                 Ok(record) => to_json(record).map(Ok),
                 Err(error) => unique_violation(error, R::SLUG, R::fields()).map(Err),
@@ -140,6 +147,42 @@ impl<R: IgniteResource> Erased for Adapter<R> {
     fn latest(&self, conn: &mut MysqlConnection, limit: i64) -> QueryResult<Vec<Value>> {
         R::latest(conn, limit)?.into_iter().map(to_json).collect()
     }
+
+    fn options(
+        &self,
+        conn: &mut MysqlConnection,
+        field: &str,
+    ) -> QueryResult<Vec<(String, String)>> {
+        R::options(conn, field)
+    }
+}
+
+/// Adds to a validated form the errors of its lookup fields: a submitted value must be
+/// one of the field's choices, so a row that does not exist is refused. A field that
+/// already has an error keeps it. The database is read only for the lookup fields the
+/// form submits.
+fn checked<R: IgniteResource>(
+    conn: &mut MysqlConnection,
+    form: &FormInput,
+    validated: Result<R::Input, FieldErrors>,
+) -> QueryResult<Result<R::Input, FieldErrors>> {
+    let mut errors = validated.as_ref().err().cloned().unwrap_or_default();
+    for field in R::fields().iter().filter(|f| f.kind == FieldKind::Lookup) {
+        let Some(value) = form.get(field.name) else {
+            continue;
+        };
+        let choices = R::options(conn, field.name)?;
+        if !choices.iter().any(|(choice, _)| choice == value.trim()) {
+            errors
+                .entry(field.name)
+                .or_insert_with(|| "Choose one of the options.".to_string());
+        }
+    }
+    Ok(if errors.is_empty() {
+        validated
+    } else {
+        Err(errors)
+    })
 }
 
 /// The name of the unique index on `field` of `table`. The panel's migrations name

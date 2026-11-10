@@ -105,6 +105,34 @@ rocket::build().attach(
 
 The panel is served under `/admin`. Its health check is `GET /up`, at the application root. It answers with a minimal HTML page, "Application up", and needs no sign-in. The documentation explains how to define a resource, its fields and columns, the profile fields an app adds, and how to extend the layout.
 
+## Resources
+
+A resource is a Diesel model with `#[derive(IgniteResource)]`. The derive writes the form, the list and the queries. Each field's type sets its input and its check:
+
+| Rust type | Input | Checked as |
+| --- | --- | --- |
+| `String` | text, or `textarea`, `password` by attribute | any text, required unless `Option` |
+| `i16`, `i32`, `i64` | number | a whole number in the type's range |
+| `f32`, `f64` | number, with `step = "0.01"` (default `any`) | a finite number |
+| `bool` | checkbox | ticked or not |
+| `chrono::NaiveDate` | date | `YYYY-MM-DD` |
+| `chrono::NaiveDateTime` | date and time | `YYYY-MM-DD HH:MM`, with seconds if given |
+
+A select is a `String` field with a list of choices, or a field whose choices come from the database:
+
+```rust
+#[ignite(options = [("draft", "Draft"), ("published", "Published")])]
+status: String,
+
+#[ignite(options = load_categories)]
+tag: Option<String>,
+
+#[ignite(belongs_to = schema::categories, display = name)]
+category_id: Option<i32>,
+```
+
+`load_categories` is a function `fn(&mut MysqlConnection) -> QueryResult<Vec<(String, String)>>`, called each time a form is shown. A `belongs_to` field stores the related row's `id`. Its select lists the rows of the related table by their `display` column, and the list shows that name. A submitted value must be one of the choices, so a value with no row is refused. The derive does not write a foreign key: add one in the migration if the database should enforce it.
+
 ## Roles and permissions
 
 The panel follows Filament and its standard plugin, Filament Shield (built on Spatie laravel-permission). Each resource has five abilities, named after its slug:

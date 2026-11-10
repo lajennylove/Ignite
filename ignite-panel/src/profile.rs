@@ -151,11 +151,14 @@ pub(crate) fn validate(
         .to_string();
         if !text.is_empty() {
             match field.kind {
-                FieldKind::Number => {
+                FieldKind::Number | FieldKind::Decimal(_) => {
                     field.check_number(&text, &mut errors);
                 }
                 FieldKind::Date => {
                     field.check_date(&text, &mut errors);
+                }
+                FieldKind::DateTime => {
+                    field.check_datetime(&text, &mut errors);
                 }
                 FieldKind::Select(choices)
                     if !choices.iter().any(|(choice, _)| *choice == text) =>

@@ -1,6 +1,8 @@
 //! The view models the Propel templates read. Propel expressions can only read
 //! a path, so every condition, URL and label is computed here first.
 
+use std::collections::HashMap;
+
 use chrono::{DateTime, NaiveDate, NaiveDateTime};
 use propel_rocket::PropelView;
 
@@ -372,8 +374,9 @@ pub(crate) struct FieldView {
     pub(crate) is_textarea: bool,
     pub(crate) is_checkbox: bool,
     pub(crate) is_select: bool,
-    /// A number input accepts decimals, so the browser's step is "any".
-    pub(crate) is_number: bool,
+    /// A decimal input has a step, which the browser checks the value against.
+    pub(crate) has_step: bool,
+    pub(crate) step: &'static str,
     pub(crate) value: String,
     pub(crate) checked: bool,
     pub(crate) options: Vec<OptionView>,
@@ -383,38 +386,66 @@ pub(crate) struct FieldView {
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct OptionView {
-    pub(crate) value: &'static str,
-    pub(crate) label: &'static str,
+    pub(crate) value: String,
+    pub(crate) label: String,
     pub(crate) selected: bool,
 }
 
 impl FieldView {
     /// Builds the input for `field`, with the value from `form` and the
-    /// error for it, if there is one. A password is never filled in.
-    pub(crate) fn new(field: &Field, form: &FormInput, errors: &FieldErrors) -> Self {
+    /// error for it, if there is one. A password is never filled in. A lookup
+    /// field's choices come from `lookup`, which the panel loads from the database.
+    pub(crate) fn new(
+        field: &Field,
+        form: &FormInput,
+        errors: &FieldErrors,
+        lookup: &[(String, String)],
+    ) -> Self {
         let (input_type, is_textarea, is_checkbox, is_select) = match field.kind {
             FieldKind::Text => ("text", false, false, false),
             FieldKind::Textarea => ("text", true, false, false),
             FieldKind::Password => ("password", false, false, false),
             FieldKind::Number => ("number", false, false, false),
+            FieldKind::Decimal(_) => ("number", false, false, false),
             FieldKind::Checkbox => ("checkbox", false, true, false),
-            FieldKind::Select(_) => ("text", false, false, true),
+            FieldKind::Select(_) | FieldKind::Lookup => ("text", false, false, true),
             FieldKind::Date => ("date", false, false, false),
+            FieldKind::DateTime => ("datetime-local", false, false, false),
+        };
+        // A number input accepts any value, as before: a resource's whole number is
+        // checked on the server, and a profile number may be a decimal.
+        let step = match field.kind {
+            FieldKind::Decimal(step) => step,
+            FieldKind::Number => "any",
+            _ => "",
         };
         let value = match field.kind {
             FieldKind::Password => String::new(),
             _ => form.get(field.name).unwrap_or("").to_string(),
         };
-        let options = match field.kind {
+        // A select starts with a placeholder, so the browser does not submit the first choice.
+        let choices: Vec<(String, String)> = match field.kind {
             FieldKind::Select(choices) => choices
                 .iter()
-                .map(|(v, label)| OptionView {
-                    value: v,
-                    label,
-                    selected: *v == value,
-                })
+                .map(|(v, label)| (v.to_string(), label.to_string()))
                 .collect(),
+            FieldKind::Lookup => lookup.to_vec(),
             _ => Vec::new(),
+        };
+        let options = if is_select {
+            std::iter::once(OptionView {
+                value: String::new(),
+                label: "Select an option".to_string(),
+                selected: value.is_empty(),
+            })
+            .chain(choices.into_iter().map(|(v, label)| OptionView {
+                selected: v == value,
+                value: v,
+                label,
+            }))
+            .collect()
+        } else {
+            Vec::new()
         };
         let error = errors.get(field.name).cloned();
 
@@ -426,7 +457,8 @@ impl FieldView {
             is_textarea,
             is_checkbox,
             is_select,
-            is_number: field.kind == FieldKind::Number,
+            has_step: !step.is_empty(),
+            step,
             value,
             checked: is_checkbox && form.checkbox(field.name),
             options,
@@ -465,15 +497,30 @@ pub(crate) fn record_form(fields: &[Field], record: &Value) -> FormInput {
     FormInput::new(values)
 }
 
-/// The fields of a form page, in display order.
+/// The fields of a form page, in display order. A form with lookup fields uses
+/// [`field_views_with`] instead.
 pub(crate) fn field_views(
     fields: &[Field],
     form: &FormInput,
     errors: &FieldErrors,
 ) -> Vec<FieldView> {
+    field_views_with(fields, form, errors, &HashMap::new())
+}
+
+/// The fields of a form page, in display order. `lookups` holds the choices of each
+/// lookup field, by field name.
+pub(crate) fn field_views_with(
+    fields: &[Field],
+    form: &FormInput,
+    errors: &FieldErrors,
+    lookups: &HashMap<&str, Vec<(String, String)>>,
+) -> Vec<FieldView> {
     fields
         .iter()
-        .map(|f| FieldView::new(f, form, errors))
+        .map(|f| {
+            let lookup = lookups.get(f.name).map(Vec::as_slice).unwrap_or(&[]);
+            FieldView::new(f, form, errors, lookup)
+        })
         .collect()
 }
 

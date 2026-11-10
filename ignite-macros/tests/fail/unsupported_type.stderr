@@ -1,5 +1,5 @@
-error: unsupported field type: use String, i32, i64, bool, chrono::NaiveDate, or Option of one
+error: unsupported field type: use String, i16, i32, i64, f32, f64, bool, chrono::NaiveDate, chrono::NaiveDateTime, or Option of one
   --> tests/fail/unsupported_type.rs:16:13
    |
-16 |     weight: f64,
+16 |     weight: u64,
    |             ^^^

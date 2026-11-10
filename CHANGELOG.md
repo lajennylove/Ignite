@@ -25,9 +25,28 @@ All notable changes to Ignite are listed here. The format follows
 - The migration `20261114000000_account_lifecycle`, which adds `users.disabled_at` and a
   foreign key from `sessions.user_id` to `users.id` with `ON DELETE CASCADE`, so deleting a
   user deletes their sessions.
+- Field types for `#[derive(IgniteResource)]`: `i16`, `f32` and `f64` (a decimal input,
+  with `step = "0.01"` for its browser step), and `chrono::NaiveDateTime` (a date-and-time
+  input). Each is checked as its type says: a decimal refuses text and values that are not
+  finite, and a date-and-time refuses what is not one. The profile's decimal and date-time
+  fields are checked the same way.
+- Static selects: `#[ignite(options = [("draft", "Draft"), ("published", "Published")])]` on
+  a `String` field. A submitted value must be one of the choices.
+- Dynamic selects: `#[ignite(options = load_choices)]` on a `String` or integer field, where
+  `load_choices` is a function `fn(&mut MysqlConnection) -> QueryResult<Vec<(String, String)>>`
+  that the panel calls each time it shows the form. A new `IgniteResource::options` method
+  returns the choices of a field by name, and the panel checks a submitted value against them.
+- Relation selects: `#[ignite(belongs_to = schema::categories, display = name)]` on an `i32`
+  or `i64` field stores the related row's `id`. The select lists the related rows by their
+  `display` column, and the list and the dashboard show that name in place of the id.
+- A select starts with a "Select an option" placeholder, so a submitted form never sends the
+  first choice by accident. Profile selects show it too.
 
 ### Changed
 
+- The derive's message for an unsupported field type lists the types it now supports.
+- A resource's number input still accepts any value in the browser, as before. The
+  server checks an integer as a whole number and a decimal as a number.
 - The last-super-admin rule counts only enabled users. A disabled super-admin cannot lose
   the role while no enabled super-admin is left, and the last enabled one cannot be disabled.
 - An upgrade gives `super-admin` to every user who exists when the migration runs, so they

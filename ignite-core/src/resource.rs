@@ -54,6 +54,16 @@ pub trait IgniteResource: Send + Sync + 'static {
     /// Table columns, in display order. Each column's `key` is a field name.
     fn columns() -> &'static [Column];
 
+    /// The choices of a [`FieldKind::Lookup`](crate::FieldKind::Lookup) field, as
+    /// `(value, label)` pairs in display order (added in v1). The panel calls it when it
+    /// shows the form, to fill the select, and when it checks a submitted value. The
+    /// default is no choices. `#[derive(IgniteResource)]` writes it for `options = ...`
+    /// and `belongs_to = ...`.
+    fn options(conn: &mut MysqlConnection, field: &str) -> QueryResult<Vec<(String, String)>> {
+        let _ = (conn, field);
+        Ok(Vec::new())
+    }
+
     /// Returns one page of rows that match `query`.
     fn list(conn: &mut MysqlConnection, query: &ListQuery) -> QueryResult<Page<Self::Record>>;
     /// Returns the row with `id`, or `None` if there is no such row.
