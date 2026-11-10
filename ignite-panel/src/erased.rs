@@ -104,7 +104,7 @@ impl<R: IgniteResource> Erased for Adapter<R> {
         match R::validate(form) {
             Ok(input) => match R::create(conn, input) {
                 Ok(record) => to_json(record).map(Ok),
-                Err(error) => unique_violation(error, R::fields()).map(Err),
+                Err(error) => unique_violation(error, R::SLUG, R::fields()).map(Err),
             },
             Err(errors) => Ok(Err(errors)),
         }
@@ -119,7 +119,7 @@ impl<R: IgniteResource> Erased for Adapter<R> {
         match R::validate_update(form) {
             Ok(input) => match R::update(conn, id, input) {
                 Ok(record) => to_json(record).map(Ok),
-                Err(error) => unique_violation(error, R::fields()).map(Err),
+                Err(error) => unique_violation(error, R::SLUG, R::fields()).map(Err),
             },
             Err(errors) => Ok(Err(errors)),
         }
@@ -142,25 +142,44 @@ impl<R: IgniteResource> Erased for Adapter<R> {
     }
 }
 
-/// Turns a unique-index violation into a field error on the field the index is
-/// named after, such as `users_email_unique` for `email`, so the form shows
-/// "Email is already taken." instead of a server error. Any other error, or a
-/// violation that names no field, is returned unchanged.
-fn unique_violation(error: DieselError, fields: &[Field]) -> QueryResult<FieldErrors> {
-    let DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, info) = &error else {
-        return Err(error);
+/// The name of the unique index on `field` of `table`. The panel's migrations name
+/// it `{table}_{field}_unique`, as `users_email_unique` guards `email` on `users`.
+/// For a derived resource the table is its [`SLUG`](ignite_core::IgniteResource::SLUG).
+pub(crate) fn unique_index_name(table: &str, field: &str) -> String {
+    format!("{table}_{field}_unique")
+}
+
+/// The index a unique-violation message names, if `error` is one. MySQL says
+/// `for key 'index'`, and MySQL 8.0.19 and later say `for key 'table.index'`; the
+/// table part is dropped.
+pub(crate) fn unique_index(error: &DieselError) -> Option<&str> {
+    let DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, info) = error else {
+        return None;
     };
-    let message = info.message();
-    let key = message
-        .rfind("for key '")
-        .map(|start| &message[start + "for key '".len()..])
-        .map(|rest| rest.trim_end_matches('\'').trim_end_matches(['\'', '`']))
-        .unwrap_or_default();
-    // An exact match wins, then a field whose name appears in the index name.
-    let field = fields
+    index_in_message(info.message())
+}
+
+fn index_in_message(message: &str) -> Option<&str> {
+    let start = message.rfind("for key '")? + "for key '".len();
+    let key = message[start..].trim_end_matches(['\'', '`']);
+    key.rsplit('.').next()
+}
+
+/// The field whose unique index is `index`, under the one rule of
+/// [`unique_index_name`]: the names must match exactly. A name that only contains
+/// a field's name, such as `users_username_unique` for `name`, matches nothing.
+fn field_for_index<'a>(index: &str, table: &str, fields: &'a [Field]) -> Option<&'a Field> {
+    fields
         .iter()
-        .find(|f| f.name == key)
-        .or_else(|| fields.iter().find(|f| key.contains(f.name)));
+        .find(|f| unique_index_name(table, f.name) == index)
+}
+
+/// Turns a unique-index violation into a field error on the field the index is
+/// named after (see [`unique_index_name`]), so the form shows "Email is already
+/// taken." instead of a server error. Any other error, or a violation whose index
+/// names no field, is returned unchanged.
+fn unique_violation(error: DieselError, table: &str, fields: &[Field]) -> QueryResult<FieldErrors> {
+    let field = unique_index(&error).and_then(|index| field_for_index(index, table, fields));
     match field {
         Some(field) => {
             let mut errors = FieldErrors::new();
@@ -173,4 +192,65 @@ fn unique_violation(error: DieselError, fields: &[Field]) -> QueryResult<FieldEr
 
 fn to_json<T: Serialize>(record: T) -> QueryResult<Value> {
     serde_json::to_value(record).map_err(|e| DieselError::SerializationError(Box::new(e)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ignite_core::FieldKind;
+
+    const NAME: Field = Field {
+        name: "name",
+        label: "Name",
+        kind: FieldKind::Text,
+        required: true,
+    };
+    const EMAIL: Field = Field {
+        name: "email",
+        label: "Email",
+        kind: FieldKind::Text,
+        required: true,
+    };
+
+    #[test]
+    fn name_does_not_match_an_index_on_username() {
+        let fields = [NAME, EMAIL];
+        assert!(field_for_index("users_username_unique", "users", &fields).is_none());
+    }
+
+    #[test]
+    fn email_matches_the_email_index() {
+        let fields = [NAME, EMAIL];
+        let field = field_for_index("users_email_unique", "users", &fields).expect("a field");
+        assert_eq!(field.name, "email");
+    }
+
+    #[test]
+    fn an_index_on_another_table_matches_nothing() {
+        let fields = [EMAIL];
+        assert!(field_for_index("accounts_email_unique", "users", &fields).is_none());
+    }
+
+    #[test]
+    fn mysql_8_table_qualified_key_is_read_as_the_index() {
+        let message = "Duplicate entry 'a@example.test' for key 'users.users_email_unique'";
+        assert_eq!(index_in_message(message), Some("users_email_unique"));
+        let fields = [NAME, EMAIL];
+        let index = index_in_message(message).unwrap();
+        assert_eq!(
+            field_for_index(index, "users", &fields).unwrap().name,
+            "email"
+        );
+    }
+
+    #[test]
+    fn mariadb_key_without_table_is_read_as_the_index() {
+        let message = "Duplicate entry 'Ada' for key 'users_name_unique'";
+        assert_eq!(index_in_message(message), Some("users_name_unique"));
+    }
+
+    #[test]
+    fn a_message_without_a_key_names_no_index() {
+        assert_eq!(index_in_message("Lock wait timeout exceeded"), None);
+    }
 }
