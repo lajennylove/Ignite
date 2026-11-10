@@ -83,32 +83,79 @@ pub fn run_migrations(conn: &mut MysqlConnection) -> Result<(), Box<dyn Error + 
 pub fn pending_migrations(
     conn: &mut MysqlConnection,
 ) -> Result<Vec<String>, Box<dyn Error + Send + Sync>> {
-    let applied: Vec<String> = if table_exists(conn, "__diesel_schema_migrations")? {
-        sql_query("SELECT version FROM __diesel_schema_migrations")
-            .load::<VersionRow>(conn)?
-            .into_iter()
-            .map(|row| row.version)
-            .collect()
-    } else {
-        Vec::new()
-    };
-    Ok(migration_names()?
+    Ok(migration_status(conn)?
         .into_iter()
-        .filter(|(version, _)| !applied.contains(version))
-        .map(|(_, name)| name)
+        .filter(|(_, applied)| !applied)
+        .map(|(name, _)| name)
         .collect())
 }
 
-/// Every embedded migration as `(version, name)`, such as `("20261108000000", "20261108000000_create_users")`.
+/// Every migration of the panel, in order, as `(name, applied)`. Reads only. `ignite
+/// migrate:status` prints it.
+pub fn migration_status(
+    conn: &mut MysqlConnection,
+) -> Result<Vec<(String, bool)>, Box<dyn Error + Send + Sync>> {
+    let applied = applied_versions(conn)?;
+    Ok(migration_names()?
+        .into_iter()
+        .map(|(version, name)| {
+            let is_applied = applied.contains(&version);
+            (name, is_applied)
+        })
+        .collect())
+}
+
+/// Reverts the most recently applied migration of the panel, by running its `down.sql`,
+/// and returns its name. Only one step is reverted per call. Returns `None` when no
+/// migration of the panel is applied. Other migrations in the same database are not touched.
+pub fn rollback(
+    conn: &mut MysqlConnection,
+) -> Result<Option<String>, Box<dyn Error + Send + Sync>> {
+    let applied = applied_versions(conn)?;
+    let names = migration_names()?;
+    let Some((version, name)) = names
+        .iter()
+        .rev()
+        .find(|(version, _)| applied.contains(version))
+    else {
+        return Ok(None);
+    };
+    let migrations = <EmbeddedMigrations as MigrationSource<Mysql>>::migrations(&MIGRATIONS)?;
+    let migration = migrations
+        .iter()
+        .find(|migration| migration.name().version().to_string() == *version)
+        .ok_or_else(|| format!("migration {name} is recorded as applied but is not embedded"))?;
+    conn.revert_migration(migration.as_ref())?;
+    Ok(Some(name.clone()))
+}
+
+/// The versions the migration table records as applied. Empty when there is no table.
+fn applied_versions(
+    conn: &mut MysqlConnection,
+) -> Result<Vec<String>, Box<dyn Error + Send + Sync>> {
+    if !table_exists(conn, "__diesel_schema_migrations")? {
+        return Ok(Vec::new());
+    }
+    Ok(sql_query("SELECT version FROM __diesel_schema_migrations")
+        .load::<VersionRow>(conn)?
+        .into_iter()
+        .map(|row| row.version)
+        .collect())
+}
+
+/// Every embedded migration as `(version, name)`, in version order, such as
+/// `("20261108000000", "20261108000000_create_users")`.
 fn migration_names() -> Result<Vec<(String, String)>, Box<dyn Error + Send + Sync>> {
     let migrations = <EmbeddedMigrations as MigrationSource<Mysql>>::migrations(&MIGRATIONS)?;
-    Ok(migrations
+    let mut names: Vec<(String, String)> = migrations
         .iter()
         .map(|migration| {
             let name = migration.name();
             (name.version().to_string(), name.to_string())
         })
-        .collect())
+        .collect();
+    names.sort();
+    Ok(names)
 }
 
 #[derive(QueryableByName)]

@@ -154,3 +154,71 @@ fn the_app_does_not_migrate_when_it_starts() {
     assert!(!version_recorded(&mut conn), "the fairing must not migrate");
     assert!(!index_exists(&mut conn), "the fairing must not migrate");
 }
+
+#[test]
+fn migrate_status_lists_every_migration_as_applied_after_a_migrate() {
+    let _guard = reset();
+    let output = ignite(&["migrate:status"], "");
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let out = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        out.contains(&format!("Applied  {VERSION}_login_throttles_window_index")),
+        "stdout: {out}"
+    );
+    assert!(!out.contains("Pending"), "stdout: {out}");
+}
+
+#[test]
+fn rollback_reverts_one_step_and_migrate_restores_it() {
+    let _guard = reset();
+    let mut conn = connection();
+    assert!(
+        index_exists(&mut conn),
+        "the latest migration is applied at the start"
+    );
+
+    let rolled = ignite(&["migrate:rollback"], "");
+    assert_eq!(
+        rolled.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&rolled.stderr)
+    );
+    let out = String::from_utf8_lossy(&rolled.stdout);
+    assert!(
+        out.contains(&format!(
+            "Rolled back one migration: reverted {VERSION}_login_throttles_window_index."
+        )),
+        "stdout: {out}"
+    );
+    assert!(!index_exists(&mut conn), "down.sql dropped the index");
+    assert!(
+        !version_recorded(&mut conn),
+        "the record of the migration is removed"
+    );
+
+    let status = ignite(&["migrate:status"], "");
+    let status_out = String::from_utf8_lossy(&status.stdout);
+    assert!(
+        status_out.contains(&format!("Pending  {VERSION}_login_throttles_window_index")),
+        "stdout: {status_out}"
+    );
+
+    let migrated = ignite(&["migrate"], "");
+    assert_eq!(
+        migrated.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&migrated.stderr)
+    );
+    assert!(index_exists(&mut conn), "migrate restores the index");
+    assert!(
+        version_recorded(&mut conn),
+        "migrate records the migration again"
+    );
+}

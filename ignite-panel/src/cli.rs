@@ -2,6 +2,9 @@
 //!
 //! - `ignite migrate` runs the panel's pending migrations, and prints what it applied.
 //!   Run it as a deploy step, before the first start. The app never migrates on boot.
+//! - `ignite migrate:status` lists each migration as Applied or Pending.
+//! - `ignite migrate:rollback` reverts the most recently applied migration with its
+//!   `down.sql`. One step per run.
 //! - `ignite user create --email <email> [--name <name>]` creates a user. It does not
 //!   migrate: when migrations are pending it stops and says to run `ignite migrate`.
 //!
@@ -18,13 +21,17 @@ use std::process::exit;
 use diesel::mysql::MysqlConnection;
 use diesel::prelude::*;
 
-use crate::{migrate, pending_migrations, users};
+use crate::{migrate, migration_status as status, pending_migrations, rollback, users};
 
 const USAGE: &str = "usage:
   ignite migrate
+  ignite migrate:status
+  ignite migrate:rollback
   ignite user create --email <email> [--name <name>] [--password-stdin]
 
 `migrate` runs the panel's pending migrations. Run it before the first start.
+`migrate:status` lists each migration as Applied or Pending. `migrate:rollback`
+reverts the most recently applied migration, one step per run.
 `user create` reads DATABASE_URL and asks for the password without echoing it, or
 reads it from standard input when standard input is not a terminal or with
 --password-stdin. It does not migrate; run `ignite migrate` first.";
@@ -37,6 +44,8 @@ pub fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let exit_code = match args.as_slice() {
         [migrate] if migrate == "migrate" => migrate_database(),
+        [status] if status == "migrate:status" => migration_status(),
+        [rollback] if rollback == "migrate:rollback" => rollback_migration(),
         [user, create, rest @ ..] if user == "user" && create == "create" => create_user(rest),
         _ => {
             eprintln!("{USAGE}");
@@ -65,6 +74,50 @@ fn migrate_database() -> i32 {
         }
         Err(error) => {
             eprintln!("Migration failed: {error}");
+            1
+        }
+    }
+}
+
+/// Lists each migration as Applied or Pending. Returns the exit code.
+fn migration_status() -> i32 {
+    let mut conn = match connect() {
+        Ok(conn) => conn,
+        Err(code) => return code,
+    };
+    match status(&mut conn) {
+        Ok(rows) => {
+            for (name, applied) in rows {
+                let state = if applied { "Applied" } else { "Pending" };
+                println!("{state:<8} {name}");
+            }
+            0
+        }
+        Err(error) => {
+            eprintln!("Could not read the migrations: {error}");
+            1
+        }
+    }
+}
+
+/// Reverts the most recently applied migration, one step. Returns the exit code.
+fn rollback_migration() -> i32 {
+    let mut conn = match connect() {
+        Ok(conn) => conn,
+        Err(code) => return code,
+    };
+    match rollback(&mut conn) {
+        Ok(Some(name)) => {
+            println!("Rolled back one migration: reverted {name}.");
+            println!("Run `ignite migrate:rollback` again to revert the next one.");
+            0
+        }
+        Ok(None) => {
+            println!("Nothing to roll back.");
+            0
+        }
+        Err(error) => {
+            eprintln!("Rollback failed: {error}");
             1
         }
     }
