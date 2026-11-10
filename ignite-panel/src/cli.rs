@@ -12,6 +12,11 @@
 //! - `ignite user role add <email> <role>` and `ignite user role remove <email> <role>` give
 //!   a user a role or take one away. The last super-admin cannot lose the role.
 //! - `ignite user roles <email>` lists the roles of a user.
+//! - `ignite user disable <email>` and `ignite user enable <email>` stop or restore a user's
+//!   sign-in. Disabling ends the user's sessions, and the last enabled super-admin cannot be
+//!   disabled.
+//! - `ignite user password <email>` sets a new password for an existing user, and ends
+//!   their sessions, as a password reset does.
 //!
 //! The user command checks `DATABASE_URL`, connects and checks for an existing user
 //! before it reads the password. Interactively the password is read from the terminal
@@ -39,6 +44,9 @@ const USAGE: &str = "usage:
   ignite user role add <email> <role>
   ignite user role remove <email> <role>
   ignite user roles <email>
+  ignite user disable <email>
+  ignite user enable <email>
+  ignite user password <email> [--password-stdin]
 
 `migrate` runs the panel's pending migrations. Run it before the first start.
 `migrate:status` lists each migration as Applied or Pending. `migrate:rollback`
@@ -49,7 +57,9 @@ reads it from standard input when standard input is not a terminal or with
 `role create` makes a role. `role grant` gives it a permission, such as `users.delete`;
 the app must have started once so the permission exists. `user role add` and
 `user role remove` change a user's roles, and the last super-admin cannot lose the role.
-`user roles` lists a user's roles.";
+`user roles` lists a user's roles. `user disable` stops a user from signing in and ends
+their sessions; `user enable` lets them sign in again. `user password` reads a new password
+the same way `user create` does, and ends the user's sessions.";
 
 /// The shortest password the CLI accepts.
 const MIN_PASSWORD_CHARS: usize = 8;
@@ -75,6 +85,11 @@ pub fn main() {
             remove_role(email, role_name)
         }
         [user, roles, email] if user == "user" && roles == "roles" => list_user_roles(email),
+        [user, disable, email] if user == "user" && disable == "disable" => disable_user(email),
+        [user, enable, email] if user == "user" && enable == "enable" => enable_user(email),
+        [user, password, rest @ ..] if user == "user" && password == "password" => {
+            reset_password(rest)
+        }
         _ => {
             eprintln!("{USAGE}");
             2
@@ -306,8 +321,8 @@ fn check_length(password: String) -> Result<String, String> {
     Ok(password)
 }
 
-/// Connects and checks that the roles tables exist, which needs `ignite migrate` first. On
-/// failure it prints the problem and returns the exit code.
+/// Connects and checks that every migration has run, which needs `ignite migrate` first when
+/// one is pending. On failure it prints the problem and returns the exit code.
 fn connect_with_roles() -> Result<MysqlConnection, i32> {
     let mut conn = connect()?;
     match pending_migrations(&mut conn) {
@@ -365,6 +380,96 @@ fn grant_permission(role: &str, permission: &str) -> i32 {
         authz::grant_permission(&mut conn, role, permission)
             .map(|()| format!("Granted {permission} to {role}.")),
     )
+}
+
+/// `ignite user password <email> [--password-stdin]`. Returns the exit code. The user must
+/// exist, and the password is read the way `user create` reads it.
+fn reset_password(args: &[String]) -> i32 {
+    let mut email = None;
+    let mut password_stdin = false;
+    for arg in args {
+        match arg.as_str() {
+            "--password-stdin" => password_stdin = true,
+            value if email.is_none() && !value.starts_with("--") => {
+                email = Some(value.trim().to_string());
+            }
+            _ => {
+                eprintln!("{USAGE}");
+                return 2;
+            }
+        }
+    }
+    let Some(email) = email.filter(|e| !e.is_empty()) else {
+        eprintln!("{USAGE}");
+        return 2;
+    };
+
+    let mut conn = match connect_with_roles() {
+        Ok(conn) => conn,
+        Err(code) => return code,
+    };
+    let user = match users::find_by_email(&mut conn, &email) {
+        Ok(Some(user)) => user,
+        Ok(None) => {
+            eprintln!("The user {email} does not exist.");
+            return 1;
+        }
+        Err(error) => {
+            eprintln!("Could not read the users table: {error}");
+            return 1;
+        }
+    };
+
+    let password = match read_password(password_stdin) {
+        Ok(password) => password,
+        Err(message) => {
+            eprintln!("{message}");
+            return 1;
+        }
+    };
+
+    match users::reset_password(&mut conn, user.id, &password) {
+        Ok(()) => {
+            println!("Changed the password of {email}. Their sessions have ended.");
+            0
+        }
+        Err(error) => {
+            eprintln!("Could not change the password: {error}");
+            1
+        }
+    }
+}
+
+/// `ignite user disable <email>`. Returns the exit code. A user who is already disabled is
+/// reported, and is not an error.
+fn disable_user(email: &str) -> i32 {
+    let mut conn = match connect_with_roles() {
+        Ok(conn) => conn,
+        Err(code) => return code,
+    };
+    report(authz::disable_user(&mut conn, email).map(|changed| {
+        if changed {
+            format!("Disabled {email}. Their sessions have ended.")
+        } else {
+            format!("{email} is already disabled.")
+        }
+    }))
+}
+
+/// `ignite user enable <email>`. Returns the exit code. A user who is already enabled is
+/// reported, and is not an error.
+fn enable_user(email: &str) -> i32 {
+    let mut conn = match connect_with_roles() {
+        Ok(conn) => conn,
+        Err(code) => return code,
+    };
+    report(authz::enable_user(&mut conn, email).map(|changed| {
+        if changed {
+            format!("Enabled {email}.")
+        } else {
+            format!("{email} is already enabled.")
+        }
+    }))
 }
 
 /// `ignite user role add <email> <role>`. Returns the exit code.

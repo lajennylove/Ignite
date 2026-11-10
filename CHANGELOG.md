@@ -18,9 +18,18 @@ All notable changes to Ignite are listed here. The format follows
 - `AdminUser::can`, which checks an ability in an app's own route.
 - The migration `20261113000000_roles_permissions`, which adds the tables `roles`,
   `permissions`, `role_permission` and `role_user`.
+- `ignite user disable <email>` and `ignite user enable <email>`. A disabled user gets the
+  normal wrong-password message when they sign in, and their sessions end at once.
+- `ignite user password <email>`, which sets a new password for an existing user and ends
+  their sessions. It reads the password the way `ignite user create` does.
+- The migration `20261114000000_account_lifecycle`, which adds `users.disabled_at` and a
+  foreign key from `sessions.user_id` to `users.id` with `ON DELETE CASCADE`, so deleting a
+  user deletes their sessions.
 
 ### Changed
 
+- The last-super-admin rule counts only enabled users. A disabled super-admin cannot lose
+  the role while no enabled super-admin is left, and the last enabled one cannot be disabled.
 - An upgrade gives `super-admin` to every user who exists when the migration runs, so they
   keep full access. A user created after the upgrade has no roles and sees no resource
   until `ignite user role add` gives them one.
