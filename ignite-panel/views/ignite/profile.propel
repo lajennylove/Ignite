@@ -25,44 +25,66 @@
 @section('content')
   <h1 class="mb-6">{{ $title }}</h1>
 
-  <div class="grid max-w-4xl gap-6">
-    <section class="ig-card">
-      <h2 class="mb-5">Your details</h2>
-      <form class="grid gap-5" method="post" action="{{ $profile_action }}">
-        <input type="hidden" name="_token" value="{{ $csrf_token }}">
+  <div class="grid max-w-6xl gap-6">
+    <div class="grid gap-6 lg:grid-cols-2">
+      <section class="ig-card">
+        <h2 class="mb-5">Your details</h2>
+        <form class="grid gap-5" method="post" action="{{ $profile_action }}">
+          <input type="hidden" name="_token" value="{{ $csrf_token }}">
 
-        @foreach (field in profile_fields)
-          <div>
-            @if (field.is_checkbox)
-              <label class="flex items-center gap-2 text-sm font-semibold text-heading">
-                <input type="checkbox" class="h-4 w-4 rounded border-bordergray text-primary focus:ring-primary" name="{{ $field.name }}" value="on" @if (field.checked)checked@endif>
-                {{ $field.label }}
-              </label>
-            @else
-              <label class="ig-label" for="{{ $field.name }}">{{ $field.label }}@if (field.required) *@endif</label>
-              @if (field.is_textarea)
-                <textarea class="ig-input min-h-32" id="{{ $field.name }}" name="{{ $field.name }}">{{ $field.value }}</textarea>
-              @elseif (field.is_select)
-                <select class="ig-input" id="{{ $field.name }}" name="{{ $field.name }}">
-                  @foreach (option in field.options)
-                    <option value="{{ $option.value }}" @if (option.selected)selected@endif>{{ $option.label }}</option>
-                  @endforeach
-                </select>
+          @foreach (field in profile_fields)
+            <div>
+              @if (field.is_checkbox)
+                <label class="flex items-center gap-2 text-sm font-semibold text-heading">
+                  <input type="checkbox" class="h-4 w-4 rounded border-bordergray text-primary focus:ring-primary" name="{{ $field.name }}" value="on" @if (field.checked)checked@endif>
+                  {{ $field.label }}
+                </label>
               @else
-                <input class="ig-input" id="{{ $field.name }}" name="{{ $field.name }}" type="{{ $field.input_type }}" value="{{ $field.value }}">
+                <label class="ig-label" for="{{ $field.name }}">{{ $field.label }}@if (field.required) *@endif</label>
+                @if (field.is_textarea)
+                  <textarea class="ig-input min-h-32" id="{{ $field.name }}" name="{{ $field.name }}">{{ $field.value }}</textarea>
+                @elseif (field.is_select)
+                  <select class="ig-input" id="{{ $field.name }}" name="{{ $field.name }}">
+                    @foreach (option in field.options)
+                      <option value="{{ $option.value }}" @if (option.selected)selected@endif>{{ $option.label }}</option>
+                    @endforeach
+                  </select>
+                @else
+                  <input class="ig-input" id="{{ $field.name }}" name="{{ $field.name }}" type="{{ $field.input_type }}" value="{{ $field.value }}">
+                @endif
               @endif
-            @endif
-            @if (field.has_error)
-              <p class="mt-1.5 mb-0 text-sm text-error-emphasis">{{ $field.error }}</p>
-            @endif
-          </div>
-        @endforeach
+              @if (field.has_error)
+                <p class="mt-1.5 mb-0 text-sm text-error-emphasis">{{ $field.error }}</p>
+              @endif
+            </div>
+          @endforeach
 
-        <div>
-          <button type="submit" class="ig-btn ig-btn-primary">Save details</button>
-        </div>
-      </form>
-    </section>
+          <div>
+            <button type="submit" class="ig-btn ig-btn-primary">Save details</button>
+          </div>
+        </form>
+      </section>
+      <section class="ig-card">
+        <h2 class="mb-5">Password</h2>
+        <form class="grid max-w-md gap-5" method="post" action="{{ $password_action }}">
+          <input type="hidden" name="_token" value="{{ $csrf_token }}">
+
+          @foreach (field in password_fields)
+            <div>
+              <label class="ig-label" for="{{ $field.name }}">{{ $field.label }}</label>
+              <input class="ig-input" id="{{ $field.name }}" name="{{ $field.name }}" type="password" autocomplete="new-password">
+              @if (field.has_error)
+                <p class="mt-1.5 mb-0 text-sm text-error-emphasis">{{ $field.error }}</p>
+              @endif
+            </div>
+          @endforeach
+
+          <div>
+            <button type="submit" class="ig-btn ig-btn-primary">Change password</button>
+          </div>
+        </form>
+      </section>
+    </div>
 
     <section class="ig-card flex flex-col gap-6 sm:flex-row sm:items-center">
       @if (has_avatar)
@@ -86,27 +108,6 @@
           </form>
         @endif
       </div>
-    </section>
-
-    <section class="ig-card">
-      <h2 class="mb-5">Password</h2>
-      <form class="grid max-w-md gap-5" method="post" action="{{ $password_action }}">
-        <input type="hidden" name="_token" value="{{ $csrf_token }}">
-
-        @foreach (field in password_fields)
-          <div>
-            <label class="ig-label" for="{{ $field.name }}">{{ $field.label }}</label>
-            <input class="ig-input" id="{{ $field.name }}" name="{{ $field.name }}" type="password" autocomplete="new-password">
-            @if (field.has_error)
-              <p class="mt-1.5 mb-0 text-sm text-error-emphasis">{{ $field.error }}</p>
-            @endif
-          </div>
-        @endforeach
-
-        <div>
-          <button type="submit" class="ig-btn ig-btn-primary">Change password</button>
-        </div>
-      </form>
     </section>
   </div>
 @endsection
