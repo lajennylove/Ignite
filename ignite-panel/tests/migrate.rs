@@ -182,6 +182,21 @@ fn rollback_reverts_one_step_and_migrate_restores_it() {
         "the latest migration is applied at the start"
     );
 
+    // The roles migration is the latest now, so the first step reverts it, and the
+    // second step reverts the index migration this test is about.
+    let roles = ignite(&["migrate:rollback"], "");
+    assert_eq!(roles.status.code(), Some(0));
+    assert!(
+        String::from_utf8_lossy(&roles.stdout)
+            .contains("reverted 20261113000000_roles_permissions."),
+        "stdout: {}",
+        String::from_utf8_lossy(&roles.stdout)
+    );
+    assert!(
+        index_exists(&mut conn),
+        "the roles step leaves the index alone"
+    );
+
     let rolled = ignite(&["migrate:rollback"], "");
     assert_eq!(
         rolled.status.code(),
@@ -220,5 +235,34 @@ fn rollback_reverts_one_step_and_migrate_restores_it() {
     assert!(
         version_recorded(&mut conn),
         "migrate records the migration again"
+    );
+}
+
+#[test]
+fn the_roles_migration_makes_existing_users_super_admins() {
+    let _guard = reset();
+    let mut conn = connection();
+    let rolled = ignite(&["migrate:rollback"], "");
+    assert_eq!(rolled.status.code(), Some(0));
+    sql_query("DELETE FROM users").execute(&mut conn).unwrap();
+    let email = "upgraded@example.test";
+    sql_query(format!(
+        "INSERT INTO users (name, email, password_hash, theme) VALUES ('Old', '{email}', 'x', 'light')"
+    ))
+    .execute(&mut conn)
+    .unwrap();
+
+    let migrated = ignite(&["migrate"], "");
+    assert_eq!(
+        migrated.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&migrated.stderr)
+    );
+    let roles = ignite(&["user", "roles", email], "");
+    assert_eq!(
+        String::from_utf8_lossy(&roles.stdout).trim(),
+        "super-admin",
+        "an existing user keeps full access after the upgrade"
     );
 }

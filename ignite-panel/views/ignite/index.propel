@@ -25,7 +25,9 @@
 @section('content')
   <div class="mb-6 flex flex-wrap items-center justify-between gap-3">
     <h1 class="mb-0">{{ $title }}</h1>
-    <a class="ig-btn ig-btn-primary" href="{{ $new_url }}">New {{ $singular }}</a>
+    @if (can_create)
+      <a class="ig-btn ig-btn-primary" href="{{ $new_url }}">New {{ $singular }}</a>
+    @endif
   </div>
 
   <section class="ig-card p-0">
@@ -57,11 +59,15 @@
                 <td>{{ $cell.text }}</td>
               @endforeach
               <td class="whitespace-nowrap text-right">
-                <a class="ig-btn ig-btn-ghost px-3 py-1" href="{{ $row.edit_url }}">Edit</a>
-                <form class="inline" method="post" action="{{ $row.delete_url }}" data-confirm="Delete this record? This cannot be undone.">
-                  <input type="hidden" name="_token" value="{{ $csrf_token }}">
-                  <button type="submit" class="ig-btn ig-btn-danger px-3 py-1">Delete</button>
-                </form>
+                @if (can_update)
+                  <a class="ig-btn ig-btn-ghost px-3 py-1" href="{{ $row.edit_url }}">Edit</a>
+                @endif
+                @if (can_delete)
+                  <form class="inline" method="post" action="{{ $row.delete_url }}" data-confirm="Delete this record? This cannot be undone.">
+                    <input type="hidden" name="_token" value="{{ $csrf_token }}">
+                    <button type="submit" class="ig-btn ig-btn-danger px-3 py-1">Delete</button>
+                  </form>
+                @endif
               </td>
             </tr>
           @empty

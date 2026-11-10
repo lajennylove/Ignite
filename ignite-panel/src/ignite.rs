@@ -204,6 +204,9 @@ impl Ignite {
         crate::assets::register(&mount);
         register_views(views.as_deref());
         let ignite = AdHoc::on_ignite("Ignite", move |rocket| async move {
+            // Each resource's abilities get a permission row, so roles can be granted them.
+            let abilities = crate::authz::resource_abilities(&resources);
+            crate::authz::register_at_start(pool.clone(), abilities).await;
             let registry = Registry {
                 mount: mount.clone(),
                 resources,

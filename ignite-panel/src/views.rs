@@ -36,6 +36,7 @@ use ignite_core::{Field, FieldErrors, FieldKind, FormInput};
 use serde::Serialize;
 use serde_json::Value;
 
+use crate::authz::Action;
 use crate::ignite::Registry;
 use crate::session::AdminUser;
 
@@ -89,8 +90,10 @@ impl Layout {
         flash: Option<String>,
         csrf_token: String,
     ) -> Self {
-        let nav = if user.is_some() {
-            std::iter::once(NavGroup {
+        // A resource is listed only when the user may view its records, and its "Add new"
+        // link only when the user may create one, as Filament's navigation does.
+        let nav = match user {
+            Some(user) => std::iter::once(NavGroup {
                 title: "Dashboard",
                 icon: "ti-layout-dashboard",
                 url: registry.mount.clone(),
@@ -98,17 +101,22 @@ impl Layout {
                 add_url: String::new(),
                 active: section.is_empty(),
             })
-            .chain(registry.resources.iter().map(|r| NavGroup {
-                title: r.title(),
-                icon: "ti-table",
-                url: format!("{}/{}", registry.mount, r.slug()),
-                has_add: true,
-                add_url: format!("{}/{}/new", registry.mount, r.slug()),
-                active: section == r.slug(),
-            }))
-            .collect()
-        } else {
-            Vec::new()
+            .chain(
+                registry
+                    .resources
+                    .iter()
+                    .filter(|r| user.may(r.slug(), Action::ViewAny))
+                    .map(|r| NavGroup {
+                        title: r.title(),
+                        icon: "ti-table",
+                        url: format!("{}/{}", registry.mount, r.slug()),
+                        has_add: user.may(r.slug(), Action::Create),
+                        add_url: format!("{}/{}/new", registry.mount, r.slug()),
+                        active: section == r.slug(),
+                    }),
+            )
+            .collect(),
+            None => Vec::new(),
         };
         Layout {
             home_url: registry.mount.clone(),
@@ -289,6 +297,12 @@ pub(crate) struct IndexPage {
     pub(crate) singular: &'static str,
     pub(crate) index_url: String,
     pub(crate) new_url: String,
+    /// Whether the user may create a record: shows the "New" button.
+    pub(crate) can_create: bool,
+    /// Whether the user may update a record: shows each row's "Edit" button.
+    pub(crate) can_update: bool,
+    /// Whether the user may delete a record: shows each row's "Delete" button.
+    pub(crate) can_delete: bool,
     pub(crate) search: String,
     pub(crate) columns: Vec<ColumnHead>,
     pub(crate) colspan: usize,

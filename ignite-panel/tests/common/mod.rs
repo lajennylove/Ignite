@@ -14,6 +14,7 @@ use ignite_core::{
     escape_like, Column, Direction, Field, FieldErrors, FieldKind, FormInput, IgniteResource,
     LatestRecords, ListQuery, Page, StatWidget,
 };
+use ignite_panel::authz::{self, SUPER_ADMIN};
 use ignite_panel::{run_migrations, users, Ignite};
 use rocket::http::{ContentType, Status};
 use rocket::local::blocking::Client;
@@ -238,7 +239,15 @@ pub fn reset() -> MutexGuard<'static, ()> {
     sql_query("DELETE FROM login_throttles")
         .execute(&mut conn)
         .unwrap();
+    for table in ["role_user", "role_permission", "permissions", "roles"] {
+        sql_query(format!("DELETE FROM {table}"))
+            .execute(&mut conn)
+            .unwrap();
+    }
     users::create_user(&mut conn, "Admin", EMAIL, PASSWORD).expect("create test user");
+    // The test user is a super-admin, so the tests that are not about roles pass every check.
+    authz::create_role(&mut conn, SUPER_ADMIN).expect("create super-admin");
+    authz::assign_role(&mut conn, EMAIL, SUPER_ADMIN).expect("make the test user a super-admin");
     guard
 }
 
@@ -311,10 +320,15 @@ pub fn with_token(client: &Client, body: &str) -> String {
 
 /// A client signed in as the test user. It loads the login page first, so it has a token.
 pub fn signed_in(mount: Option<&str>) -> Client {
+    signed_in_as(mount, EMAIL, PASSWORD)
+}
+
+/// A client signed in as the user with `email` and `password`.
+pub fn signed_in_as(mount: Option<&str>, email: &str, password: &str) -> Client {
     let client = client(mount);
     let base = mount.unwrap_or("/admin").trim_end_matches('/').to_string();
     client.get(format!("{base}/login")).dispatch();
-    let body = with_token(&client, &format!("email={EMAIL}&password={PASSWORD}"));
+    let body = with_token(&client, &format!("email={email}&password={password}"));
     let status = client
         .post(format!("{base}/login"))
         .header(ContentType::Form)

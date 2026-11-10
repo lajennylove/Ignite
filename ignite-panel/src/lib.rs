@@ -8,6 +8,7 @@
 //! ```
 
 mod assets;
+pub mod authz;
 pub mod cli;
 mod csrf;
 mod embedded;

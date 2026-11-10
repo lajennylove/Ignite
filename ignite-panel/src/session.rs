@@ -16,6 +16,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 
+use crate::authz::{self, Abilities, Action};
 use crate::ignite::Registry;
 use crate::proxy::{request_is_secure, TrustedProxies};
 use crate::{sessions, users};
@@ -269,6 +270,7 @@ pub struct AdminUser {
     email: String,
     theme: String,
     has_avatar: bool,
+    abilities: Abilities,
 }
 
 impl AdminUser {
@@ -296,6 +298,17 @@ impl AdminUser {
     pub fn has_avatar(&self) -> bool {
         self.has_avatar
     }
+
+    /// Whether the user may do `ability`, such as `reports.view`. Reads the abilities
+    /// the user's roles grant, loaded with the sign-in. A super-admin may do everything.
+    pub fn can(&self, ability: &str) -> bool {
+        self.abilities.allows(ability)
+    }
+
+    /// Whether the user may do `action` on the resource at `slug`.
+    pub(crate) fn may(&self, slug: &str, action: Action) -> bool {
+        self.can(&authz::ability(slug, action))
+    }
 }
 
 #[rocket::async_trait]
@@ -317,19 +330,20 @@ impl<'r> FromRequest<'r> for AdminUser {
         let joined = rocket::tokio::task::spawn_blocking(move || lookup_user(&pool, &lookup)).await;
         let found = match joined {
             Ok(result) => classify(result),
-            Err(error) => classify::<users::User, _>(Err(error)),
+            Err(error) => classify::<(users::User, Abilities), _>(Err(error)),
         };
         match found {
             Lookup::Unknown => Outcome::Error((Status::Unauthorized, ())),
             // A database outage is not a sign-out, so it must not reach the 401 catcher,
             // which redirects to the login page.
             Lookup::Unavailable => Outcome::Error((Status::InternalServerError, ())),
-            Lookup::Found(user) => Outcome::Success(AdminUser {
+            Lookup::Found((user, abilities)) => Outcome::Success(AdminUser {
                 user_id: user.id,
                 name: user.name,
                 email: user.email,
                 theme: user.theme,
                 has_avatar: user.avatar_mime.is_some(),
+                abilities,
             }),
         }
     }
@@ -362,12 +376,17 @@ fn classify<T, E: std::fmt::Display>(result: Result<Option<T>, E>) -> Lookup<T> 
 fn lookup_user(
     pool: &Pool,
     sid: &str,
-) -> Result<Option<users::User>, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<Option<(users::User, Abilities)>, Box<dyn std::error::Error + Send + Sync>> {
     let mut conn = pool.get()?;
     let Some(user_id) = sessions::user_for(&mut conn, sid)? else {
         return Ok(None);
     };
-    Ok(users::find_by_id(&mut conn, user_id)?)
+    let Some(user) = users::find_by_id(&mut conn, user_id)? else {
+        return Ok(None);
+    };
+    // A failed read of the roles is an outage, not a sign-out, so it answers 500.
+    let abilities = authz::load(&mut conn, user.id)?;
+    Ok(Some((user, abilities)))
 }
 
 /// Answers a request that failed the CSRF check: the form expired or its token did not match.

@@ -22,6 +22,8 @@ use rocket::tokio::io::AsyncReadExt;
 use rocket::{get, post, routes, FromForm, Route, State};
 use serde_json::Value;
 
+use crate::authz::Action;
+
 use crate::erased::{self, Erased};
 use crate::ignite::Registry;
 use crate::profile;
@@ -115,7 +117,13 @@ async fn dashboard(
 ) -> Result<PropelView, Status> {
     let flash = take_flash(cookies, &registry.secret);
     let token = csrf_token(cookies, &registry.secret);
-    let resources = registry.resources.clone();
+    // The dashboard shows a resource's cards and table only when the user may view its records.
+    let resources: Vec<Arc<dyn Erased>> = registry
+        .resources
+        .iter()
+        .filter(|r| session.may(r.slug(), Action::ViewAny))
+        .cloned()
+        .collect();
     let (widgets, tables) = blocking(pool, move |conn| {
         let mut widgets = Vec::new();
         let mut tables = Vec::new();
@@ -757,6 +765,7 @@ async fn index(
     registry: &State<Registry>,
     pool: &State<Pool>,
 ) -> Result<PropelView, Status> {
+    authorize(registry, &session, slug, Action::ViewAny)?;
     let resource = registry.find(slug).ok_or(Status::NotFound)?;
     let columns = resource.columns();
     let index_url = format!("{}/{}", registry.mount, resource.slug());
@@ -845,6 +854,9 @@ async fn index(
         title: resource.title(),
         singular: resource.singular(),
         new_url: format!("{index_url}/new"),
+        can_create: session.may(slug, Action::Create),
+        can_update: session.may(slug, Action::Update),
+        can_delete: session.may(slug, Action::Delete),
         index_url: index_url.clone(),
         search: search.clone(),
         columns: heads,
@@ -872,6 +884,7 @@ async fn new_form(
     cookies: &CookieJar<'_>,
     registry: &State<Registry>,
 ) -> Result<PropelView, Status> {
+    authorize(registry, &session, slug, Action::Create)?;
     let resource = registry.find(slug).ok_or(Status::NotFound)?;
     let index_url = format!("{}/{}", registry.mount, resource.slug());
     let layout = Layout::new(
@@ -920,6 +933,7 @@ async fn create(
     registry: &State<Registry>,
     pool: &State<Pool>,
 ) -> Result<Reply, Status> {
+    authorize(registry, &session, slug, Action::Create)?;
     let resource = registry.find(slug).ok_or(Status::NotFound)?;
     let index_url = format!("{}/{}", registry.mount, resource.slug());
     let form = read_form(body).await?;
@@ -960,6 +974,7 @@ async fn edit_form(
     registry: &State<Registry>,
     pool: &State<Pool>,
 ) -> Result<PropelView, Status> {
+    authorize(registry, &session, slug, Action::Update)?;
     let id = parse_id(id)?;
     let resource = registry.find(slug).ok_or(Status::NotFound)?;
     let index_url = format!("{}/{}", registry.mount, resource.slug());
@@ -1013,6 +1028,7 @@ async fn update(
     registry: &State<Registry>,
     pool: &State<Pool>,
 ) -> Result<Reply, Status> {
+    authorize(registry, &session, slug, Action::Update)?;
     let id = parse_id(id)?;
     let resource = registry.find(slug).ok_or(Status::NotFound)?;
     let index_url = format!("{}/{}", registry.mount, resource.slug());
@@ -1050,11 +1066,12 @@ async fn destroy(
     slug: &str,
     id: &str,
     body: Data<'_>,
-    _session: AdminUser,
+    session: AdminUser,
     cookies: &CookieJar<'_>,
     registry: &State<Registry>,
     pool: &State<Pool>,
 ) -> Result<Redirect, Status> {
+    authorize(registry, &session, slug, Action::Delete)?;
     let form = read_form(body).await?;
     check_csrf(cookies, &registry.secret, form.get("_token"))?;
     let id = parse_id(id)?;
@@ -1112,6 +1129,23 @@ fn form_page(
         Status::UnprocessableEntity,
         render_page("ignite::form", &page, compiled::form::render),
     )
+}
+
+/// Refuses a request the signed-in user may not make on the resource at `slug`: 404 for an
+/// unknown resource, and 403 Forbidden when the user lacks the ability. Each resource
+/// route calls it first, as Laravel's policies do.
+fn authorize(
+    registry: &Registry,
+    session: &AdminUser,
+    slug: &str,
+    action: Action,
+) -> Result<(), Status> {
+    registry.find(slug).ok_or(Status::NotFound)?;
+    if session.may(slug, action) {
+        Ok(())
+    } else {
+        Err(Status::Forbidden)
+    }
 }
 
 /// Runs `work` on a blocking thread with a connection from the pool.
