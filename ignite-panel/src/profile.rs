@@ -157,10 +157,10 @@ pub(crate) fn validate(
                 FieldKind::Date => {
                     field.check_date(&text, &mut errors);
                 }
-                FieldKind::Select(choices) => {
-                    if !choices.iter().any(|(choice, _)| *choice == text) {
-                        errors.insert(field.name, "Choose one of the options.".to_string());
-                    }
+                FieldKind::Select(choices)
+                    if !choices.iter().any(|(choice, _)| *choice == text) =>
+                {
+                    errors.insert(field.name, "Choose one of the options.".to_string());
                 }
                 _ => {}
             }

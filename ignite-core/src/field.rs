@@ -59,7 +59,11 @@ impl Field {
     /// Parses `text` as a whole number of type `T`. If it does not parse, records
     /// "<label> must be a whole number." in `errors` and returns `None`. Resources and
     /// profile fields both check numbers this way.
-    pub fn check_whole_number<T: FromStr>(&self, text: &str, errors: &mut FieldErrors) -> Option<T> {
+    pub fn check_whole_number<T: FromStr>(
+        &self,
+        text: &str,
+        errors: &mut FieldErrors,
+    ) -> Option<T> {
         match text.parse::<T>() {
             Ok(value) => Some(value),
             Err(_) => {
