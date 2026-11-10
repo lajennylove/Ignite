@@ -25,6 +25,19 @@ pub const TRUSTED_PROXIES_ENV: &str = "IGNITE_TRUSTED_PROXIES";
 /// The default URL prefix of the admin panel.
 const DEFAULT_MOUNT: &str = "/admin";
 
+/// Slugs the panel's own routes use under the mount, so a resource with one of them
+/// would be shadowed: its list would never load. `resource` panics on these. The
+/// `/<slug>` routes come after the fixed ones, so a fixed route always wins.
+const RESERVED_SLUGS: &[&str] = &[
+    "login",
+    "logout",
+    "logout-everywhere",
+    "profile",
+    "theme",
+    "build",
+    "up",
+];
+
 /// The panel's state, shared by every route. Rocket manages it as state.
 pub(crate) struct Registry {
     /// The URL prefix, without a trailing slash, such as `/admin`.
@@ -108,8 +121,14 @@ impl Ignite {
     ///
     /// # Panics
     ///
-    /// Panics if another resource already uses the same slug.
+    /// Panics if another resource already uses the same slug, or if the slug is one
+    /// the panel reserves for its own routes, such as `profile` or `login`.
     pub fn resource<R: IgniteResource>(mut self) -> Self {
+        assert!(
+            !RESERVED_SLUGS.contains(&R::SLUG),
+            "the slug `{}` is reserved for the panel's own routes; choose another slug",
+            R::SLUG
+        );
         assert!(
             !self.resources.iter().any(|r| r.slug() == R::SLUG),
             "two Ignite resources use the slug `{}`",
