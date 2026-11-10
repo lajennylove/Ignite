@@ -16,6 +16,7 @@ use rocket::form::Form;
 use rocket::fs::TempFile;
 use rocket::http::{ContentType, CookieJar, Status};
 use rocket::request::{FromRequest, Outcome, Request};
+use rocket::response::content::RawHtml;
 use rocket::response::{self, Redirect, Responder, Response};
 use rocket::tokio::io::AsyncReadExt;
 use rocket::{get, post, routes, FromForm, Route, State};
@@ -47,10 +48,13 @@ pub(crate) fn health() -> Vec<Route> {
     routes![up]
 }
 
-/// Answers 200 while the app is running.
+/// Answers 200 while the app is running, with a minimal page as Laravel's `/up` does.
 #[get("/up")]
-fn up() -> &'static str {
-    "OK"
+fn up() -> RawHtml<&'static str> {
+    RawHtml(
+        "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n\
+         <title>Application up</title>\n</head>\n<body>\nApplication up\n</body>\n</html>\n",
+    )
 }
 
 /// Every route the panel mounts under its prefix.

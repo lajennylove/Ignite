@@ -257,5 +257,14 @@ fn the_health_check_answers_ok_at_the_root_without_sign_in() {
     let client = common::client(None);
     let response = client.get("/up").dispatch();
     assert_eq!(response.status(), rocket::http::Status::Ok);
-    assert_eq!(response.into_string().unwrap(), "OK");
+    assert_eq!(
+        response.content_type(),
+        Some(rocket::http::ContentType::HTML)
+    );
+    let body = response.into_string().unwrap();
+    assert!(
+        body.contains("<title>Application up</title>"),
+        "body: {body}"
+    );
+    assert!(body.contains("Application up"), "body: {body}");
 }
