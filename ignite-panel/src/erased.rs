@@ -174,10 +174,14 @@ fn field_for_index<'a>(index: &str, table: &str, fields: &'a [Field]) -> Option<
         .find(|f| unique_index_name(table, f.name) == index)
 }
 
-/// Turns a unique-index violation into a field error on the field the index is
-/// named after (see [`unique_index_name`]), so the form shows "Email is already
-/// taken." instead of a server error. Any other error, or a violation whose index
-/// names no field, is returned unchanged.
+/// Turns a unique-index violation into a field error, so the form shows "Email is
+/// already taken." instead of a server error.
+///
+/// The rule, the only one: the violated index must be named exactly
+/// `{table}_{field}_unique` (see [`unique_index_name`]), where `table` is the
+/// resource's SLUG and `field` is a form field's name. Matching is exact, so `name`
+/// does not claim `users_username_unique`. Any other error, or a violation whose
+/// index names no field, is returned unchanged.
 fn unique_violation(error: DieselError, table: &str, fields: &[Field]) -> QueryResult<FieldErrors> {
     let field = unique_index(&error).and_then(|index| field_for_index(index, table, fields));
     match field {

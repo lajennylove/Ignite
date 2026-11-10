@@ -1,4 +1,4 @@
-//! A database failure while the panel reads the session is a 503, not a sign-out.
+//! A database failure while the panel reads the session is a 500, not a sign-out.
 //! A missing or unknown session is still a 401, which the panel answers with the
 //! login redirect.
 
@@ -11,7 +11,7 @@ use diesel::sql_query;
 use rocket::http::Status;
 
 #[test]
-fn a_failed_session_query_is_503_and_does_not_redirect_to_login() {
+fn a_failed_session_query_is_500_and_does_not_redirect_to_login() {
     let _guard = reset();
     let client = signed_in(None);
     let mut conn = MysqlConnection::establish(&common::database_url()).expect("connect");
@@ -24,11 +24,16 @@ fn a_failed_session_query_is_503_and_does_not_redirect_to_login() {
     let response = client.get("/admin").dispatch();
     let status = response.status();
     let location = response.headers().get_one("Location").map(str::to_string);
+    let body = response.into_string().unwrap_or_default();
     sql_query("RENAME TABLE sessions_away TO sessions")
         .execute(&mut conn)
         .unwrap();
 
-    assert_eq!(status, Status::ServiceUnavailable);
+    assert_eq!(status, Status::InternalServerError);
+    assert!(
+        body.contains("Something went wrong. Try again in a moment."),
+        "the styled 500 page is shown"
+    );
     assert!(
         location.is_none(),
         "an outage must not redirect to the login page, got {location:?}"

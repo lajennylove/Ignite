@@ -323,7 +323,7 @@ impl<'r> FromRequest<'r> for AdminUser {
             Lookup::Unknown => Outcome::Error((Status::Unauthorized, ())),
             // A database outage is not a sign-out, so it must not reach the 401 catcher,
             // which redirects to the login page.
-            Lookup::Unavailable => Outcome::Error((Status::ServiceUnavailable, ())),
+            Lookup::Unavailable => Outcome::Error((Status::InternalServerError, ())),
             Lookup::Found(user) => Outcome::Success(AdminUser {
                 user_id: user.id,
                 name: user.name,
@@ -336,7 +336,7 @@ impl<'r> FromRequest<'r> for AdminUser {
 }
 
 /// What a session lookup found. `Unknown` is a missing or ended session (401, the
-/// login redirect). `Unavailable` is a database error (503): the user may still be
+/// login redirect). `Unavailable` is a database error (500, as Laravel's auth guard): the user may still be
 /// signed in, so the panel must not send them to the login page.
 enum Lookup<T> {
     Found(T),
@@ -388,6 +388,30 @@ pub(crate) fn csrf_mismatch() -> RawHtml<String> {
 <main class="mx-auto max-w-xl px-4 py-12">
 <h1 class="text-2xl font-semibold text-heading">Page Expired</h1>
 <p class="text-[#5b6070]">This form expired, or its security token did not match. Go back, reload the page and try again.</p>
+</main>
+</body>
+</html>"#
+    ))
+}
+
+/// Answers a server error with the panel's styling. A database failure while the
+/// panel reads the session lands here, and it is not a sign-out.
+#[catch(500)]
+pub(crate) fn server_error() -> RawHtml<String> {
+    let styles = crate::assets::tags();
+    RawHtml(format!(
+        r#"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Something went wrong · Ignite</title>
+{styles}
+</head>
+<body class="min-h-screen bg-white font-sans text-text antialiased">
+<main class="mx-auto max-w-xl px-4 py-12">
+<h1 class="text-2xl font-semibold text-heading">Something went wrong</h1>
+<p class="text-[#5b6070]">Something went wrong. Try again in a moment.</p>
 </main>
 </body>
 </html>"#

@@ -27,7 +27,9 @@ const DEFAULT_MOUNT: &str = "/admin";
 
 /// Slugs the panel's own routes use under the mount, so a resource with one of them
 /// would be shadowed: its list would never load. `resource` panics on these. The
-/// `/<slug>` routes come after the fixed ones, so a fixed route always wins.
+/// `/<slug>` routes come after the fixed ones, so a fixed route always wins. The
+/// health check `/up` is mounted at the application root, not under the mount, so it
+/// cannot collide with a resource and is not listed.
 const RESERVED_SLUGS: &[&str] = &[
     "login",
     "logout",
@@ -35,7 +37,6 @@ const RESERVED_SLUGS: &[&str] = &[
     "profile",
     "theme",
     "build",
-    "up",
 ];
 
 /// The panel's state, shared by every route. Rocket manages it as state.
@@ -216,7 +217,11 @@ impl Ignite {
                 .manage(registry)
                 .register(
                     "/",
-                    catchers![session::unauthorized, session::csrf_mismatch],
+                    catchers![
+                        session::unauthorized,
+                        session::csrf_mismatch,
+                        session::server_error
+                    ],
                 )
                 .mount("/", routes::health())
                 .mount(mount, routes::all())
