@@ -119,9 +119,8 @@ pub(crate) fn mark_secure_cookies(request: &Request<'_>, response: &mut Response
         .rocket()
         .state::<Registry>()
         .map_or(&fallback, |registry| &registry.trusted_proxies);
-    let endpoints: Vec<_> = request.rocket().endpoints().collect();
-    let direct_tls = !endpoints.is_empty() && endpoints.iter().all(|e| e.is_tls());
-    let socket = request.remote().and_then(|endpoint| endpoint.ip());
+    let direct_tls = request.rocket().config().tls_enabled();
+    let socket = request.remote().map(|remote| remote.ip());
     let proto = request
         .headers()
         .get("X-Forwarded-Proto")

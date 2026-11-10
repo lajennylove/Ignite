@@ -1,11 +1,11 @@
 //! The panel's cookies get the `Secure` flag when the request was made over HTTPS. Directly,
-//! that is a server whose listeners are all TLS, which a local client cannot simulate, so it
-//! is unit-tested in `proxy.rs`. Through a proxy, the flag follows `X-Forwarded-Proto`, but
-//! only when the socket is listed in `IGNITE_TRUSTED_PROXIES`.
+//! that is a server configured for TLS, which a local client can simulate through its
+//! configuration without opening a listener. Through a proxy, the flag follows
+//! `X-Forwarded-Proto`, but only when the socket is listed in `IGNITE_TRUSTED_PROXIES`.
 
 mod common;
 
-use common::{client, reset};
+use common::{client, client_on, reset};
 use rocket::http::Header;
 use rocket::local::blocking::Client;
 
@@ -18,6 +18,15 @@ fn proxied_client() -> Client {
     let client = client(None);
     std::env::remove_var("IGNITE_TRUSTED_PROXIES");
     client
+}
+
+/// A client for a server configured for TLS. The certificate files are named but not read,
+/// because the local client never starts a listener.
+fn tls_client() -> Client {
+    let figment = rocket::Config::figment()
+        .merge(("tls.certs", "tests/fixtures/tls/cert.pem"))
+        .merge(("tls.key", "tests/fixtures/tls/key.pem"));
+    client_on(None, rocket::custom(figment))
 }
 
 /// The `Set-Cookie` values of a login page request, from `remote`, with `proto` as the
@@ -57,6 +66,14 @@ fn a_direct_http_request_gets_cookies_without_secure() {
     let _guard = reset();
     let client = client(None);
     assert_none_secure(&panel_cookies(&client, DIRECT, None));
+}
+
+#[test]
+fn a_server_configured_for_tls_gets_secure_cookies_on_every_request() {
+    let _guard = reset();
+    assert_all_secure(&panel_cookies(&tls_client(), DIRECT, None));
+    // A fresh client, because the first response's cookie would otherwise be kept and not re-sent.
+    assert_all_secure(&panel_cookies(&tls_client(), DIRECT, Some("http")));
 }
 
 #[test]

@@ -275,6 +275,11 @@ pub fn random_key() -> String {
 
 /// A client for the panel with the `Widgets` resource, not signed in.
 pub fn client(mount: Option<&str>) -> Client {
+    client_on(mount, rocket::build())
+}
+
+/// A client for the panel built on `rocket`, such as one with a TLS configuration.
+pub fn client_on(mount: Option<&str>, rocket: rocket::Rocket<rocket::Build>) -> Client {
     ensure_secret();
     // An app's own profile field, declared the way the developer declares it.
     let mut ignite = Ignite::new()
@@ -288,7 +293,7 @@ pub fn client(mount: Option<&str>) -> Client {
     if let Some(mount) = mount {
         ignite = ignite.mount(mount);
     }
-    Client::tracked(rocket::build().attach(ignite.fairing())).expect("valid rocket")
+    Client::tracked(rocket.attach(ignite.fairing())).expect("valid rocket")
 }
 
 /// The CSRF token of a client's browser session, read from its token cookie.

@@ -324,7 +324,7 @@ impl<'r> FromRequest<'r> for ClientIp {
     type Error = ();
 
     async fn from_request(request: &'r Request<'_>) -> Outcome<Self, ()> {
-        let socket = request.remote().and_then(|endpoint| endpoint.ip());
+        let socket = request.remote().map(|remote| remote.ip());
         let forwarded = request
             .headers()
             .get("X-Forwarded-For")
