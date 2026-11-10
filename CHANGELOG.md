@@ -6,6 +6,26 @@ All notable changes to Ignite are listed here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Roles and permissions, modelled on Filament and Filament Shield. Each resource has the
+  abilities `<slug>.viewAny`, `<slug>.view`, `<slug>.create`, `<slug>.update` and
+  `<slug>.delete`, which the panel registers when the app starts. The routes answer 403
+  Forbidden without the ability. The navigation, the dashboard and the buttons show only
+  what the user may do. The role `super-admin` passes every check.
+- The `ignite role create`, `ignite role grant`, `ignite user role add`,
+  `ignite user role remove` and `ignite user roles` commands.
+- `AdminUser::can`, which checks an ability in an app's own route.
+- The migration `20261113000000_roles_permissions`, which adds the tables `roles`,
+  `permissions`, `role_permission` and `role_user`.
+
+### Changed
+
+- An upgrade gives `super-admin` to every user who exists when the migration runs, so they
+  keep full access. A user created after the upgrade has no roles and sees no resource
+  until `ignite user role add` gives them one.
+
+
 ## [0.2.0] - 2026-11-09
 
 ### Added

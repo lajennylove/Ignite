@@ -105,6 +105,39 @@ rocket::build().attach(
 
 The panel is served under `/admin`. Its health check is `GET /up`, at the application root. It answers with a minimal HTML page, "Application up", and needs no sign-in. The documentation explains how to define a resource, its fields and columns, the profile fields an app adds, and how to extend the layout.
 
+## Roles and permissions
+
+The panel follows Filament and its standard plugin, Filament Shield (built on Spatie laravel-permission). Each resource has five abilities, named after its slug:
+
+| Ability | Lets the user |
+| --- | --- |
+| `<slug>.viewAny` | See the list, and the resource in the navigation and on the dashboard. |
+| `<slug>.view` | Reserved for a detail page. The panel has none yet, so nothing checks it. |
+| `<slug>.create` | Open the new form and save a new record. |
+| `<slug>.update` | Open the edit form and save a change. |
+| `<slug>.delete` | Delete a record. |
+
+A resource with the slug `users` has `users.viewAny`, `users.view`, `users.create`, `users.update` and `users.delete`. The panel registers them in the `permissions` table when the app starts, so declare the resources before the first start, and start the app once after you add one.
+
+A user holds the abilities of their roles. Manage them with the `ignite` command:
+
+```sh
+ignite role create editors
+ignite role grant editors users.viewAny
+ignite role grant editors users.update
+ignite user role add editor@example.com editors
+ignite user roles editor@example.com
+ignite user role remove editor@example.com editors
+```
+
+- `super-admin` is a role that passes every check, as Filament Shield's super admin does.
+- The migration that adds roles gives `super-admin` to every user who exists when it runs, so an upgrade locks nobody out. A user created later has no roles until `ignite user role add` gives one. The last super-admin cannot lose the role.
+- `role grant` refuses a permission that the app has not registered yet. It also refuses an unknown role.
+- The server answers 403 Forbidden to a request the user may not make, and an unknown resource stays 404. The navigation lists only the resources the user may view, the "Add new" link and the New button need `create`, the Edit button needs `update`, and the Delete button needs `delete`. The dashboard shows a resource's stat cards and table only when the user may view it.
+- An app's own route can check an ability: `user.can("reports.view")`, where `user` is an `AdminUser` request guard.
+
+The panel does not edit roles yet. Use the command.
+
 ## Tests
 
 The test suite needs a MariaDB or MySQL database that it may drop and rewrite tables in. Point `DATABASE_URL` at a database set aside for tests, such as `ignite_test`, and never at a database with data you keep:
