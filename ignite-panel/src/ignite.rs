@@ -5,7 +5,8 @@ use std::sync::Arc;
 
 use ignite_core::{build_pool, Field, IgniteResource, Pool};
 use rocket::catchers;
-use rocket::fairing::AdHoc;
+use rocket::fairing::{self, AdHoc, Fairing, Info, Kind};
+use rocket::{Build, Request, Response, Rocket};
 
 use crate::erased::{Adapter, Erased};
 use crate::proxy::TrustedProxies;
@@ -164,8 +165,10 @@ impl Ignite {
 
     /// Returns the fairing. At ignite, before launch, it manages the pool and
     /// mounts the routes under the URL prefix. Rocket runs fairing hooks at
-    /// ignite, not when `attach` is called, at this Rocket revision.
-    pub fn fairing(self) -> AdHoc {
+    /// ignite, not when `attach` is called, at this Rocket revision. On each
+    /// response it adds `Secure` to the panel's cookies when the request was
+    /// made over HTTPS.
+    pub fn fairing(self) -> PanelFairing {
         let Ignite {
             pool,
             mount,
@@ -179,7 +182,7 @@ impl Ignite {
         // The panel registers its own assets, so an app adds nothing for its styling.
         crate::assets::register(&mount);
         register_views(views.as_deref());
-        AdHoc::on_ignite("Ignite", move |rocket| async move {
+        let ignite = AdHoc::on_ignite("Ignite", move |rocket| async move {
             let registry = Registry {
                 mount: mount.clone(),
                 resources,
@@ -197,7 +200,32 @@ impl Ignite {
                 )
                 .mount("/", routes::health())
                 .mount(mount, routes::all())
-        })
+        });
+        PanelFairing { ignite }
+    }
+}
+
+/// The fairing [`Ignite::fairing`] returns. Its ignite hook is the panel's setup. Its
+/// response hook marks the panel's cookies `Secure` over HTTPS.
+pub struct PanelFairing {
+    ignite: AdHoc,
+}
+
+#[rocket::async_trait]
+impl Fairing for PanelFairing {
+    fn info(&self) -> Info {
+        Info {
+            name: "Ignite",
+            kind: Kind::Ignite | Kind::Response,
+        }
+    }
+
+    async fn on_ignite(&self, rocket: Rocket<Build>) -> fairing::Result {
+        self.ignite.on_ignite(rocket).await
+    }
+
+    async fn on_response<'r>(&self, request: &'r Request<'_>, response: &mut Response<'r>) {
+        crate::session::mark_secure_cookies(request, response);
     }
 }
 

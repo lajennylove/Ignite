@@ -11,11 +11,13 @@ use rocket::http::{Cookie, CookieJar, SameSite, Status};
 use rocket::request::{FromRequest, Outcome, Request};
 use rocket::response::content::RawHtml;
 use rocket::response::Redirect;
+use rocket::Response;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 
 use crate::ignite::Registry;
+use crate::proxy::{request_is_secure, TrustedProxies};
 use crate::{sessions, users};
 use ignite_core::Pool;
 
@@ -98,13 +100,62 @@ fn open<T: DeserializeOwned>(key: &[u8], kind: &str, sealed: &str) -> Option<T> 
 }
 
 fn cookie(name: &'static str, value: String) -> Cookie<'static> {
+    // The Secure flag is added by `mark_secure_cookies` when the request is secure.
     Cookie::build((name, value))
         .path("/")
         .http_only(true)
         .same_site(SameSite::Lax)
-        // Release builds send the cookie only over HTTPS.
-        .secure(!cfg!(debug_assertions))
         .build()
+}
+
+/// Adds `Secure` to the panel's cookies on a response to a request that was made over
+/// HTTPS, directly or through a trusted proxy (see `proxy::request_is_secure`). A plain
+/// HTTP request, such as a local development server, gets cookies without it, so the
+/// browser keeps them. The panel's cookies are the ones whose names start with `ignite_`.
+pub(crate) fn mark_secure_cookies(request: &Request<'_>, response: &mut Response<'_>) {
+    let fallback = TrustedProxies::default();
+    let trusted = request
+        .rocket()
+        .state::<Registry>()
+        .map_or(&fallback, |registry| &registry.trusted_proxies);
+    let endpoints: Vec<_> = request.rocket().endpoints().collect();
+    let direct_tls = !endpoints.is_empty() && endpoints.iter().all(|e| e.is_tls());
+    let socket = request.remote().and_then(|endpoint| endpoint.ip());
+    let proto = request
+        .headers()
+        .get("X-Forwarded-Proto")
+        .collect::<Vec<_>>()
+        .join(",");
+    let proto = (!proto.is_empty()).then_some(proto);
+    if !request_is_secure(direct_tls, socket, proto.as_deref(), trusted) {
+        return;
+    }
+
+    let cookies: Vec<String> = response
+        .headers()
+        .get("Set-Cookie")
+        .map(str::to_string)
+        .collect();
+    let needs_flag = |c: &str| c.starts_with("ignite_") && !has_secure_flag(c);
+    if !cookies.iter().any(|c| needs_flag(c)) {
+        return;
+    }
+    response.remove_header("Set-Cookie");
+    for cookie in cookies {
+        let cookie = if needs_flag(&cookie) {
+            format!("{cookie}; Secure")
+        } else {
+            cookie
+        };
+        response.adjoin_raw_header("Set-Cookie", cookie);
+    }
+}
+
+/// Whether a `Set-Cookie` value already has the `Secure` attribute.
+fn has_secure_flag(set_cookie: &str) -> bool {
+    set_cookie
+        .split(';')
+        .any(|attribute| attribute.trim().eq_ignore_ascii_case("secure"))
 }
 
 /// Sets the session cookie for session `session_id`, the id of a `sessions` row.

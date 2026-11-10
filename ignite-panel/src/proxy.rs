@@ -103,6 +103,36 @@ fn canonical(ip: IpAddr) -> IpAddr {
     }
 }
 
+/// Whether the request came over HTTPS. `direct_tls` is true when every listener of the
+/// server is TLS, so a request that reached it did so over HTTPS. Otherwise, when the
+/// socket is a trusted proxy, the request is secure when the right-most `X-Forwarded-Proto`
+/// entry is `https`. A forwarded scheme from any other socket is ignored.
+pub(crate) fn request_is_secure(
+    direct_tls: bool,
+    socket: Option<IpAddr>,
+    forwarded_proto: Option<&str>,
+    trusted: &TrustedProxies,
+) -> bool {
+    if direct_tls {
+        return true;
+    }
+    let Some(socket) = socket else {
+        return false;
+    };
+    if !trusted.contains(socket) {
+        return false;
+    }
+    forwarded_proto
+        .and_then(|header| {
+            header
+                .split(',')
+                .map(str::trim)
+                .filter(|e| !e.is_empty())
+                .next_back()
+        })
+        .is_some_and(|proto| proto.eq_ignore_ascii_case("https"))
+}
+
 /// The client's address. `socket` is the address the connection came from, or `None`
 /// when Rocket does not know it. When `socket` is not a trusted proxy, it is the
 /// answer, and `forwarded_for` is ignored. When it is one, the answer is the
@@ -238,6 +268,57 @@ mod tests {
         let proxies = trusted("0.0.0.0/0");
         assert!(proxies.contains(ip("203.0.113.9")));
         assert!(!proxies.contains(ip("2001:db8::1")));
+    }
+
+    #[test]
+    fn a_direct_tls_listener_is_secure_whatever_the_headers() {
+        let none = TrustedProxies::default();
+        assert!(request_is_secure(
+            true,
+            Some(ip("198.51.100.4")),
+            None,
+            &none
+        ));
+    }
+
+    #[test]
+    fn a_forwarded_scheme_from_an_untrusted_socket_is_ignored() {
+        let none = TrustedProxies::default();
+        assert!(!request_is_secure(
+            false,
+            Some(ip("198.51.100.4")),
+            Some("https"),
+            &none
+        ));
+    }
+
+    #[test]
+    fn a_trusted_proxy_decides_the_scheme_from_forwarded_proto() {
+        let proxies = trusted("192.0.2.10");
+        assert!(request_is_secure(
+            false,
+            Some(ip("192.0.2.10")),
+            Some("https"),
+            &proxies
+        ));
+        assert!(request_is_secure(
+            false,
+            Some(ip("192.0.2.10")),
+            Some("HTTP, https"),
+            &proxies
+        ));
+        assert!(!request_is_secure(
+            false,
+            Some(ip("192.0.2.10")),
+            Some("http"),
+            &proxies
+        ));
+        assert!(!request_is_secure(
+            false,
+            Some(ip("192.0.2.10")),
+            None,
+            &proxies
+        ));
     }
 
     #[test]

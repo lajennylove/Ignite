@@ -130,7 +130,11 @@ fn a_number_and_a_date_are_checked_like_resource_fields() {
     let decimal = save(&client, "shoe_size=42.5&birthday=2020-12-31");
     assert_eq!(decimal.status(), Status::SeeOther);
     assert_eq!(stored_profile().contains("\"shoe_size\":\"42.5\""), true);
-    let page = client.get("/admin/profile").dispatch().into_string().unwrap();
+    let page = client
+        .get("/admin/profile")
+        .dispatch()
+        .into_string()
+        .unwrap();
     assert!(
         page.contains(r#"type="number" step="any""#),
         "a number input accepts decimals in the browser"
