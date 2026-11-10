@@ -12,14 +12,18 @@ use ignite_core::{
 };
 use propel_rocket::PropelView;
 use rocket::data::{Data, ToByteUnit};
+use rocket::form::Form;
+use rocket::fs::TempFile;
 use rocket::http::{ContentType, CookieJar, Status};
 use rocket::request::{FromRequest, Outcome, Request};
 use rocket::response::{self, Redirect, Responder, Response};
-use rocket::{get, post, routes, Route, State};
+use rocket::tokio::io::AsyncReadExt;
+use rocket::{get, post, routes, FromForm, Route, State};
 use serde_json::Value;
 
 use crate::erased::Erased;
 use crate::ignite::Registry;
+use crate::profile;
 use crate::session::{
     check_csrf, csrf_token, end_session, session_id, set_flash, start_session, take_flash,
     AdminUser,
@@ -45,7 +49,12 @@ pub(crate) fn all() -> Vec<Route> {
         login,
         logout,
         logout_everywhere,
-        profile,
+        profile_form,
+        save_profile,
+        change_password,
+        upload_avatar,
+        remove_avatar,
+        avatar,
         set_theme,
         index,
         new_form,
@@ -115,6 +124,8 @@ async fn dashboard(
         signed_in: layout.signed_in,
         user_name: layout.user_name,
         user_initials: layout.user_initials,
+        has_avatar: layout.has_avatar,
+        avatar_url: layout.avatar_url,
         theme: layout.theme,
         theme_url: layout.theme_url,
         profile_url: layout.profile_url,
@@ -175,6 +186,8 @@ fn login_page(
         signed_in: layout.signed_in,
         user_name: layout.user_name,
         user_initials: layout.user_initials,
+        has_avatar: layout.has_avatar,
+        avatar_url: layout.avatar_url,
         theme: layout.theme,
         theme_url: layout.theme_url,
         profile_url: layout.profile_url,
@@ -361,21 +374,27 @@ async fn set_theme(
     Ok(Status::NoContent)
 }
 
-/// The signed-in user's profile, linked from the top bar.
-#[get("/profile")]
-async fn profile(
-    session: AdminUser,
+/// Renders the profile page: the profile form, the password form and the picture. The
+/// forms show `values` and their errors, so a rejected form keeps what was typed.
+fn render_profile(
+    registry: &Registry,
+    session: &AdminUser,
     cookies: &CookieJar<'_>,
-    registry: &State<Registry>,
+    values: &FormInput,
+    errors: &FieldErrors,
+    password_errors: &FieldErrors,
 ) -> PropelView {
     let flash = take_flash(cookies, &registry.secret);
     let token = csrf_token(cookies, &registry.secret);
-    let layout = Layout::new(registry, Some(&session), "profile", flash, token);
+    let layout = Layout::new(registry, Some(session), "profile", flash, token);
+    let fields = profile::profile_fields(registry);
     let page = ProfilePage {
         home_url: layout.home_url,
         signed_in: layout.signed_in,
         user_name: layout.user_name,
         user_initials: layout.user_initials,
+        has_avatar: layout.has_avatar,
+        avatar_url: layout.avatar_url,
         theme: layout.theme,
         theme_url: layout.theme_url,
         profile_url: layout.profile_url,
@@ -385,9 +404,245 @@ async fn profile(
         has_flash: layout.has_flash,
         flash: layout.flash,
         title: "Profile",
-        email: session.email().to_string(),
+        profile_action: format!("{}/profile", registry.mount),
+        profile_fields: field_views(&fields, values, errors),
+        password_action: format!("{}/profile/password", registry.mount),
+        password_fields: field_views(
+            &profile::PASSWORD_FIELDS,
+            &FormInput::default(),
+            password_errors,
+        ),
+        avatar_action: format!("{}/profile/avatar", registry.mount),
+        remove_avatar_action: format!("{}/profile/avatar/remove", registry.mount),
     };
     render_page("ignite::profile", &page, compiled::profile::render)
+}
+
+/// The signed-in user's row, as the profile needs it.
+async fn load_user(pool: &State<Pool>, id: i64) -> Result<users::User, Status> {
+    blocking(pool, move |conn| {
+        users::find_by_id(conn, id).map_err(db_status)
+    })
+    .await?
+    .ok_or(Status::NotFound)
+}
+
+/// The profile page, linked from the top bar.
+#[get("/profile")]
+async fn profile_form(
+    session: AdminUser,
+    cookies: &CookieJar<'_>,
+    registry: &State<Registry>,
+    pool: &State<Pool>,
+) -> Result<PropelView, Status> {
+    let row = load_user(pool, session.user_id()).await?;
+    let values = profile::form_values(&row.name, &row.email, row.profile.as_deref());
+    Ok(render_profile(
+        registry,
+        &session,
+        cookies,
+        &values,
+        &FieldErrors::new(),
+        &FieldErrors::new(),
+    ))
+}
+
+/// Saves the name, the email and the app's profile fields.
+#[post("/profile", data = "<body>")]
+async fn save_profile(
+    body: Data<'_>,
+    session: AdminUser,
+    cookies: &CookieJar<'_>,
+    registry: &State<Registry>,
+    pool: &State<Pool>,
+) -> Result<Reply, Status> {
+    let form = read_form(body).await?;
+    check_csrf(cookies, &registry.secret, form.get("_token"))?;
+    let fields = profile::profile_fields(registry);
+    let saved = match profile::validate(&fields, &form) {
+        Ok(saved) => saved,
+        Err(errors) => {
+            return Ok(Reply::Page(
+                Status::UnprocessableEntity,
+                render_profile(
+                    registry,
+                    &session,
+                    cookies,
+                    &form,
+                    &errors,
+                    &FieldErrors::new(),
+                ),
+            ))
+        }
+    };
+
+    let id = session.user_id();
+    let email = saved.email.clone();
+    let taken = blocking(pool, move |conn| {
+        users::email_taken(conn, &email, id).map_err(db_status)
+    })
+    .await?;
+    if taken {
+        let mut errors = FieldErrors::new();
+        errors.insert("email", "Another user already has this email.".to_string());
+        return Ok(Reply::Page(
+            Status::UnprocessableEntity,
+            render_profile(
+                registry,
+                &session,
+                cookies,
+                &form,
+                &errors,
+                &FieldErrors::new(),
+            ),
+        ));
+    }
+
+    blocking(pool, move |conn| {
+        users::update_profile(conn, id, &saved.name, &saved.email, &saved.custom).map_err(db_status)
+    })
+    .await?;
+    set_flash(cookies, &registry.secret, "Profile saved.");
+    Ok(Reply::Redirect(Box::new(Redirect::to(format!(
+        "{}/profile",
+        registry.mount
+    )))))
+}
+
+/// Changes the password. The current password must match, and every other session of
+/// the user ends, so an old sign-in cannot keep working.
+#[post("/profile/password", data = "<body>")]
+async fn change_password(
+    body: Data<'_>,
+    session: AdminUser,
+    cookies: &CookieJar<'_>,
+    registry: &State<Registry>,
+    pool: &State<Pool>,
+) -> Result<Reply, Status> {
+    let form = read_form(body).await?;
+    check_csrf(cookies, &registry.secret, form.get("_token"))?;
+    let row = load_user(pool, session.user_id()).await?;
+    let current = form.get("current_password").unwrap_or("");
+    let new = form.get("new_password").unwrap_or("").to_string();
+    let confirm = form.get("confirm_password").unwrap_or("");
+    let errors = profile::password_errors(
+        users::verify_password(&row.password_hash, current),
+        &new,
+        confirm,
+    );
+    if !errors.is_empty() {
+        let values = profile::form_values(&row.name, &row.email, row.profile.as_deref());
+        return Ok(Reply::Page(
+            Status::UnprocessableEntity,
+            render_profile(
+                registry,
+                &session,
+                cookies,
+                &values,
+                &FieldErrors::new(),
+                &errors,
+            ),
+        ));
+    }
+
+    let id = session.user_id();
+    let keep = session_id(cookies, &registry.secret).unwrap_or_default();
+    blocking(pool, move |conn| {
+        users::update_password(conn, id, &new).map_err(db_status)?;
+        sessions::delete_others_for_user(conn, id, &keep).map_err(db_status)?;
+        Ok(())
+    })
+    .await?;
+    set_flash(
+        cookies,
+        &registry.secret,
+        "Password changed. Other devices were signed out.",
+    );
+    Ok(Reply::Redirect(Box::new(Redirect::to(format!(
+        "{}/profile",
+        registry.mount
+    )))))
+}
+
+/// A picture sent from the profile form. The token travels in the same form.
+#[derive(FromForm)]
+struct AvatarUpload<'r> {
+    #[field(name = "_token")]
+    token: String,
+    avatar: TempFile<'r>,
+}
+
+/// Stores a profile picture. Only PNG, JPEG and WebP pictures of up to 1 MB are kept,
+/// and the type comes from the file's bytes, not from its name.
+#[post("/profile/avatar", data = "<upload>")]
+async fn upload_avatar(
+    upload: Form<AvatarUpload<'_>>,
+    session: AdminUser,
+    cookies: &CookieJar<'_>,
+    registry: &State<Registry>,
+    pool: &State<Pool>,
+) -> Result<Redirect, Status> {
+    let upload = upload.into_inner();
+    check_csrf(cookies, &registry.secret, Some(upload.token.as_str()))?;
+    let mut bytes = Vec::new();
+    upload
+        .avatar
+        .open()
+        .await
+        .map_err(|_| Status::BadRequest)?
+        .read_to_end(&mut bytes)
+        .await
+        .map_err(|_| Status::BadRequest)?;
+
+    let profile_url = format!("{}/profile", registry.mount);
+    let Some(mime) =
+        profile::picture_type(&bytes).filter(|_| bytes.len() <= profile::MAX_AVATAR_BYTES)
+    else {
+        set_flash(
+            cookies,
+            &registry.secret,
+            "Choose a PNG, JPEG or WebP picture of up to 1 MB.",
+        );
+        return Ok(Redirect::to(profile_url));
+    };
+    let id = session.user_id();
+    blocking(pool, move |conn| {
+        users::set_avatar(conn, id, mime, &bytes).map_err(db_status)
+    })
+    .await?;
+    set_flash(cookies, &registry.secret, "Picture saved.");
+    Ok(Redirect::to(profile_url))
+}
+
+/// Removes the profile picture. The initials show again.
+#[post("/profile/avatar/remove", data = "<body>")]
+async fn remove_avatar(
+    body: Data<'_>,
+    session: AdminUser,
+    cookies: &CookieJar<'_>,
+    registry: &State<Registry>,
+    pool: &State<Pool>,
+) -> Result<Redirect, Status> {
+    let form = read_form(body).await?;
+    check_csrf(cookies, &registry.secret, form.get("_token"))?;
+    let id = session.user_id();
+    blocking(pool, move |conn| {
+        users::remove_avatar(conn, id).map_err(db_status)
+    })
+    .await?;
+    set_flash(cookies, &registry.secret, "Picture removed.");
+    Ok(Redirect::to(format!("{}/profile", registry.mount)))
+}
+
+/// The signed-in user's picture, served with the type it was stored with.
+#[get("/profile/avatar")]
+async fn avatar(session: AdminUser, pool: &State<Pool>) -> Result<(ContentType, Vec<u8>), Status> {
+    let id = session.user_id();
+    let (mime, bytes) = blocking(pool, move |conn| users::avatar(conn, id).map_err(db_status))
+        .await?
+        .ok_or(Status::NotFound)?;
+    let content_type = ContentType::parse_flexible(&mime).unwrap_or(ContentType::Binary);
+    Ok((content_type, bytes))
 }
 
 // Rocket takes each query parameter as an argument, so the list has many.
@@ -478,6 +733,8 @@ async fn index(
         signed_in: layout.signed_in,
         user_name: layout.user_name,
         user_initials: layout.user_initials,
+        has_avatar: layout.has_avatar,
+        avatar_url: layout.avatar_url,
         theme: layout.theme,
         theme_url: layout.theme_url,
         profile_url: layout.profile_url,
@@ -530,6 +787,8 @@ async fn new_form(
         signed_in: layout.signed_in,
         user_name: layout.user_name,
         user_initials: layout.user_initials,
+        has_avatar: layout.has_avatar,
+        avatar_url: layout.avatar_url,
         theme: layout.theme,
         theme_url: layout.theme_url,
         profile_url: layout.profile_url,
@@ -624,6 +883,8 @@ async fn edit_form(
         signed_in: layout.signed_in,
         user_name: layout.user_name,
         user_initials: layout.user_initials,
+        has_avatar: layout.has_avatar,
+        avatar_url: layout.avatar_url,
         theme: layout.theme,
         theme_url: layout.theme_url,
         profile_url: layout.profile_url,
@@ -730,6 +991,8 @@ fn form_page(
         signed_in: layout.signed_in,
         user_name: layout.user_name,
         user_initials: layout.user_initials,
+        has_avatar: layout.has_avatar,
+        avatar_url: layout.avatar_url,
         theme: layout.theme,
         theme_url: layout.theme_url,
         profile_url: layout.profile_url,

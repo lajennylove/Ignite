@@ -217,6 +217,7 @@ pub struct AdminUser {
     name: String,
     email: String,
     theme: String,
+    has_avatar: bool,
 }
 
 impl AdminUser {
@@ -238,6 +239,11 @@ impl AdminUser {
     /// The theme the user chose, "light" or "dark".
     pub fn theme(&self) -> &str {
         &self.theme
+    }
+
+    /// Whether the user has a profile picture. Without one, the panel shows the initials.
+    pub fn has_avatar(&self) -> bool {
+        self.has_avatar
     }
 }
 
@@ -271,6 +277,7 @@ impl<'r> FromRequest<'r> for AdminUser {
                 name: user.name,
                 email: user.email,
                 theme: user.theme,
+                has_avatar: user.avatar_mime.is_some(),
             }),
             None => Outcome::Error((Status::Unauthorized, ())),
         }

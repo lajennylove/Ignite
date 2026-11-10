@@ -267,7 +267,15 @@ pub fn random_key() -> String {
 /// A client for the panel with the `Widgets` resource, not signed in.
 pub fn client(mount: Option<&str>) -> Client {
     ensure_secret();
-    let mut ignite = Ignite::new().resource::<Widgets>();
+    // An app's own profile field, declared the way the developer declares it.
+    let mut ignite = Ignite::new()
+        .resource::<Widgets>()
+        .profile_field(ignite_core::Field {
+            name: "job_title",
+            label: "Job title",
+            kind: ignite_core::FieldKind::Text,
+            required: false,
+        });
     if let Some(mount) = mount {
         ignite = ignite.mount(mount);
     }

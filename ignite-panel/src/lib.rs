@@ -13,6 +13,7 @@ mod csrf;
 mod embedded;
 mod erased;
 mod ignite;
+mod profile;
 mod routes;
 mod session;
 mod sessions;

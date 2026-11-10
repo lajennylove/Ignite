@@ -25,13 +25,88 @@
 @section('content')
   <h1 class="mb-6">{{ $title }}</h1>
 
-  <section class="ig-card flex max-w-2xl flex-col gap-6 sm:flex-row sm:items-center">
-    <span class="flex h-20 w-20 shrink-0 items-center justify-center rounded-full bg-lightprimary text-2xl font-semibold text-primary">{{ $user_initials }}</span>
-    <dl class="grid flex-1 grid-cols-[8rem_minmax(0,1fr)] gap-x-4 gap-y-3">
-      <dt class="font-semibold text-heading">Name</dt>
-      <dd class="m-0">{{ $user_name }}</dd>
-      <dt class="font-semibold text-heading">Email</dt>
-      <dd class="m-0">{{ $email }}</dd>
-    </dl>
-  </section>
+  <div class="grid max-w-4xl gap-6">
+    <section class="ig-card">
+      <h2 class="mb-5">Your details</h2>
+      <form class="grid gap-5" method="post" action="{{ $profile_action }}">
+        <input type="hidden" name="_token" value="{{ $csrf_token }}">
+
+        @foreach (field in profile_fields)
+          <div>
+            @if (field.is_checkbox)
+              <label class="flex items-center gap-2 text-sm font-semibold text-heading">
+                <input type="checkbox" class="h-4 w-4 rounded border-bordergray text-primary focus:ring-primary" name="{{ $field.name }}" value="on" @if (field.checked)checked@endif>
+                {{ $field.label }}
+              </label>
+            @else
+              <label class="ig-label" for="{{ $field.name }}">{{ $field.label }}@if (field.required) *@endif</label>
+              @if (field.is_textarea)
+                <textarea class="ig-input min-h-32" id="{{ $field.name }}" name="{{ $field.name }}">{{ $field.value }}</textarea>
+              @elseif (field.is_select)
+                <select class="ig-input" id="{{ $field.name }}" name="{{ $field.name }}">
+                  @foreach (option in field.options)
+                    <option value="{{ $option.value }}" @if (option.selected)selected@endif>{{ $option.label }}</option>
+                  @endforeach
+                </select>
+              @else
+                <input class="ig-input" id="{{ $field.name }}" name="{{ $field.name }}" type="{{ $field.input_type }}" value="{{ $field.value }}">
+              @endif
+            @endif
+            @if (field.has_error)
+              <p class="mt-1.5 mb-0 text-sm text-error-emphasis">{{ $field.error }}</p>
+            @endif
+          </div>
+        @endforeach
+
+        <div>
+          <button type="submit" class="ig-btn ig-btn-primary">Save details</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="ig-card flex flex-col gap-6 sm:flex-row sm:items-center">
+      @if (has_avatar)
+        <img src="{{ $avatar_url }}" alt="" class="h-20 w-20 shrink-0 rounded-full object-cover">
+      @else
+        <span class="flex h-20 w-20 shrink-0 items-center justify-center rounded-full bg-lightprimary text-2xl font-semibold text-primary">{{ $user_initials }}</span>
+      @endif
+
+      <div class="grid flex-1 gap-3">
+        <h2 class="m-0">Picture</h2>
+        <p class="m-0 text-sm">PNG, JPEG or WebP, up to 1 MB. Without a picture, your initials show.</p>
+        <form class="flex flex-wrap items-center gap-3" method="post" action="{{ $avatar_action }}" enctype="multipart/form-data">
+          <input type="hidden" name="_token" value="{{ $csrf_token }}">
+          <input class="text-sm" type="file" name="avatar" accept="image/png,image/jpeg,image/webp" required>
+          <button type="submit" class="ig-btn ig-btn-outline">Upload</button>
+        </form>
+        @if (has_avatar)
+          <form method="post" action="{{ $remove_avatar_action }}">
+            <input type="hidden" name="_token" value="{{ $csrf_token }}">
+            <button type="submit" class="ig-btn ig-btn-ghost">Remove picture</button>
+          </form>
+        @endif
+      </div>
+    </section>
+
+    <section class="ig-card">
+      <h2 class="mb-5">Password</h2>
+      <form class="grid max-w-md gap-5" method="post" action="{{ $password_action }}">
+        <input type="hidden" name="_token" value="{{ $csrf_token }}">
+
+        @foreach (field in password_fields)
+          <div>
+            <label class="ig-label" for="{{ $field.name }}">{{ $field.label }}</label>
+            <input class="ig-input" id="{{ $field.name }}" name="{{ $field.name }}" type="password" autocomplete="new-password">
+            @if (field.has_error)
+              <p class="mt-1.5 mb-0 text-sm text-error-emphasis">{{ $field.error }}</p>
+            @endif
+          </div>
+        @endforeach
+
+        <div>
+          <button type="submit" class="ig-btn ig-btn-primary">Change password</button>
+        </div>
+      </form>
+    </section>
+  </div>
 @endsection

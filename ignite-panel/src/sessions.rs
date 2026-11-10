@@ -62,3 +62,17 @@ pub(crate) fn delete(conn: &mut MysqlConnection, id: &str) -> QueryResult<usize>
 pub(crate) fn delete_for_user(conn: &mut MysqlConnection, user_id: i64) -> QueryResult<usize> {
     diesel::delete(sessions::table.filter(sessions::user_id.eq(user_id))).execute(conn)
 }
+
+/// Ends every session of `user_id` except `keep`, the one the user is using. Returns the number removed.
+pub(crate) fn delete_others_for_user(
+    conn: &mut MysqlConnection,
+    user_id: i64,
+    keep: &str,
+) -> QueryResult<usize> {
+    diesel::delete(
+        sessions::table
+            .filter(sessions::user_id.eq(user_id))
+            .filter(sessions::id.ne(keep)),
+    )
+    .execute(conn)
+}

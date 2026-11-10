@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use ignite_core::{build_pool, IgniteResource, Pool};
+use ignite_core::{build_pool, Field, IgniteResource, Pool};
 use rocket::catchers;
 use rocket::fairing::AdHoc;
 
@@ -24,6 +24,8 @@ pub(crate) struct Registry {
     /// The URL prefix, without a trailing slash, such as `/admin`.
     pub(crate) mount: String,
     pub(crate) resources: Vec<Arc<dyn Erased>>,
+    /// The fields the app adds to every profile.
+    pub(crate) profile_fields: Vec<Field>,
     /// The key that signs the session and flash cookies.
     pub(crate) secret: Vec<u8>,
     /// Paths that the app's CSRF guard does not check (see `Ignite::csrf_exempt`).
@@ -43,6 +45,7 @@ pub struct Ignite {
     pool: Pool,
     mount: String,
     resources: Vec<Arc<dyn Erased>>,
+    profile_fields: Vec<Field>,
     secret: Vec<u8>,
     views: Option<PathBuf>,
     csrf_exempt: Vec<String>,
@@ -72,6 +75,7 @@ impl Ignite {
             pool,
             mount: DEFAULT_MOUNT.to_string(),
             resources: Vec::new(),
+            profile_fields: Vec::new(),
             secret: session::secret_from_env(),
             views,
             csrf_exempt: Vec::new(),
@@ -90,6 +94,24 @@ impl Ignite {
             R::SLUG
         );
         self.resources.push(Arc::new(Adapter::<R>::new()));
+        self
+    }
+
+    /// Adds a field to every user's profile, after the name and the email. The value is
+    /// stored with the user and shown in the profile form. Use the same [`Field`] as a
+    /// resource: its `name` is the key the value is stored under.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the field's name is `name`, `email`, or another profile field's name.
+    pub fn profile_field(mut self, field: Field) -> Self {
+        assert!(
+            !matches!(field.name, "name" | "email")
+                && !self.profile_fields.iter().any(|f| f.name == field.name),
+            "the profile already has a field named `{}`",
+            field.name
+        );
+        self.profile_fields.push(field);
         self
     }
 
@@ -127,6 +149,7 @@ impl Ignite {
             pool,
             mount,
             resources,
+            profile_fields,
             secret,
             views,
             csrf_exempt,
@@ -138,6 +161,7 @@ impl Ignite {
             let registry = Registry {
                 mount: mount.clone(),
                 resources,
+                profile_fields,
                 secret,
                 csrf_exempt,
             };

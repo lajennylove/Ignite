@@ -46,6 +46,8 @@ pub(crate) struct Layout {
     pub(crate) signed_in: bool,
     pub(crate) user_name: String,
     pub(crate) user_initials: String,
+    pub(crate) has_avatar: bool,
+    pub(crate) avatar_url: String,
     pub(crate) theme: String,
     pub(crate) theme_url: String,
     pub(crate) profile_url: String,
@@ -113,6 +115,13 @@ impl Layout {
             signed_in: user.is_some(),
             user_name: user.map(|u| u.name().to_string()).unwrap_or_default(),
             user_initials: user.map(|u| initials(u.name())).unwrap_or_default(),
+            has_avatar: user.is_some_and(|u| u.has_avatar()),
+            // A timestamp in the URL makes the browser fetch the picture again after a change.
+            avatar_url: format!(
+                "{}/profile/avatar?v={}",
+                registry.mount,
+                chrono::Utc::now().timestamp_millis()
+            ),
             theme: user
                 .map(|u| u.theme().to_string())
                 .unwrap_or_else(|| "light".to_string()),
@@ -135,6 +144,8 @@ pub(crate) struct DashboardPage {
     pub(crate) signed_in: bool,
     pub(crate) user_name: String,
     pub(crate) user_initials: String,
+    pub(crate) has_avatar: bool,
+    pub(crate) avatar_url: String,
     pub(crate) theme: String,
     pub(crate) theme_url: String,
     pub(crate) profile_url: String,
@@ -212,6 +223,8 @@ pub(crate) struct LoginPage {
     pub(crate) signed_in: bool,
     pub(crate) user_name: String,
     pub(crate) user_initials: String,
+    pub(crate) has_avatar: bool,
+    pub(crate) avatar_url: String,
     pub(crate) theme: String,
     pub(crate) theme_url: String,
     pub(crate) profile_url: String,
@@ -235,6 +248,8 @@ pub(crate) struct ProfilePage {
     pub(crate) signed_in: bool,
     pub(crate) user_name: String,
     pub(crate) user_initials: String,
+    pub(crate) has_avatar: bool,
+    pub(crate) avatar_url: String,
     pub(crate) theme: String,
     pub(crate) theme_url: String,
     pub(crate) profile_url: String,
@@ -244,7 +259,12 @@ pub(crate) struct ProfilePage {
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
     pub(crate) title: &'static str,
-    pub(crate) email: String,
+    pub(crate) profile_action: String,
+    pub(crate) profile_fields: Vec<FieldView>,
+    pub(crate) password_action: String,
+    pub(crate) password_fields: Vec<FieldView>,
+    pub(crate) avatar_action: String,
+    pub(crate) remove_avatar_action: String,
 }
 
 /// The list view of a resource.
@@ -255,6 +275,8 @@ pub(crate) struct IndexPage {
     pub(crate) signed_in: bool,
     pub(crate) user_name: String,
     pub(crate) user_initials: String,
+    pub(crate) has_avatar: bool,
+    pub(crate) avatar_url: String,
     pub(crate) theme: String,
     pub(crate) theme_url: String,
     pub(crate) profile_url: String,
@@ -308,6 +330,8 @@ pub(crate) struct FormPage {
     pub(crate) signed_in: bool,
     pub(crate) user_name: String,
     pub(crate) user_initials: String,
+    pub(crate) has_avatar: bool,
+    pub(crate) avatar_url: String,
     pub(crate) theme: String,
     pub(crate) theme_url: String,
     pub(crate) profile_url: String,
