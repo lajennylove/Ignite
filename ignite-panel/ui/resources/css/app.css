@@ -89,6 +89,13 @@
 }
 
 @layer components {
+    /* The column beside the fixed sidebar, which is shown from the xl breakpoint. */
+    .ig-with-sidebar {
+        @media (width >= 80rem) {
+            padding-left: 270px;
+        }
+    }
+
     /* A surface: stat tiles, tables, forms and the login card. */
     .ig-card {
         @apply rounded-md bg-surface p-6 shadow-card;
@@ -115,7 +122,7 @@
         @apply border border-transparent text-primary hover:bg-lightprimary;
     }
     .ig-btn-danger {
-        @apply border border-transparent bg-error text-white hover:bg-error-emphasis;
+        @apply border border-transparent bg-error-emphasis text-white hover:opacity-90;
     }
 
     .ig-input {
@@ -136,7 +143,7 @@
         @apply px-4 py-3 text-left font-semibold text-heading;
     }
     .ig-table td {
-        @apply px-4 py-3 align-top text-text;
+        @apply px-4 py-3 align-middle text-text;
     }
     .ig-table tbody tr:hover {
         @apply bg-lightprimary;

@@ -4,7 +4,7 @@
   @include('ignite::partials.nav')
 @endsection
 
-@section('ignite_column')xl:pl-[270px]@endsection
+@section('ignite_column')ig-with-sidebar@endsection
 
 @section('ignite_bar')
   <header class="sticky top-0 z-20 flex items-center border-b border-border bg-page px-5 py-3">
