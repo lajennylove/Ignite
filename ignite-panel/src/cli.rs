@@ -7,6 +7,11 @@
 //!   `down.sql`. One step per run.
 //! - `ignite user create --email <email> [--name <name>]` creates a user. It does not
 //!   migrate: when migrations are pending it stops and says to run `ignite migrate`.
+//! - `ignite role create <name>` creates a role.
+//! - `ignite role grant <role> <permission>` gives a role a permission, such as `users.delete`.
+//! - `ignite user role add <email> <role>` and `ignite user role remove <email> <role>` give
+//!   a user a role or take one away. The last super-admin cannot lose the role.
+//! - `ignite user roles <email>` lists the roles of a user.
 //!
 //! The user command checks `DATABASE_URL`, connects and checks for an existing user
 //! before it reads the password. Interactively the password is read from the terminal
@@ -21,6 +26,7 @@ use std::process::exit;
 use diesel::mysql::MysqlConnection;
 use diesel::prelude::*;
 
+use crate::authz::{self, AuthzError};
 use crate::{migrate, migration_status as status, pending_migrations, rollback, users};
 
 const USAGE: &str = "usage:
@@ -28,13 +34,22 @@ const USAGE: &str = "usage:
   ignite migrate:status
   ignite migrate:rollback
   ignite user create --email <email> [--name <name>] [--password-stdin]
+  ignite role create <name>
+  ignite role grant <role> <permission>
+  ignite user role add <email> <role>
+  ignite user role remove <email> <role>
+  ignite user roles <email>
 
 `migrate` runs the panel's pending migrations. Run it before the first start.
 `migrate:status` lists each migration as Applied or Pending. `migrate:rollback`
 reverts the most recently applied migration, one step per run.
 `user create` reads DATABASE_URL and asks for the password without echoing it, or
 reads it from standard input when standard input is not a terminal or with
---password-stdin. It does not migrate; run `ignite migrate` first.";
+--password-stdin. It does not migrate; run `ignite migrate` first.
+`role create` makes a role. `role grant` gives it a permission, such as `users.delete`;
+the app must have started once so the permission exists. `user role add` and
+`user role remove` change a user's roles, and the last super-admin cannot lose the role.
+`user roles` lists a user's roles.";
 
 /// The shortest password the CLI accepts.
 const MIN_PASSWORD_CHARS: usize = 8;
@@ -47,6 +62,19 @@ pub fn main() {
         [status] if status == "migrate:status" => migration_status(),
         [rollback] if rollback == "migrate:rollback" => rollback_migration(),
         [user, create, rest @ ..] if user == "user" && create == "create" => create_user(rest),
+        [role, create, name] if role == "role" && create == "create" => create_role(name),
+        [role, grant, role_name, permission] if role == "role" && grant == "grant" => {
+            grant_permission(role_name, permission)
+        }
+        [user, role, add, email, role_name] if user == "user" && role == "role" && add == "add" => {
+            assign_role(email, role_name)
+        }
+        [user, role, remove, email, role_name]
+            if user == "user" && role == "role" && remove == "remove" =>
+        {
+            remove_role(email, role_name)
+        }
+        [user, roles, email] if user == "user" && roles == "roles" => list_user_roles(email),
         _ => {
             eprintln!("{USAGE}");
             2
@@ -276,4 +304,117 @@ fn check_length(password: String) -> Result<String, String> {
         ));
     }
     Ok(password)
+}
+
+/// Connects and checks that the roles tables exist, which needs `ignite migrate` first. On
+/// failure it prints the problem and returns the exit code.
+fn connect_with_roles() -> Result<MysqlConnection, i32> {
+    let mut conn = connect()?;
+    match pending_migrations(&mut conn) {
+        Ok(pending) if pending.is_empty() => Ok(conn),
+        Ok(pending) => {
+            eprintln!(
+                "The panel's tables are not set up: these migrations have not run: {}. \
+                 Run `ignite migrate` first.",
+                pending.join(", ")
+            );
+            Err(1)
+        }
+        Err(error) => {
+            eprintln!("Could not read the migration table: {error}");
+            Err(1)
+        }
+    }
+}
+
+/// Prints the outcome of a role command: the message on success, or the problem and exit 1.
+fn report(result: Result<String, AuthzError>) -> i32 {
+    match result {
+        Ok(message) => {
+            println!("{message}");
+            0
+        }
+        Err(error) => {
+            eprintln!("{error}");
+            1
+        }
+    }
+}
+
+/// `ignite role create <name>`. Returns the exit code.
+fn create_role(name: &str) -> i32 {
+    let name = name.trim();
+    if name.is_empty() {
+        eprintln!("The role name must not be empty.");
+        return 2;
+    }
+    let mut conn = match connect_with_roles() {
+        Ok(conn) => conn,
+        Err(code) => return code,
+    };
+    report(authz::create_role(&mut conn, name).map(|()| format!("Created role {name}.")))
+}
+
+/// `ignite role grant <role> <permission>`. Returns the exit code.
+fn grant_permission(role: &str, permission: &str) -> i32 {
+    let mut conn = match connect_with_roles() {
+        Ok(conn) => conn,
+        Err(code) => return code,
+    };
+    report(
+        authz::grant_permission(&mut conn, role, permission)
+            .map(|()| format!("Granted {permission} to {role}.")),
+    )
+}
+
+/// `ignite user role add <email> <role>`. Returns the exit code.
+fn assign_role(email: &str, role: &str) -> i32 {
+    let mut conn = match connect_with_roles() {
+        Ok(conn) => conn,
+        Err(code) => return code,
+    };
+    report(
+        authz::assign_role(&mut conn, email, role)
+            .map(|()| format!("Added role {role} to {email}.")),
+    )
+}
+
+/// `ignite user role remove <email> <role>`. Returns the exit code. A user who did not have
+/// the role is reported, and is not an error.
+fn remove_role(email: &str, role: &str) -> i32 {
+    let mut conn = match connect_with_roles() {
+        Ok(conn) => conn,
+        Err(code) => return code,
+    };
+    report(authz::remove_role(&mut conn, email, role).map(|removed| {
+        if removed {
+            format!("Removed role {role} from {email}.")
+        } else {
+            format!("{email} did not have the role {role}.")
+        }
+    }))
+}
+
+/// `ignite user roles <email>`. Returns the exit code.
+fn list_user_roles(email: &str) -> i32 {
+    let mut conn = match connect_with_roles() {
+        Ok(conn) => conn,
+        Err(code) => return code,
+    };
+    match authz::user_roles(&mut conn, email) {
+        Ok(roles) if roles.is_empty() => {
+            println!("{email} has no roles.");
+            0
+        }
+        Ok(roles) => {
+            for role in roles {
+                println!("{role}");
+            }
+            0
+        }
+        Err(error) => {
+            eprintln!("{error}");
+            1
+        }
+    }
 }
