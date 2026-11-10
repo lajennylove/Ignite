@@ -384,6 +384,10 @@ fn lookup_user(
     let Some(user) = users::find_by_id(&mut conn, user_id)? else {
         return Ok(None);
     };
+    // A disabled user's sessions end, so the guard refuses them like a signed-out request.
+    if user.disabled_at.is_some() {
+        return Ok(None);
+    }
     // A failed read of the roles is an outage, not a sign-out, so it answers 500.
     let abilities = authz::load(&mut conn, user.id)?;
     Ok(Some((user, abilities)))

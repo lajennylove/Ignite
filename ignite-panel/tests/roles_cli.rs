@@ -169,14 +169,17 @@ fn the_cli_refuses_to_remove_the_last_super_admin() {
 #[test]
 fn role_commands_refuse_when_the_roles_tables_are_missing() {
     let _guard = reset();
-    // The roles migration is the latest one, so one rollback drops its tables.
-    let rolled = ignite(&["migrate:rollback"]);
-    assert_eq!(
-        rolled.status.code(),
-        Some(0),
-        "stderr: {}",
-        text(&rolled.stderr)
-    );
+    // The account lifecycle migration is the latest one, and the roles migration is the one
+    // before it, so two rollbacks drop the roles tables.
+    for _ in 0..2 {
+        let rolled = ignite(&["migrate:rollback"]);
+        assert_eq!(
+            rolled.status.code(),
+            Some(0),
+            "stderr: {}",
+            text(&rolled.stderr)
+        );
+    }
 
     let refused = ignite(&["role", "create", "editors"]);
     assert_eq!(refused.status.code(), Some(1));

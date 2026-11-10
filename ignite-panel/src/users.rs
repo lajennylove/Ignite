@@ -1,10 +1,12 @@
 //! The `users` table the panel signs in with: its schema, argon2 password
 //! hashes, profile pictures, and the lookups the login and the CLI need.
 
-use chrono::NaiveDateTime;
+use chrono::{NaiveDateTime, Utc};
 use diesel::mysql::MysqlConnection;
 use diesel::prelude::*;
 use diesel::result::QueryResult;
+
+use crate::sessions;
 
 diesel::table! {
     /// The panel's `users` table. See `migrations/20261108000000_create_users`.
@@ -17,6 +19,7 @@ diesel::table! {
         theme -> Text,
         avatar_mime -> Nullable<Text>,
         profile -> Nullable<Text>,
+        disabled_at -> Nullable<Timestamp>,
     }
 }
 
@@ -49,6 +52,8 @@ pub struct User {
     pub avatar_mime: Option<String>,
     /// The values of the profile fields the app adds, as a JSON object. `None` when unset.
     pub profile: Option<String>,
+    /// When the user was disabled. `None` when the user is enabled. A disabled user cannot sign in.
+    pub disabled_at: Option<NaiveDateTime>,
 }
 
 /// The themes a user can choose.
@@ -83,6 +88,35 @@ pub fn update_password(conn: &mut MysqlConnection, id: i64, password: &str) -> Q
     let hash = hash_password(password).map_err(hash_error)?;
     diesel::update(users::table.find(id))
         .set(users::password_hash.eq(hash))
+        .execute(conn)
+}
+
+/// Sets a new password for the user with `id` and ends every session of the user, so
+/// anyone signed in with the old password must sign in again. Used by `ignite user password`.
+pub fn reset_password(conn: &mut MysqlConnection, id: i64, password: &str) -> QueryResult<()> {
+    conn.transaction(|conn| {
+        update_password(conn, id, password)?;
+        sessions::delete_for_user(conn, id)?;
+        Ok(())
+    })
+}
+
+/// Disables the user with `id`: they cannot sign in, and their sessions end. The caller
+/// checks the user is enabled and is not the last enabled super-admin.
+pub fn disable(conn: &mut MysqlConnection, id: i64) -> QueryResult<()> {
+    conn.transaction(|conn| {
+        diesel::update(users::table.find(id))
+            .set(users::disabled_at.eq(Some(Utc::now().naive_utc())))
+            .execute(conn)?;
+        sessions::delete_for_user(conn, id)?;
+        Ok(())
+    })
+}
+
+/// Enables the user with `id` again. Their old sessions stay ended, so they sign in again.
+pub fn enable(conn: &mut MysqlConnection, id: i64) -> QueryResult<usize> {
+    diesel::update(users::table.find(id))
+        .set(users::disabled_at.eq(None::<NaiveDateTime>))
         .execute(conn)
 }
 

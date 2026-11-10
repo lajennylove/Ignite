@@ -171,8 +171,10 @@ pub enum AuthzError {
     NotFound(String),
     /// A role with this name already exists.
     Exists(String),
-    /// The change would leave no super-admin, so the user who would lose the role is kept.
+    /// The change would leave no enabled super-admin, so the user who would lose the role is kept.
     LastSuperAdmin,
+    /// Disabling the user would leave no enabled super-admin, so the user is kept enabled.
+    CannotDisableLastSuperAdmin,
     /// The database failed.
     Database(DieselError),
 }
@@ -184,8 +186,13 @@ impl fmt::Display for AuthzError {
             AuthzError::Exists(name) => write!(f, "A role named {name} already exists."),
             AuthzError::LastSuperAdmin => write!(
                 f,
-                "This is the last super-admin, so the role cannot be removed. \
-                 Give super-admin to another user first."
+                "This is the last super-admin who is enabled, so the role cannot be removed. \
+                 Give super-admin to another enabled user first."
+            ),
+            AuthzError::CannotDisableLastSuperAdmin => write!(
+                f,
+                "This is the last super-admin who is enabled, so the user cannot be disabled. \
+                 Give super-admin to another enabled user first."
             ),
             AuthzError::Database(error) => write!(f, "The database failed: {error}"),
         }
@@ -259,7 +266,7 @@ pub fn assign_role(conn: &mut MysqlConnection, email: &str, role: &str) -> Resul
 }
 
 /// Takes the role `role` from the user with `email`. Returns `false` when the user did not
-/// have it. Refuses to remove super-admin from the last user who has it, so nobody is locked out.
+/// have it. Refuses to remove super-admin from the last enabled user who has it, so nobody is locked out.
 pub fn remove_role(
     conn: &mut MysqlConnection,
     email: &str,
@@ -279,14 +286,8 @@ pub fn remove_role(
         if holds.is_empty() {
             return Ok(false);
         }
-        if role == SUPER_ADMIN {
-            let holders: Vec<CountRow> =
-                sql_query("SELECT COUNT(*) AS count FROM role_user WHERE role_id = ?")
-                    .bind::<BigInt, _>(role_row)
-                    .load(conn)?;
-            if holders.first().is_some_and(|row| row.count <= 1) {
-                return Err(AuthzError::LastSuperAdmin);
-            }
+        if role == SUPER_ADMIN && enabled_super_admins_besides(conn, user_row)? == 0 {
+            return Err(AuthzError::LastSuperAdmin);
         }
         sql_query("DELETE FROM role_user WHERE user_id = ? AND role_id = ?")
             .bind::<BigInt, _>(user_row)
@@ -294,6 +295,61 @@ pub fn remove_role(
             .execute(conn)?;
         Ok(true)
     })
+}
+
+/// How many enabled users other than `user_id` hold super-admin. A disabled user cannot
+/// sign in, so they do not keep the panel open for anyone.
+fn enabled_super_admins_besides(
+    conn: &mut MysqlConnection,
+    user_id: i64,
+) -> Result<i64, DieselError> {
+    let rows: Vec<CountRow> = sql_query(
+        "SELECT COUNT(*) AS count FROM role_user \
+         INNER JOIN roles ON roles.id = role_user.role_id \
+         INNER JOIN users ON users.id = role_user.user_id \
+         WHERE roles.name = ? AND role_user.user_id <> ? AND users.disabled_at IS NULL",
+    )
+    .bind::<Text, _>(SUPER_ADMIN)
+    .bind::<BigInt, _>(user_id)
+    .load(conn)?;
+    Ok(rows.first().map_or(0, |row| row.count))
+}
+
+/// Disables the user with `email`: they cannot sign in, and their sessions end. Returns
+/// `false` when the user was already disabled. Refuses to disable the last enabled super-admin.
+pub fn disable_user(conn: &mut MysqlConnection, email: &str) -> Result<bool, AuthzError> {
+    let user = find_user(conn, email)?;
+    if user.disabled_at.is_some() {
+        return Ok(false);
+    }
+    conn.transaction(|conn| {
+        // The same lock as `remove_role`, so two changes to the super-admins cannot both pass.
+        sql_query("SELECT id FROM roles WHERE name = ? FOR UPDATE")
+            .bind::<Text, _>(SUPER_ADMIN)
+            .execute(conn)?;
+        let abilities = load(conn, user.id)?;
+        if abilities.super_admin && enabled_super_admins_besides(conn, user.id)? == 0 {
+            return Err(AuthzError::CannotDisableLastSuperAdmin);
+        }
+        users::disable(conn, user.id)?;
+        Ok(true)
+    })
+}
+
+/// Enables the user with `email` again. Returns `false` when the user was already enabled.
+pub fn enable_user(conn: &mut MysqlConnection, email: &str) -> Result<bool, AuthzError> {
+    let user = find_user(conn, email)?;
+    if user.disabled_at.is_none() {
+        return Ok(false);
+    }
+    users::enable(conn, user.id)?;
+    Ok(true)
+}
+
+/// The user with `email`. The user must exist.
+fn find_user(conn: &mut MysqlConnection, email: &str) -> Result<users::User, AuthzError> {
+    users::find_by_email(conn, email)?
+        .ok_or_else(|| AuthzError::NotFound(format!("The user {email}")))
 }
 
 /// The names of the roles of the user with `email`, in name order.

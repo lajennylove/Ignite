@@ -138,6 +138,21 @@ ignite user role remove editor@example.com editors
 
 The panel does not edit roles yet. Use the command.
 
+## Account lifecycle
+
+Manage a user's account with the `ignite` command:
+
+```sh
+ignite user disable editor@example.com
+ignite user enable editor@example.com
+ignite user password editor@example.com
+```
+
+- A disabled user cannot sign in. They get the same "The email or password is incorrect." message as a wrong password, which does not reveal that the account exists, and the attempt counts against the sign-in throttle. Disabling ends the user's sessions at once, so a signed-in browser is sent to the login page on its next request. Enabling restores sign-in, and the old sessions stay ended.
+- The last enabled super-admin cannot be disabled, and a disabled super-admin does not count as one who keeps the panel open, so the role cannot be removed from the last enabled super-admin either.
+- `ignite user password` reads the new password the way `ignite user create` does: asked for twice in a terminal, or from standard input with `--password-stdin`. It ends the user's sessions, as the panel's change-password form does for other devices.
+- Deleting a user deletes their session rows too, through the foreign key on `sessions.user_id`. The sign-in throttle rows are keyed by email and address rather than by user, and they expire after one minute, so they need no cleanup.
+
 ## Tests
 
 The test suite needs a MariaDB or MySQL database that it may drop and rewrite tables in. Point `DATABASE_URL` at a database set aside for tests, such as `ignite_test`, and never at a database with data you keep:

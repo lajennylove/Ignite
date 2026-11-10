@@ -276,7 +276,10 @@ async fn login(
                 false
             }
         };
-        match user.filter(|_| matched) {
+        // A disabled user gets the same answer as a wrong password, and the attempt counts
+        // against the throttle, as Laravel's Auth::attempt does for an extra condition such
+        // as `active`. The message does not reveal that the account exists but is disabled.
+        match user.filter(|user| matched && user.disabled_at.is_none()) {
             Some(user) => {
                 throttle::clear(conn, &throttle_key).map_err(db_status)?;
                 sessions::create(conn, user.id).map(Some).map_err(db_status)

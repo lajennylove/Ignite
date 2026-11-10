@@ -182,8 +182,16 @@ fn rollback_reverts_one_step_and_migrate_restores_it() {
         "the latest migration is applied at the start"
     );
 
-    // The roles migration is the latest now, so the first step reverts it, and the
-    // second step reverts the index migration this test is about.
+    // The account lifecycle and roles migrations are newer than the index one, so the first
+    // two steps revert them, and the third step reverts the index migration this test is about.
+    let lifecycle = ignite(&["migrate:rollback"], "");
+    assert_eq!(lifecycle.status.code(), Some(0));
+    assert!(
+        String::from_utf8_lossy(&lifecycle.stdout)
+            .contains("reverted 20261114000000_account_lifecycle."),
+        "stdout: {}",
+        String::from_utf8_lossy(&lifecycle.stdout)
+    );
     let roles = ignite(&["migrate:rollback"], "");
     assert_eq!(roles.status.code(), Some(0));
     assert!(
@@ -242,8 +250,11 @@ fn rollback_reverts_one_step_and_migrate_restores_it() {
 fn the_roles_migration_makes_existing_users_super_admins() {
     let _guard = reset();
     let mut conn = connection();
-    let rolled = ignite(&["migrate:rollback"], "");
-    assert_eq!(rolled.status.code(), Some(0));
+    // Revert the account lifecycle migration, then the roles migration.
+    for _ in 0..2 {
+        let rolled = ignite(&["migrate:rollback"], "");
+        assert_eq!(rolled.status.code(), Some(0));
+    }
     sql_query("DELETE FROM users").execute(&mut conn).unwrap();
     let email = "upgraded@example.test";
     sql_query(format!(
