@@ -6,24 +6,28 @@ Documentation: [ignite.rocketboost.rs](https://ignite.rocketboost.rs). Changes b
 
 ## Install
 
-Ignite is not on crates.io. Add it from git. The versions below are the ones the workspace builds against:
+Ignite is not on crates.io. Add it from git, at the revision the install page and the example app pin. Orbit, Rocket and Propel come from crates.io, so the app builds one copy of each crate:
 
 ```toml
 [dependencies]
-ignite-panel = { git = "https://github.com/lajennylove/Ignite", branch = "main" }
-ignite-core = { git = "https://github.com/lajennylove/Ignite", branch = "main" }
-orbit-orm = { git = "https://github.com/lajennylove/Orbit", rev = "e3b8668270cc8c3f2c17b69b9257c442707be1a4" }
+ignite-panel = { git = "https://github.com/lajennylove/Ignite", rev = "d3d1975ae107b4e7e7dce92a20f1c83a73428866" }
+ignite-core = { git = "https://github.com/lajennylove/Ignite", rev = "d3d1975ae107b4e7e7dce92a20f1c83a73428866" }
+orbit-orm = "0.1.0"
 rocket = "0.5.2"
 propel_rocket = "0.2.0"
 propel_runtime = "0.2.0"
 serde = { version = "1", features = ["derive"] }
 chrono = { version = "0.4", features = ["serde"] }
 dotenvy = "0.15"
+
+[build-dependencies]
+propel_compiler = "0.2.0"
 ```
 
-- **Orbit** is pinned to revision `e3b8668`, the revision the Ignite workspace locks. Orbit is not on crates.io, so Cargo takes it from git.
-- **Rocket** 0.5.2 and **Propel** 0.2.0 come from crates.io, as in the workspace's `Cargo.lock`.
-- **Ignite** has no release tag that includes Orbit yet, so the install follows `main`.
+- **Ignite** is pinned to revision `d3d1975`, the revision of the Ignite main branch that the install page documents. Cargo takes it from git.
+- **Orbit** (`orbit-orm`) 0.1.0 comes from crates.io. The models derive its `OrbitModel`.
+- **Rocket** 0.5.2 and **Propel** 0.2.0 come from crates.io. A git pin of either would build a second copy, and the panel's views would not match the app's.
+- **propel_compiler** 0.2.0 is a build dependency. An app with its own views compiles them in its `build.rs`.
 - **chrono** is needed for the date fields of a resource, and **dotenvy** for the `ignite` command.
 
 ### Build requirements
