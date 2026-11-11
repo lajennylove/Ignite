@@ -6,23 +6,25 @@ Documentation: [ignite.rocketboost.rs](https://ignite.rocketboost.rs). Changes b
 
 ## Install
 
-Ignite is not on crates.io. Add it from git, with the pins below. Each pin is needed for a reason:
+Ignite is not on crates.io. Add it from git. The versions below are the ones the workspace builds against:
 
 ```toml
 [dependencies]
-# Rocket is pinned to a revision the panel is built against.
-rocket = { git = "https://github.com/rwf2/Rocket", rev = "3a54d079" }
-# Orbit is pinned to a revision of its main branch.
-orbit-orm = { git = "https://github.com/lajennylove/Orbit", rev = "2457a1b3e19ff840514613a7237bbc5ba8776b09" }
-ignite-core = { git = "https://github.com/lajennylove/Ignite", tag = "v0.2.0" }
-ignite-panel = { git = "https://github.com/lajennylove/Ignite", tag = "v0.2.0" }
-propel_rocket = { git = "https://github.com/lajennylove/Propel", rev = "09c8a02ba0f3ed75b02c7f3d36b5a0e6f4d047b7" }
-propel_macros = { git = "https://github.com/lajennylove/Propel", rev = "09c8a02ba0f3ed75b02c7f3d36b5a0e6f4d047b7" }
-propel_runtime = { git = "https://github.com/lajennylove/Propel", rev = "09c8a02ba0f3ed75b02c7f3d36b5a0e6f4d047b7" }
+ignite-panel = { git = "https://github.com/lajennylove/Ignite", branch = "main" }
+ignite-core = { git = "https://github.com/lajennylove/Ignite", branch = "main" }
+orbit-orm = { git = "https://github.com/lajennylove/Orbit", rev = "e3b8668270cc8c3f2c17b69b9257c442707be1a4" }
+rocket = "0.5.2"
+propel_rocket = "0.2.0"
+propel_runtime = "0.2.0"
+serde = { version = "1", features = ["derive"] }
+chrono = { version = "0.4", features = ["serde"] }
+dotenvy = "0.15"
 ```
 
-- **Rocket** is pinned to revision `3a54d079`, the Rocket revision Ignite is built against. The panel uses Rocket APIs of this revision.
-- **Propel** is pinned to one revision, `09c8a02` (the commit of Propel's `v0.2.0` tag), for all the Propel crates. Pin the revision, not the tag: Cargo treats a tag and a revision as two different sources and would build Propel twice, and the panel's views would not be found. `propel_rocket` is the Rocket integration that renders the views.
+- **Orbit** is pinned to revision `e3b8668`, the revision the Ignite workspace locks. Orbit is not on crates.io, so Cargo takes it from git.
+- **Rocket** 0.5.2 and **Propel** 0.2.0 come from crates.io, as in the workspace's `Cargo.lock`.
+- **Ignite** has no release tag that includes Orbit yet, so the install follows `main`.
+- **chrono** is needed for the date fields of a resource, and **dotenvy** for the `ignite` command.
 
 ### Build requirements
 
@@ -71,7 +73,7 @@ lists each migration as `Applied` or `Pending`.
 
 To undo the last batch, run `ignite migrate:rollback`. A batch is the set of migrations that one `ignite migrate` applied, so a run reverts all of them, last first, each with its `down.sql`. After a `migrate` that applied one migration, a rollback reverts that one. It is not one step per run: when a batch has several migrations, one run reverts all of them. It says so in its output, and changes nothing else.
 
-**After the move from Diesel.** The panel keeps its migrations in Diesel's `__diesel_schema_migrations` table. The rows Diesel wrote are the history, as batch 0, and they are not run again. A rollback that reaches batch 0 reverts those migrations too, which drops the panel's tables. Back up the database before you roll back that far.
+**Batch 0.** The panel records its migrations in the `__diesel_schema_migrations` table. A database that was migrated before the move to Orbit has its earlier migrations there as batch 0. They are not run again. A rollback that reaches batch 0 reverts those migrations too, which drops the panel's tables. Back up the database before you roll back that far.
 
 **If a migration fails.** MySQL and MariaDB commit each schema statement as it runs, and a failed migration does not roll back the statements before it. A failed `ignite migrate` can therefore leave the database part way through a migration. To recover:
 
@@ -111,7 +113,7 @@ The panel is served under `/admin`. Its health check is `GET /up`, at the applic
 
 ## Resources
 
-A resource is an Orbit model with `#[derive(OrbitModel)]` and `#[derive(IgniteResource)]`. The derive writes the form, the list and the queries. Each field's type sets its input and its check:
+A resource is an Orbit model with `#[derive(OrbitModel)]` and `#[derive(IgniteResource)]`. The model also derives `Serialize`. The derive writes the form, the list and the queries. Its `#[ignite(table = ...)]` must name the table of the model's `#[orbit(table = ...)]`, which is checked at compile time. Each writable field needs `#[orbit(fillable)]`, because Orbit refuses to insert or update a column that is not fillable. Each field's type sets its input and its check:
 
 | Rust type | Input | Checked as |
 | --- | --- | --- |
@@ -220,9 +222,9 @@ The test suite needs a MariaDB or MySQL database that it may drop and rewrite ta
 DATABASE_URL=mysql://user@localhost/ignite_test cargo test --workspace
 ```
 
-Continuous integration runs the same checks on every push and pull request. It uses a MariaDB 11.4 service, and runs format, lint, the tests and a release build of the panel. The workflow is in `.github/workflows/ci.yml`. Locally, the suite has run against MariaDB 13.0.2 with the libmariadb 3.4.10 client.
+Continuous integration runs the same checks on every push and pull request. It uses a MariaDB 11.4 service, and runs format, lint, the tests and a release build of the panel. The workflow is in `.github/workflows/ci.yml`. Locally, the suite has run against MariaDB 13.0.2.
 
 ## Requirements
 
 - Rust (stable).
-- MariaDB or MySQL, and the client library described under Build requirements.
+- MariaDB or MySQL. No MariaDB client library is needed to build.
