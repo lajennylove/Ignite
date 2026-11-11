@@ -9,11 +9,11 @@ All notable changes to Ignite are listed here. The format follows
 ### Changed
 
 - Migrations run on Orbit (`orbit-orm`) instead of Diesel. `ignite migrate`, `ignite migrate:status`
-  and `ignite migrate:rollback` keep their names. The first `ignite migrate` records the migrations
-  Diesel had applied, without running them, so nothing runs twice.
+  and `ignite migrate:rollback` keep their names. The migrations are recorded in Diesel's
+  `__diesel_schema_migrations` table. The rows Diesel wrote are batch 0 and are not run again.
 - `ignite migrate:rollback` reverts the last batch, not one migration. A batch is the set of
-  migrations one `ignite migrate` applied. The batch imported from Diesel is one batch, so the
-  first rollback after the move reverts every panel migration.
+  migrations one `ignite migrate` applied. The rows Diesel wrote are batch 0, so the
+  rollback that reaches them reverts every panel migration.
 - The migration functions `migrate`, `run_migrations`, `pending_migrations`, `migration_status`
   and `rollback` are async and take an `orbit_orm::Database`, not a Diesel connection. `rollback`
   returns the names it reverted.

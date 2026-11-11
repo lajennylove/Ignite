@@ -294,8 +294,8 @@ pub fn rewind_to(applied: &[&str]) {
         let up = std::fs::read_to_string(format!("{root}{name}/up.sql")).expect("read up.sql");
         t.exec(&up);
         t.exec_with(
-            "INSERT INTO migrations (migration, batch) VALUES (?, 1)",
-            &[(*name).into()],
+            "INSERT INTO __diesel_schema_migrations (version, batch) VALUES (?, 1)",
+            &[name[..14].into()],
         );
     }
 }

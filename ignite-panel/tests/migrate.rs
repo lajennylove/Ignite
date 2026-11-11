@@ -32,11 +32,13 @@ fn count(conn: &TestDb, sql: &str) -> i64 {
     conn.count(sql, &[])
 }
 
-/// Whether Orbit's table records the latest migration as applied.
+/// Whether the migrations table records the latest migration as applied.
 fn version_recorded(conn: &TestDb) -> bool {
     count(
         conn,
-        &format!("SELECT COUNT(*) AS count FROM migrations WHERE migration = '{LATEST}'"),
+        &format!(
+            "SELECT COUNT(*) AS count FROM __diesel_schema_migrations WHERE version = '{VERSION}'"
+        ),
     ) > 0
 }
 
@@ -54,7 +56,7 @@ fn index_exists(conn: &TestDb) -> bool {
 fn make_latest_pending(conn: &TestDb) {
     conn.exec(format!("DROP INDEX IF EXISTS {INDEX} ON login_throttles"));
     conn.exec(format!(
-        "DELETE FROM migrations WHERE migration = '{LATEST}'"
+        "DELETE FROM __diesel_schema_migrations WHERE version = '{VERSION}'"
     ));
 }
 
@@ -238,9 +240,9 @@ fn make_diesel_database(conn: &TestDb) {
     let root = concat!(env!("CARGO_MANIFEST_DIR"), "/migrations/");
     // Undo the whole panel first, so the schema is empty before the old one is built.
     rollback_everything();
-    conn.exec("DROP TABLE IF EXISTS migrations");
+    conn.exec("DROP TABLE IF EXISTS __diesel_schema_migrations");
     conn.exec(
-        "CREATE TABLE IF NOT EXISTS __diesel_schema_migrations (\
+        "CREATE TABLE __diesel_schema_migrations (\
          version VARCHAR(50) PRIMARY KEY NOT NULL, \
          run_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)",
     );

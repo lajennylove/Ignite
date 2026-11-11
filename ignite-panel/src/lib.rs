@@ -70,21 +70,19 @@ fn migrator() -> Result<Migrator, OrbitError> {
     )
 }
 
-/// The table that Diesel recorded the applied migrations in, before the panel moved to Orbit.
-const DIESEL_TABLE: &str = "__diesel_schema_migrations";
-
-/// The table that Orbit records the applied migrations in.
-const ORBIT_TABLE: &str = "migrations";
+/// The table that the applied migrations are recorded in. It is Diesel's table: the rows that
+/// Diesel wrote are the history, as batch 0, and Orbit adds its `batch` column when it needs it.
+const MIGRATIONS_TABLE: &str = "__diesel_schema_migrations";
 
 /// Runs the panel's pending migrations and returns the names of the ones it applied, such
 /// as `20261112000000_login_throttles_window_index`. Running them again applies nothing.
 /// `ignite migrate` calls this. An app that prefers to migrate itself can call it too.
 ///
-/// The first time a database is migrated with Orbit, the migrations that Diesel had applied
-/// are recorded as applied first, without running them, so nothing runs twice.
+/// The migrations Diesel had applied stay applied: they are batch 0 of the same table, and
+/// nothing runs twice.
 pub async fn migrate(db: &Database) -> Result<Vec<String>, OrbitError> {
     let migrator = migrator()?;
-    import_diesel_history(db, &migrator).await?;
+    migrator.import_diesel_history(db).await?;
     migrator.run(db).await
 }
 
@@ -119,34 +117,18 @@ pub async fn migration_status(db: &Database) -> Result<Vec<(String, bool)>, Orbi
 
 /// Reverts the most recently applied batch of the panel's migrations, running each `down.sql`
 /// in reverse order, and returns the names it reverted, last first. A batch is the set of
-/// migrations that one `migrate` run applied. Other migrations in the same database are not
-/// touched. Returns nothing when no migration of the panel is applied.
+/// migrations that one `migrate` run applied. The history that Diesel recorded is batch 0, so
+/// the rollback that reaches it reverts those migrations too. Other migrations in the same
+/// database are not touched. Returns nothing when no migration of the panel is applied.
 pub async fn rollback(db: &Database) -> Result<Vec<String>, OrbitError> {
     let migrator = migrator()?;
-    import_diesel_history(db, &migrator).await?;
+    migrator.import_diesel_history(db).await?;
     migrator.rollback(db).await
 }
 
-/// Records the migrations that Diesel applied, once. It runs only while Orbit's table does not
-/// exist yet. After that, a rollback may revert the imported batch, and importing again would
-/// record those migrations as applied without running them.
-async fn import_diesel_history(db: &Database, migrator: &Migrator) -> Result<(), OrbitError> {
-    if !table_exists(db, ORBIT_TABLE).await? {
-        migrator.import_diesel_history(db).await?;
-    }
-    Ok(())
-}
-
-/// The names of the migrations that are applied. It reads only. Before Orbit has a table,
-/// the Diesel history stands in for it, as the import would record it.
+/// The names of the migrations that are applied. It reads only.
 async fn applied_names(db: &Database, migrator: &Migrator) -> Result<HashSet<String>, OrbitError> {
-    if table_exists(db, ORBIT_TABLE).await? {
-        let names: Vec<String> = sqlx::query_scalar("SELECT migration FROM migrations")
-            .fetch_all(db.pool())
-            .await?;
-        return Ok(names.into_iter().collect());
-    }
-    if !table_exists(db, DIESEL_TABLE).await? {
+    if !table_exists(db, MIGRATIONS_TABLE).await? {
         return Ok(HashSet::new());
     }
     let versions: Vec<String> =
