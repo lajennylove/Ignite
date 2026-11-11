@@ -4,36 +4,31 @@
 mod common;
 
 use common::*;
-use diesel::mysql::MysqlConnection;
-use diesel::prelude::*;
 use ignite_panel::authz::{self, AuthzError, SUPER_ADMIN};
 use ignite_panel::users;
 use rocket::http::{ContentType, Status};
 
-diesel::table! {
-    permissions (id) {
-        id -> BigInt,
-        name -> Text,
-    }
-}
-
 const VIEWER: &str = "viewer@example.test";
 const NOBODY: &str = "nobody@example.test";
 
-fn connection() -> MysqlConnection {
-    MysqlConnection::establish(&database_url()).expect("connect to ignite_test")
+fn connection() -> TestDb {
+    test_db()
 }
 
 /// Creates a user with `email`, and a role `role` that holds `permissions`. Call it after a
 /// client has started, so the permission rows exist.
 fn user_with_role(email: &str, role: &str, permissions: &[&str]) {
-    let mut conn = connection();
-    users::create_user(&mut conn, "Test user", email, PASSWORD).expect("create user");
-    authz::create_role(&mut conn, role).expect("create role");
+    let conn = connection();
+    conn.run(users::create_user(&conn.db, "Test user", email, PASSWORD))
+        .expect("create user");
+    conn.run(authz::create_role(&conn.db, role))
+        .expect("create role");
     for permission in permissions {
-        authz::grant_permission(&mut conn, role, permission).expect("grant permission");
+        conn.run(authz::grant_permission(&conn.db, role, permission))
+            .expect("grant permission");
     }
-    authz::assign_role(&mut conn, email, role).expect("assign role");
+    conn.run(authz::assign_role(&conn.db, email, role))
+        .expect("assign role");
 }
 
 #[test]
@@ -42,11 +37,10 @@ fn the_app_registers_one_permission_per_resource_action() {
     let _client = client(None);
     let _again = client(None);
 
-    let count: i64 = permissions::table
-        .filter(permissions::name.like("widgets.%"))
-        .count()
-        .get_result(&mut connection())
-        .unwrap();
+    let count = connection().count(
+        "SELECT COUNT(*) FROM permissions WHERE name LIKE ?",
+        &["widgets.%".into()],
+    );
     assert_eq!(count, 5, "viewAny, view, create, update and delete");
 }
 
@@ -224,24 +218,28 @@ fn a_user_who_may_only_create_sees_the_new_button_and_no_row_buttons() {
 fn the_last_super_admin_cannot_lose_the_role() {
     let _guard = reset();
     let _ = client(None);
-    let mut conn = connection();
+    let conn = connection();
 
-    let refused = authz::remove_role(&mut conn, EMAIL, SUPER_ADMIN);
+    let refused = conn.run(authz::remove_role(&conn.db, EMAIL, SUPER_ADMIN));
     assert!(
         matches!(refused, Err(AuthzError::LastSuperAdmin)),
         "{refused:?}"
     );
     assert_eq!(
-        authz::user_roles(&mut conn, EMAIL).unwrap(),
+        conn.run(authz::user_roles(&conn.db, EMAIL)).unwrap(),
         vec![SUPER_ADMIN.to_string()],
         "the role is kept"
     );
 
-    users::create_user(&mut conn, "Second", NOBODY, PASSWORD).unwrap();
-    authz::assign_role(&mut conn, NOBODY, SUPER_ADMIN).unwrap();
-    assert!(authz::remove_role(&mut conn, EMAIL, SUPER_ADMIN).unwrap());
+    conn.run(users::create_user(&conn.db, "Second", NOBODY, PASSWORD))
+        .unwrap();
+    conn.run(authz::assign_role(&conn.db, NOBODY, SUPER_ADMIN))
+        .unwrap();
+    assert!(conn
+        .run(authz::remove_role(&conn.db, EMAIL, SUPER_ADMIN))
+        .unwrap());
     // NOBODY is now the last super-admin, so the same refusal applies to them.
-    let refused = authz::remove_role(&mut conn, NOBODY, SUPER_ADMIN);
+    let refused = conn.run(authz::remove_role(&conn.db, NOBODY, SUPER_ADMIN));
     assert!(
         matches!(refused, Err(AuthzError::LastSuperAdmin)),
         "{refused:?}"
@@ -252,20 +250,33 @@ fn the_last_super_admin_cannot_lose_the_role() {
 fn a_grant_names_an_existing_role_and_permission() {
     let _guard = reset();
     let _ = client(None);
-    let mut conn = connection();
-    authz::create_role(&mut conn, "editors").unwrap();
+    let conn = connection();
+    conn.run(authz::create_role(&conn.db, "editors")).unwrap();
 
     assert!(matches!(
-        authz::grant_permission(&mut conn, "editors", "widgets.nothing"),
+        conn.run(authz::grant_permission(
+            &conn.db,
+            "editors",
+            "widgets.nothing"
+        )),
         Err(AuthzError::NotFound(_))
     ));
     assert!(matches!(
-        authz::grant_permission(&mut conn, "missing", "widgets.viewAny"),
+        conn.run(authz::grant_permission(
+            &conn.db,
+            "missing",
+            "widgets.viewAny"
+        )),
         Err(AuthzError::NotFound(_))
     ));
-    authz::grant_permission(&mut conn, "editors", "widgets.viewAny").unwrap();
+    conn.run(authz::grant_permission(
+        &conn.db,
+        "editors",
+        "widgets.viewAny",
+    ))
+    .unwrap();
     assert!(matches!(
-        authz::create_role(&mut conn, "editors"),
+        conn.run(authz::create_role(&conn.db, "editors")),
         Err(AuthzError::Exists(_))
     ));
 }

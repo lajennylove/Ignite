@@ -7,12 +7,7 @@ mod common;
 
 use std::process::{Command, Stdio};
 
-use common::{database_url, reset};
-use diesel::connection::SimpleConnection;
-use diesel::mysql::MysqlConnection;
-use diesel::prelude::*;
-use diesel::sql_query;
-use diesel::sql_types::BigInt;
+use common::{database_url, reset, test_db, TestDb};
 use rocket::local::blocking::Client;
 
 /// The latest migration, which adds the index on `login_throttles(window_start)`.
@@ -29,32 +24,23 @@ const BEFORE_ROLES: [&str; 6] = [
     "20261112000000_login_throttles_window_index",
 ];
 
-#[derive(QueryableByName)]
-struct CountRow {
-    #[diesel(sql_type = BigInt)]
-    count: i64,
+fn connection() -> TestDb {
+    test_db()
 }
 
-fn connection() -> MysqlConnection {
-    MysqlConnection::establish(&database_url()).expect("connect to ignite_test")
-}
-
-fn count(conn: &mut MysqlConnection, sql: &str) -> i64 {
-    sql_query(sql)
-        .get_result::<CountRow>(conn)
-        .expect("count query")
-        .count
+fn count(conn: &TestDb, sql: &str) -> i64 {
+    conn.count(sql, &[])
 }
 
 /// Whether Orbit's table records the latest migration as applied.
-fn version_recorded(conn: &mut MysqlConnection) -> bool {
+fn version_recorded(conn: &TestDb) -> bool {
     count(
         conn,
         &format!("SELECT COUNT(*) AS count FROM migrations WHERE migration = '{LATEST}'"),
     ) > 0
 }
 
-fn index_exists(conn: &mut MysqlConnection) -> bool {
+fn index_exists(conn: &TestDb) -> bool {
     count(
         conn,
         &format!(
@@ -65,15 +51,11 @@ fn index_exists(conn: &mut MysqlConnection) -> bool {
 }
 
 /// Makes the latest migration pending again: no index, and no record that it ran.
-fn make_latest_pending(conn: &mut MysqlConnection) {
-    sql_query(format!("DROP INDEX IF EXISTS {INDEX} ON login_throttles"))
-        .execute(conn)
-        .unwrap();
-    sql_query(format!(
+fn make_latest_pending(conn: &TestDb) {
+    conn.exec(format!("DROP INDEX IF EXISTS {INDEX} ON login_throttles"));
+    conn.exec(format!(
         "DELETE FROM migrations WHERE migration = '{LATEST}'"
-    ))
-    .execute(conn)
-    .unwrap();
+    ));
 }
 
 /// Runs the `ignite` binary with the test database and the given arguments.
@@ -100,8 +82,8 @@ fn ignite(args: &[&str], stdin: &str) -> std::process::Output {
 #[test]
 fn ignite_migrate_applies_what_is_pending_and_then_nothing() {
     let _guard = reset();
-    let mut conn = connection();
-    make_latest_pending(&mut conn);
+    let conn = connection();
+    make_latest_pending(&conn);
 
     let first = ignite(&["migrate"], "");
     assert_eq!(
@@ -115,8 +97,8 @@ fn ignite_migrate_applies_what_is_pending_and_then_nothing() {
         out.contains(&format!("Applied {VERSION}_login_throttles_window_index")),
         "stdout: {out}"
     );
-    assert!(version_recorded(&mut conn));
-    assert!(index_exists(&mut conn));
+    assert!(version_recorded(&conn));
+    assert!(index_exists(&conn));
 
     let second = ignite(&["migrate"], "");
     assert_eq!(second.status.code(), Some(0));
@@ -126,8 +108,8 @@ fn ignite_migrate_applies_what_is_pending_and_then_nothing() {
 #[test]
 fn user_create_refuses_on_a_pending_schema_and_does_not_migrate() {
     let _guard = reset();
-    let mut conn = connection();
-    make_latest_pending(&mut conn);
+    let conn = connection();
+    make_latest_pending(&conn);
 
     let output = ignite(
         &[
@@ -142,15 +124,15 @@ fn user_create_refuses_on_a_pending_schema_and_does_not_migrate() {
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("ignite migrate"), "stderr: {stderr}");
-    assert!(!version_recorded(&mut conn), "user create must not migrate");
-    assert!(!index_exists(&mut conn), "user create must not migrate");
+    assert!(!version_recorded(&conn), "user create must not migrate");
+    assert!(!index_exists(&conn), "user create must not migrate");
 }
 
 #[test]
 fn the_app_does_not_migrate_when_it_starts() {
     let _guard = reset();
-    let mut conn = connection();
-    make_latest_pending(&mut conn);
+    let conn = connection();
+    make_latest_pending(&conn);
 
     // Launching the client runs the panel's fairing, which is what an app does at start.
     let _client = Client::tracked(
@@ -162,8 +144,8 @@ fn the_app_does_not_migrate_when_it_starts() {
     )
     .expect("valid rocket");
 
-    assert!(!version_recorded(&mut conn), "the fairing must not migrate");
-    assert!(!index_exists(&mut conn), "the fairing must not migrate");
+    assert!(!version_recorded(&conn), "the fairing must not migrate");
+    assert!(!index_exists(&conn), "the fairing must not migrate");
 }
 
 #[test]
@@ -187,9 +169,9 @@ fn migrate_status_lists_every_migration_as_applied_after_a_migrate() {
 #[test]
 fn rollback_reverts_the_last_batch_and_migrate_restores_it() {
     let _guard = reset();
-    let mut conn = connection();
+    let conn = connection();
     assert!(
-        index_exists(&mut conn),
+        index_exists(&conn),
         "the latest migration is applied at the start"
     );
 
@@ -215,9 +197,9 @@ fn rollback_reverts_the_last_batch_and_migrate_restores_it() {
         out.contains("reverted 20261115000000_password_reset_tokens."),
         "stdout: {out}"
     );
-    assert!(!index_exists(&mut conn), "down.sql dropped the index");
+    assert!(!index_exists(&conn), "down.sql dropped the index");
     assert!(
-        !version_recorded(&mut conn),
+        !version_recorded(&conn),
         "the record of the migration is removed"
     );
 
@@ -242,9 +224,9 @@ fn rollback_reverts_the_last_batch_and_migrate_restores_it() {
         "stderr: {}",
         String::from_utf8_lossy(&migrated.stderr)
     );
-    assert!(index_exists(&mut conn), "migrate restores the index");
+    assert!(index_exists(&conn), "migrate restores the index");
     assert!(
-        version_recorded(&mut conn),
+        version_recorded(&conn),
         "migrate records the migration again"
     );
 }
@@ -252,32 +234,24 @@ fn rollback_reverts_the_last_batch_and_migrate_restores_it() {
 /// Turns the database into one that Diesel had migrated up to the roles migration: Orbit's
 /// table is dropped, Diesel's history lists the six migrations before roles, and their tables
 /// exist. The roles, account lifecycle and password reset migrations are still to run.
-fn make_diesel_database(conn: &mut MysqlConnection) {
+fn make_diesel_database(conn: &TestDb) {
     let root = concat!(env!("CARGO_MANIFEST_DIR"), "/migrations/");
     // Undo the whole panel first, so the schema is empty before the old one is built.
     rollback_everything();
-    sql_query("DROP TABLE IF EXISTS migrations")
-        .execute(conn)
-        .unwrap();
-    sql_query(
+    conn.exec("DROP TABLE IF EXISTS migrations");
+    conn.exec(
         "CREATE TABLE IF NOT EXISTS __diesel_schema_migrations (\
          version VARCHAR(50) PRIMARY KEY NOT NULL, \
          run_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)",
-    )
-    .execute(conn)
-    .unwrap();
-    sql_query("DELETE FROM __diesel_schema_migrations")
-        .execute(conn)
-        .unwrap();
+    );
+    conn.exec("DELETE FROM __diesel_schema_migrations");
     for name in BEFORE_ROLES {
         let up = std::fs::read_to_string(format!("{root}{name}/up.sql")).unwrap();
-        conn.batch_execute(&up).unwrap();
-        sql_query(format!(
+        conn.exec(&up);
+        conn.exec(format!(
             "INSERT INTO __diesel_schema_migrations (version) VALUES ('{}')",
             &name[..14]
-        ))
-        .execute(conn)
-        .unwrap();
+        ));
     }
 }
 
@@ -295,11 +269,9 @@ fn rollback_everything() {
 #[test]
 fn the_roles_migration_makes_existing_users_super_admins() {
     let _guard = reset();
-    let mut conn = connection();
-    make_diesel_database(&mut conn);
-    sql_query("INSERT INTO users (name, email, password_hash, theme) VALUES ('Old', 'upgraded@example.test', 'x', 'light')")
-        .execute(&mut conn)
-        .unwrap();
+    let conn = connection();
+    make_diesel_database(&conn);
+    conn.exec("INSERT INTO users (name, email, password_hash, theme) VALUES ('Old', 'upgraded@example.test', 'x', 'light')");
 
     let status = ignite(&["migrate:status"], "");
     let status_out = String::from_utf8_lossy(&status.stdout);
@@ -340,8 +312,8 @@ fn the_roles_migration_makes_existing_users_super_admins() {
 #[test]
 fn a_rollback_of_the_imported_batch_is_not_undone_by_the_next_migrate() {
     let _guard = reset();
-    let mut conn = connection();
-    make_diesel_database(&mut conn);
+    let conn = connection();
+    make_diesel_database(&conn);
 
     // The imported batch reverts with the rest. Orbit's table exists now, so the next migrate
     // must run the migrations again rather than record them as applied.
@@ -360,5 +332,5 @@ fn a_rollback_of_the_imported_batch_is_not_undone_by_the_next_migrate() {
         out.contains("Applied 20261108000000_create_users"),
         "stdout: {out}"
     );
-    assert!(index_exists(&mut conn), "the index is back after a re-run");
+    assert!(index_exists(&conn), "the index is back after a re-run");
 }

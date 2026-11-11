@@ -1,5 +1,5 @@
 //! The admin routes. Each handler looks up the resource by its slug, runs the
-//! database work on a blocking thread, and renders a Propel view. Every route
+//! database work through the app's Orbit database, and renders a Propel view. Every route
 //! except the sign-in and the sign-out needs an [`AdminUser`].
 
 use std::collections::HashMap;
@@ -7,11 +7,10 @@ use std::net::IpAddr;
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 
-use diesel::mysql::MysqlConnection;
-use diesel::result::QueryResult;
 use ignite_core::{
-    Column, Conn, Direction, FieldErrors, FieldKind, FormInput, LatestRecords, ListQuery, Pool,
+    Column, Database, Direction, FieldErrors, FieldKind, FormInput, LatestRecords, ListQuery,
 };
+use orbit_orm::Error as OrbitError;
 use propel_rocket::PropelView;
 use rocket::data::{Data, ToByteUnit};
 use rocket::form::Form;
@@ -117,7 +116,7 @@ async fn dashboard(
     session: AdminUser,
     cookies: &CookieJar<'_>,
     registry: &State<Registry>,
-    pool: &State<Pool>,
+    db: &State<Database>,
 ) -> Result<PropelView, Status> {
     let flash = take_flash(cookies, &registry.secret);
     let token = csrf_token(cookies, &registry.secret);
@@ -128,22 +127,20 @@ async fn dashboard(
         .filter(|r| session.may(r.slug(), Action::ViewAny))
         .cloned()
         .collect();
-    let (widgets, tables) = blocking(pool, move |conn| {
-        let mut widgets = Vec::new();
-        let mut tables = Vec::new();
-        for resource in &resources {
-            widgets.extend(resource.widgets(conn).map_err(db_status)?);
-            if let Some(declared) = resource.latest_records() {
-                let limit = declared.limit.max(1);
-                let records = resource.latest(conn, limit).map_err(db_status)?;
-                let lookups =
-                    lookup_choices(conn, resource.as_ref(), declared.columns).map_err(db_status)?;
-                tables.push((declared, resource.columns(), records, lookups));
-            }
+    let mut widgets = Vec::new();
+    let mut tables = Vec::new();
+    for resource in &resources {
+        let database = db.inner();
+        widgets.extend(resource.widgets(database).await.map_err(db_status)?);
+        if let Some(declared) = resource.latest_records() {
+            let limit = declared.limit.max(1);
+            let records = resource.latest(database, limit).await.map_err(db_status)?;
+            let lookups = lookup_choices(database, resource.as_ref(), declared.columns)
+                .await
+                .map_err(db_status)?;
+            tables.push((declared, resource.columns(), records, lookups));
         }
-        Ok((widgets, tables))
-    })
-    .await?;
+    }
     let tables = tables
         .into_iter()
         .map(|(declared, columns, records, lookups)| {
@@ -244,7 +241,7 @@ async fn login(
     client_ip: ClientIp,
     cookies: &CookieJar<'_>,
     registry: &State<Registry>,
-    pool: &State<Pool>,
+    db: &State<Database>,
 ) -> Result<Reply, Status> {
     let form = read_form(body).await?;
     check_csrf(cookies, &registry.secret, form.get("_token"))?;
@@ -253,11 +250,9 @@ async fn login(
     let throttle_key = throttle::key(&email, client_ip.0);
 
     // Refuse before checking the password while the key is at its limit.
-    let check = throttle_key.clone();
-    let waiting = blocking(pool, move |conn| {
-        throttle::retry_after(conn, &check, throttle::LIMIT).map_err(db_status)
-    })
-    .await?;
+    let waiting = throttle::retry_after(db.inner(), &throttle_key, throttle::LIMIT)
+        .await
+        .map_err(db_status)?;
     if let Some(seconds) = waiting {
         let message = format!("Too many sign-in attempts. Try again in {seconds} seconds.");
         let page = render_page(
@@ -273,33 +268,40 @@ async fn login(
         return Ok(Reply::Throttled(seconds, page));
     }
 
-    let lookup = email.clone();
-    let signed_in = blocking(pool, move |conn| {
-        let user = users::find_by_email(conn, &lookup).map_err(db_status)?;
-        // Check a password even when there is no such user, so the response time
-        // does not show which emails are registered.
-        let matched = match &user {
-            Some(user) => users::verify_password(&user.password_hash, &password),
-            None => {
-                users::verify_password(dummy_hash(), &password);
-                false
-            }
-        };
-        // A disabled user gets the same answer as a wrong password, and the attempt counts
-        // against the throttle, as Laravel's Auth::attempt does for an extra condition such
-        // as `active`. The message does not reveal that the account exists but is disabled.
-        match user.filter(|user| matched && user.disabled_at.is_none()) {
-            Some(user) => {
-                throttle::clear(conn, &throttle_key).map_err(db_status)?;
-                sessions::create(conn, user.id).map(Some).map_err(db_status)
-            }
-            None => {
-                throttle::record_failure(conn, &throttle_key).map_err(db_status)?;
-                Ok(None)
-            }
+    let database = db.inner();
+    let user = users::find_by_email(database, &email)
+        .await
+        .map_err(db_status)?;
+    // Check a password even when there is no such user, so the response time
+    // does not show which emails are registered.
+    let matched = match &user {
+        Some(user) => users::verify_password(&user.password_hash, &password),
+        None => {
+            users::verify_password(dummy_hash(), &password);
+            false
         }
-    })
-    .await?;
+    };
+    // A disabled user gets the same answer as a wrong password, and the attempt counts
+    // against the throttle, as Laravel's Auth::attempt does for an extra condition such
+    // as `active`. The message does not reveal that the account exists but is disabled.
+    let signed_in = match user.filter(|user| matched && user.disabled_at.is_none()) {
+        Some(user) => {
+            throttle::clear(database, &throttle_key)
+                .await
+                .map_err(db_status)?;
+            Some(
+                sessions::create(database, user.id)
+                    .await
+                    .map_err(db_status)?,
+            )
+        }
+        None => {
+            throttle::record_failure(database, &throttle_key)
+                .await
+                .map_err(db_status)?;
+            None
+        }
+    };
 
     match signed_in {
         Some(session_id) => {
@@ -367,16 +369,13 @@ async fn logout(
     body: Data<'_>,
     cookies: &CookieJar<'_>,
     registry: &State<Registry>,
-    pool: &State<Pool>,
+    db: &State<Database>,
 ) -> Result<Redirect, Status> {
     let form = read_form(body).await?;
     check_csrf(cookies, &registry.secret, form.get("_token"))?;
     if let Some(session_id) = session_id(cookies, &registry.secret) {
         // The row goes first: a copied cookie stops working even if the cookie is still in the jar.
-        let _ = blocking(pool, move |conn| {
-            sessions::delete(conn, &session_id).map_err(db_status)
-        })
-        .await;
+        let _ = sessions::delete(db.inner(), &session_id).await;
     }
     end_session(cookies);
     Ok(Redirect::to(format!("{}/login", registry.mount)))
@@ -389,14 +388,13 @@ async fn logout_everywhere(
     user: AdminUser,
     cookies: &CookieJar<'_>,
     registry: &State<Registry>,
-    pool: &State<Pool>,
+    db: &State<Database>,
 ) -> Result<Redirect, Status> {
     let form = read_form(body).await?;
     check_csrf(cookies, &registry.secret, form.get("_token"))?;
-    blocking(pool, move |conn| {
-        sessions::delete_for_user(conn, user.user_id()).map_err(db_status)
-    })
-    .await?;
+    sessions::delete_for_user(db.inner(), user.user_id())
+        .await
+        .map_err(db_status)?;
     end_session(cookies);
     Ok(Redirect::to(format!("{}/login", registry.mount)))
 }
@@ -408,7 +406,7 @@ async fn set_theme(
     user: AdminUser,
     cookies: &CookieJar<'_>,
     registry: &State<Registry>,
-    pool: &State<Pool>,
+    db: &State<Database>,
 ) -> Result<Status, Status> {
     let form = read_form(body).await?;
     check_csrf(cookies, &registry.secret, form.get("_token"))?;
@@ -418,10 +416,9 @@ async fn set_theme(
         .ok_or(Status::BadRequest)?
         .to_string();
     let id = user.user_id();
-    blocking(pool, move |conn| {
-        users::set_theme(conn, id, &theme).map_err(db_status)
-    })
-    .await?;
+    users::set_theme(db.inner(), id, &theme)
+        .await
+        .map_err(db_status)?;
     Ok(Status::NoContent)
 }
 
@@ -470,12 +467,11 @@ fn render_profile(
 }
 
 /// The signed-in user's row, as the profile needs it.
-async fn load_user(pool: &State<Pool>, id: i64) -> Result<users::User, Status> {
-    blocking(pool, move |conn| {
-        users::find_by_id(conn, id).map_err(db_status)
-    })
-    .await?
-    .ok_or(Status::NotFound)
+async fn load_user(db: &State<Database>, id: i64) -> Result<users::User, Status> {
+    users::find_by_id(db.inner(), id)
+        .await
+        .map_err(db_status)?
+        .ok_or(Status::NotFound)
 }
 
 /// The profile page, linked from the top bar.
@@ -484,9 +480,9 @@ async fn profile_form(
     session: AdminUser,
     cookies: &CookieJar<'_>,
     registry: &State<Registry>,
-    pool: &State<Pool>,
+    db: &State<Database>,
 ) -> Result<PropelView, Status> {
-    let row = load_user(pool, session.user_id()).await?;
+    let row = load_user(db, session.user_id()).await?;
     let values = profile::form_values(
         &profile::profile_fields(registry),
         &row.name,
@@ -510,12 +506,12 @@ async fn save_profile(
     session: AdminUser,
     cookies: &CookieJar<'_>,
     registry: &State<Registry>,
-    pool: &State<Pool>,
+    db: &State<Database>,
 ) -> Result<Reply, Status> {
     let form = read_form(body).await?;
     check_csrf(cookies, &registry.secret, form.get("_token"))?;
     let fields = profile::profile_fields(registry);
-    let row = load_user(pool, session.user_id()).await?;
+    let row = load_user(db, session.user_id()).await?;
     let saved = match profile::validate(&fields, &form, row.profile.as_deref()) {
         Ok(saved) => saved,
         Err(errors) => {
@@ -534,30 +530,20 @@ async fn save_profile(
     };
 
     let id = session.user_id();
-    let email = saved.email.clone();
-    let taken = blocking(pool, move |conn| {
-        users::email_taken(conn, &email, id).map_err(db_status)
-    })
-    .await?;
+    let database = db.inner();
+    let taken = users::email_taken(database, &saved.email, id)
+        .await
+        .map_err(db_status)?;
     // Two saves can both pass the check above. The unique index then refuses the
     // second one, and that refusal is the same field error as a taken email.
     let saved_ok = if taken {
         false
     } else {
-        blocking(pool, move |conn| {
-            match users::update_profile(conn, id, &saved.name, &saved.email, &saved.custom) {
-                Ok(_) => Ok(true),
-                Err(error)
-                    if erased::unique_index(&error).is_some_and(|index| {
-                        index == erased::unique_index_name("users", "email")
-                    }) =>
-                {
-                    Ok(false)
-                }
-                Err(error) => Err(db_status(error)),
-            }
-        })
-        .await?
+        match users::update_profile(database, id, &saved.name, &saved.email, &saved.custom).await {
+            Ok(_) => true,
+            Err(error) if is_email_index_violation(&error) => false,
+            Err(error) => return Err(db_status(error)),
+        }
     };
     if !saved_ok {
         let mut errors = FieldErrors::new();
@@ -594,19 +580,17 @@ async fn change_password(
     client_ip: ClientIp,
     cookies: &CookieJar<'_>,
     registry: &State<Registry>,
-    pool: &State<Pool>,
+    db: &State<Database>,
 ) -> Result<Reply, Status> {
     let form = read_form(body).await?;
     check_csrf(cookies, &registry.secret, form.get("_token"))?;
-    let row = load_user(pool, session.user_id()).await?;
+    let row = load_user(db, session.user_id()).await?;
     let key = throttle::password_key(&row.email, client_ip.0);
 
     // Refuse before the current password is checked while the key is at its limit.
-    let check = key.clone();
-    let waiting = blocking(pool, move |conn| {
-        throttle::retry_after(conn, &check, throttle::LIMIT).map_err(db_status)
-    })
-    .await?;
+    let waiting = throttle::retry_after(db.inner(), &key, throttle::LIMIT)
+        .await
+        .map_err(db_status)?;
     if let Some(seconds) = waiting {
         let values = profile::form_values(
             &profile::profile_fields(registry),
@@ -635,11 +619,9 @@ async fn change_password(
     let confirm = form.get("confirm_password").unwrap_or("");
     let current_ok = users::verify_password(&row.password_hash, current);
     if !current_ok {
-        let count = key.clone();
-        blocking(pool, move |conn| {
-            throttle::record_failure(conn, &count).map_err(db_status)
-        })
-        .await?;
+        throttle::record_failure(db.inner(), &key)
+            .await
+            .map_err(db_status)?;
     }
     let errors = profile::password_errors(current_ok, &new, confirm);
     if !errors.is_empty() {
@@ -664,13 +646,14 @@ async fn change_password(
 
     let id = session.user_id();
     let keep = session_id(cookies, &registry.secret).unwrap_or_default();
-    blocking(pool, move |conn| {
-        users::update_password(conn, id, &new).map_err(db_status)?;
-        sessions::delete_others_for_user(conn, id, &keep).map_err(db_status)?;
-        throttle::clear(conn, &key).map_err(db_status)?;
-        Ok(())
-    })
-    .await?;
+    let database = db.inner();
+    users::update_password(database, id, &new)
+        .await
+        .map_err(db_status)?;
+    sessions::delete_others_for_user(database, id, &keep)
+        .await
+        .map_err(db_status)?;
+    throttle::clear(database, &key).await.map_err(db_status)?;
     set_flash(
         cookies,
         &registry.secret,
@@ -698,7 +681,7 @@ async fn upload_avatar(
     session: AdminUser,
     cookies: &CookieJar<'_>,
     registry: &State<Registry>,
-    pool: &State<Pool>,
+    db: &State<Database>,
 ) -> Result<Redirect, Status> {
     let upload = upload.into_inner();
     check_csrf(cookies, &registry.secret, Some(upload.token.as_str()))?;
@@ -724,10 +707,9 @@ async fn upload_avatar(
         return Ok(Redirect::to(profile_url));
     };
     let id = session.user_id();
-    blocking(pool, move |conn| {
-        users::set_avatar(conn, id, mime, &bytes).map_err(db_status)
-    })
-    .await?;
+    users::set_avatar(db.inner(), id, mime, &bytes)
+        .await
+        .map_err(db_status)?;
     set_flash(cookies, &registry.secret, "Picture saved.");
     Ok(Redirect::to(profile_url))
 }
@@ -739,25 +721,28 @@ async fn remove_avatar(
     session: AdminUser,
     cookies: &CookieJar<'_>,
     registry: &State<Registry>,
-    pool: &State<Pool>,
+    db: &State<Database>,
 ) -> Result<Redirect, Status> {
     let form = read_form(body).await?;
     check_csrf(cookies, &registry.secret, form.get("_token"))?;
     let id = session.user_id();
-    blocking(pool, move |conn| {
-        users::remove_avatar(conn, id).map_err(db_status)
-    })
-    .await?;
+    users::remove_avatar(db.inner(), id)
+        .await
+        .map_err(db_status)?;
     set_flash(cookies, &registry.secret, "Picture removed.");
     Ok(Redirect::to(format!("{}/profile", registry.mount)))
 }
 
 /// The signed-in user's picture, served with the type it was stored with.
 #[get("/profile/avatar")]
-async fn avatar(session: AdminUser, pool: &State<Pool>) -> Result<(ContentType, Vec<u8>), Status> {
+async fn avatar(
+    session: AdminUser,
+    db: &State<Database>,
+) -> Result<(ContentType, Vec<u8>), Status> {
     let id = session.user_id();
-    let (mime, bytes) = blocking(pool, move |conn| users::avatar(conn, id).map_err(db_status))
-        .await?
+    let (mime, bytes) = users::avatar(db.inner(), id)
+        .await
+        .map_err(db_status)?
         .ok_or(Status::NotFound)?;
     let content_type = ContentType::parse_flexible(&mime).unwrap_or(ContentType::Binary);
     Ok((content_type, bytes))
@@ -775,7 +760,7 @@ async fn index(
     session: AdminUser,
     cookies: &CookieJar<'_>,
     registry: &State<Registry>,
-    pool: &State<Pool>,
+    db: &State<Database>,
 ) -> Result<PropelView, Status> {
     authorize(registry, &session, slug, Action::ViewAny)?;
     let resource = registry.find(slug).ok_or(Status::NotFound)?;
@@ -802,14 +787,11 @@ async fn index(
         sort: sort.clone().map(|key| (key, direction)),
     };
 
-    let worker = resource.clone();
     let keys: Vec<&str> = columns.iter().map(|c| c.key).collect();
-    let (records, total, lookups) = blocking(pool, move |conn| {
-        let (records, total) = worker.list(conn, &query).map_err(db_status)?;
-        let lookups = lookup_choices(conn, worker.as_ref(), &keys).map_err(db_status)?;
-        Ok((records, total, lookups))
-    })
-    .await?;
+    let (records, total) = resource.list(db.inner(), &query).await.map_err(db_status)?;
+    let lookups = lookup_choices(db.inner(), resource.as_ref(), &keys)
+        .await
+        .map_err(db_status)?;
 
     let mut rows = Vec::with_capacity(records.len());
     for record in &records {
@@ -898,16 +880,12 @@ async fn new_form(
     session: AdminUser,
     cookies: &CookieJar<'_>,
     registry: &State<Registry>,
-    pool: &State<Pool>,
+    db: &State<Database>,
 ) -> Result<PropelView, Status> {
     authorize(registry, &session, slug, Action::Create)?;
     let resource = registry.find(slug).ok_or(Status::NotFound)?;
     let index_url = format!("{}/{}", registry.mount, resource.slug());
-    let worker = resource.clone();
-    let lookups = blocking(pool, move |conn| {
-        lookup_choices(conn, worker.as_ref(), &field_names(worker.as_ref())).map_err(db_status)
-    })
-    .await?;
+    let lookups = form_lookups(db, &resource).await?;
     let layout = Layout::new(
         registry,
         Some(&session),
@@ -953,7 +931,7 @@ async fn create(
     session: AdminUser,
     cookies: &CookieJar<'_>,
     registry: &State<Registry>,
-    pool: &State<Pool>,
+    db: &State<Database>,
 ) -> Result<Reply, Status> {
     authorize(registry, &session, slug, Action::Create)?;
     let resource = registry.find(slug).ok_or(Status::NotFound)?;
@@ -961,12 +939,10 @@ async fn create(
     let form = read_form(body).await?;
     check_csrf(cookies, &registry.secret, form.get("_token"))?;
 
-    let worker = resource.clone();
-    let db_form = form.clone();
-    let outcome = blocking(pool, move |conn| {
-        worker.create(conn, &db_form).map_err(db_status)
-    })
-    .await?;
+    let outcome = resource
+        .create(db.inner(), &form)
+        .await
+        .map_err(db_status)?;
 
     match outcome {
         Ok(_) => {
@@ -974,7 +950,7 @@ async fn create(
             Ok(Reply::Redirect(Box::new(Redirect::to(index_url))))
         }
         Err(errors) => {
-            let lookups = form_lookups(pool, &resource).await?;
+            let lookups = form_lookups(db, &resource).await?;
             Ok(form_page(
                 registry,
                 &session,
@@ -998,21 +974,15 @@ async fn edit_form(
     session: AdminUser,
     cookies: &CookieJar<'_>,
     registry: &State<Registry>,
-    pool: &State<Pool>,
+    db: &State<Database>,
 ) -> Result<PropelView, Status> {
     authorize(registry, &session, slug, Action::Update)?;
     let id = parse_id(id)?;
     let resource = registry.find(slug).ok_or(Status::NotFound)?;
     let index_url = format!("{}/{}", registry.mount, resource.slug());
 
-    let worker = resource.clone();
-    let (record, lookups) = blocking(pool, move |conn| {
-        let record = worker.find(conn, id).map_err(db_status)?;
-        let lookups = lookup_choices(conn, worker.as_ref(), &field_names(worker.as_ref()))
-            .map_err(db_status)?;
-        Ok((record, lookups))
-    })
-    .await?;
+    let record = resource.find(db.inner(), id).await.map_err(db_status)?;
+    let lookups = form_lookups(db, &resource).await?;
     let record = record.ok_or(Status::NotFound)?;
     let form = record_form(resource.fields(), &record);
 
@@ -1057,7 +1027,7 @@ async fn update(
     session: AdminUser,
     cookies: &CookieJar<'_>,
     registry: &State<Registry>,
-    pool: &State<Pool>,
+    db: &State<Database>,
 ) -> Result<Reply, Status> {
     authorize(registry, &session, slug, Action::Update)?;
     let id = parse_id(id)?;
@@ -1066,12 +1036,10 @@ async fn update(
     let form = read_form(body).await?;
     check_csrf(cookies, &registry.secret, form.get("_token"))?;
 
-    let worker = resource.clone();
-    let db_form = form.clone();
-    let outcome = blocking(pool, move |conn| {
-        worker.update(conn, id, &db_form).map_err(db_status)
-    })
-    .await?;
+    let outcome = resource
+        .update(db.inner(), id, &form)
+        .await
+        .map_err(db_status)?;
 
     match outcome {
         Ok(_) => {
@@ -1079,7 +1047,7 @@ async fn update(
             Ok(Reply::Redirect(Box::new(Redirect::to(index_url))))
         }
         Err(errors) => {
-            let lookups = form_lookups(pool, &resource).await?;
+            let lookups = form_lookups(db, &resource).await?;
             Ok(form_page(
                 registry,
                 &session,
@@ -1104,7 +1072,7 @@ async fn destroy(
     session: AdminUser,
     cookies: &CookieJar<'_>,
     registry: &State<Registry>,
-    pool: &State<Pool>,
+    db: &State<Database>,
 ) -> Result<Redirect, Status> {
     authorize(registry, &session, slug, Action::Delete)?;
     let form = read_form(body).await?;
@@ -1113,8 +1081,7 @@ async fn destroy(
     let resource = registry.find(slug).ok_or(Status::NotFound)?;
     let index_url = format!("{}/{}", registry.mount, resource.slug());
 
-    let worker = resource.clone();
-    let deleted = blocking(pool, move |conn| worker.delete(conn, id).map_err(db_status)).await?;
+    let deleted = resource.delete(db.inner(), id).await.map_err(db_status)?;
     if deleted == 0 {
         return Err(Status::NotFound);
     }
@@ -1184,29 +1151,21 @@ fn authorize(
     }
 }
 
-/// Runs `work` on a blocking thread with a connection from the pool.
-pub(crate) async fn blocking<T, F>(pool: &State<Pool>, work: F) -> Result<T, Status>
-where
-    T: Send + 'static,
-    F: FnOnce(&mut Conn) -> Result<T, Status> + Send + 'static,
-{
-    let pool = pool.inner().clone();
-    rocket::tokio::task::spawn_blocking(move || {
-        let mut conn = pool.get().map_err(|e| {
-            rocket::error!("ignite: no database connection: {e}");
-            Status::InternalServerError
-        })?;
-        work(&mut conn)
-    })
-    .await
-    .unwrap_or(Err(Status::InternalServerError))
+/// Whether `error` is the unique index of the `users` email, which a second save of the same
+/// email hits when two saves both pass the taken check.
+fn is_email_index_violation(error: &OrbitError) -> bool {
+    matches!(
+        error,
+        OrbitError::UniqueViolation { index: Some(index) }
+            if *index == erased::unique_index_name("users", "email")
+    )
 }
 
 /// Maps a database error to a status. A missing row is a 404; anything else is
 /// logged and answered with a 500.
-pub(crate) fn db_status(error: diesel::result::Error) -> Status {
+pub(crate) fn db_status(error: OrbitError) -> Status {
     match error {
-        diesel::result::Error::NotFound => Status::NotFound,
+        OrbitError::NotFound { .. } => Status::NotFound,
         other => {
             rocket::error!("ignite: database error: {other}");
             Status::InternalServerError
@@ -1269,15 +1228,15 @@ fn field_names(resource: &dyn Erased) -> Vec<&'static str> {
 
 /// The choices of the lookup fields among `names`, by field name, as the panel shows
 /// them. A field that is not a lookup is skipped, so a list loads only what it shows.
-fn lookup_choices(
-    conn: &mut MysqlConnection,
+async fn lookup_choices(
+    db: &Database,
     resource: &dyn Erased,
     names: &[&str],
-) -> QueryResult<HashMap<&'static str, Vec<(String, String)>>> {
+) -> Result<HashMap<&'static str, Vec<(String, String)>>, OrbitError> {
     let mut choices = HashMap::new();
     for field in resource.fields() {
         if field.kind == FieldKind::Lookup && names.contains(&field.name) {
-            choices.insert(field.name, resource.options(conn, field.name)?);
+            choices.insert(field.name, resource.options(db, field.name).await?);
         }
     }
     Ok(choices)
@@ -1286,14 +1245,16 @@ fn lookup_choices(
 /// The choices of a form's lookup fields, read from the database for a form that is
 /// shown again with its errors.
 async fn form_lookups(
-    pool: &State<Pool>,
+    db: &State<Database>,
     resource: &Arc<dyn Erased>,
 ) -> Result<HashMap<&'static str, Vec<(String, String)>>, Status> {
-    let worker = resource.clone();
-    blocking(pool, move |conn| {
-        lookup_choices(conn, worker.as_ref(), &field_names(worker.as_ref())).map_err(db_status)
-    })
+    lookup_choices(
+        db.inner(),
+        resource.as_ref(),
+        &field_names(resource.as_ref()),
+    )
     .await
+    .map_err(db_status)
 }
 
 /// The text a cell shows for a stored value. A lookup field shows the label of its

@@ -28,8 +28,6 @@
 
 use std::process::exit;
 
-use diesel::mysql::MysqlConnection;
-use diesel::prelude::*;
 use orbit_orm::Database;
 use rocket::tokio::runtime::Runtime;
 
@@ -180,16 +178,6 @@ fn database_url() -> Result<String, i32> {
     })
 }
 
-/// Connects to the database named by `DATABASE_URL`. Prints the problem and returns the
-/// exit code when it cannot.
-fn connect() -> Result<MysqlConnection, i32> {
-    let url = database_url()?;
-    MysqlConnection::establish(&url).map_err(|error| {
-        eprintln!("Could not connect to DATABASE_URL: {error}");
-        1
-    })
-}
-
 /// Connects Orbit to `DATABASE_URL`. The commands drive it with `block_on` on the runtime that
 /// is returned, so the CLI stays synchronous. Prints the problem and returns the exit code when
 /// it cannot connect.
@@ -206,12 +194,13 @@ fn connect_orbit() -> Result<(Runtime, Database), i32> {
     Ok((runtime, db))
 }
 
-/// Refuses to continue when migrations are pending, and says to run `ignite migrate`. It reads
-/// only. On failure it prints the problem and returns the exit code.
-fn check_migrated() -> Result<(), i32> {
+/// Connects Orbit and refuses to continue when migrations are pending, which needs
+/// `ignite migrate` first. Returns the runtime that drives the database. On failure it prints
+/// the problem and returns the exit code.
+fn check_migrated() -> Result<(Runtime, Database), i32> {
     let (runtime, db) = connect_orbit()?;
     match runtime.block_on(pending_migrations(&db)) {
-        Ok(pending) if pending.is_empty() => Ok(()),
+        Ok(pending) if pending.is_empty() => Ok((runtime, db)),
         Ok(pending) => {
             eprintln!(
                 "The panel's tables are not set up: these migrations have not run: {}. \
@@ -225,6 +214,11 @@ fn check_migrated() -> Result<(), i32> {
             Err(1)
         }
     }
+}
+
+/// Connects and checks that every migration has run. See [`check_migrated`].
+fn connect_with_roles() -> Result<(Runtime, Database), i32> {
+    check_migrated()
 }
 
 /// Parses `--email` and `--name`, then creates the user. Returns the exit code.
@@ -266,15 +260,12 @@ fn create_user(args: &[String]) -> i32 {
     let name = name.unwrap_or_default();
 
     // The command never migrates. A schema that is behind is refused, with the fix.
-    if let Err(code) = check_migrated() {
-        return code;
-    }
-    let mut conn = match connect() {
-        Ok(conn) => conn,
+    let (runtime, db) = match check_migrated() {
+        Ok(connection) => connection,
         Err(code) => return code,
     };
     // Everything that can fail without a password runs before the prompt.
-    match users::find_by_email(&mut conn, &email) {
+    match runtime.block_on(users::find_by_email(&db, &email)) {
         Ok(Some(_)) => {
             eprintln!("A user with the email {email} already exists.");
             return 1;
@@ -294,15 +285,12 @@ fn create_user(args: &[String]) -> i32 {
         }
     };
 
-    match users::create_user(&mut conn, &name, &email, &password) {
+    match runtime.block_on(users::create_user(&db, &name, &email, &password)) {
         Ok(user) => {
             println!("Created user #{} for {}.", user.id, user.email);
             0
         }
-        Err(diesel::result::Error::DatabaseError(
-            diesel::result::DatabaseErrorKind::UniqueViolation,
-            _,
-        )) => {
+        Err(orbit_orm::Error::UniqueViolation { .. }) => {
             eprintln!("A user with the email {email} already exists.");
             1
         }
@@ -354,13 +342,6 @@ fn check_length(password: String) -> Result<String, String> {
     Ok(password)
 }
 
-/// Connects and checks that every migration has run, which needs `ignite migrate` first when
-/// one is pending. On failure it prints the problem and returns the exit code.
-fn connect_with_roles() -> Result<MysqlConnection, i32> {
-    check_migrated()?;
-    connect()
-}
-
 /// Prints the outcome of a role command: the message on success, or the problem and exit 1.
 fn report(result: Result<String, AuthzError>) -> i32 {
     match result {
@@ -382,21 +363,26 @@ fn create_role(name: &str) -> i32 {
         eprintln!("The role name must not be empty.");
         return 2;
     }
-    let mut conn = match connect_with_roles() {
-        Ok(conn) => conn,
+    let (runtime, db) = match connect_with_roles() {
+        Ok(connection) => connection,
         Err(code) => return code,
     };
-    report(authz::create_role(&mut conn, name).map(|()| format!("Created role {name}.")))
+    report(
+        runtime
+            .block_on(authz::create_role(&db, name))
+            .map(|()| format!("Created role {name}.")),
+    )
 }
 
 /// `ignite role grant <role> <permission>`. Returns the exit code.
 fn grant_permission(role: &str, permission: &str) -> i32 {
-    let mut conn = match connect_with_roles() {
-        Ok(conn) => conn,
+    let (runtime, db) = match connect_with_roles() {
+        Ok(connection) => connection,
         Err(code) => return code,
     };
     report(
-        authz::grant_permission(&mut conn, role, permission)
+        runtime
+            .block_on(authz::grant_permission(&db, role, permission))
             .map(|()| format!("Granted {permission} to {role}.")),
     )
 }
@@ -423,11 +409,11 @@ fn reset_password(args: &[String]) -> i32 {
         return 2;
     };
 
-    let mut conn = match connect_with_roles() {
-        Ok(conn) => conn,
+    let (runtime, db) = match connect_with_roles() {
+        Ok(connection) => connection,
         Err(code) => return code,
     };
-    let user = match users::find_by_email(&mut conn, &email) {
+    let user = match runtime.block_on(users::find_by_email(&db, &email)) {
         Ok(Some(user)) => user,
         Ok(None) => {
             eprintln!("The user {email} does not exist.");
@@ -447,7 +433,7 @@ fn reset_password(args: &[String]) -> i32 {
         }
     };
 
-    match users::reset_password(&mut conn, user.id, &password) {
+    match runtime.block_on(users::reset_password(&db, user.id, &password)) {
         Ok(()) => {
             println!("Changed the password of {email}. Their sessions have ended.");
             0
@@ -462,43 +448,52 @@ fn reset_password(args: &[String]) -> i32 {
 /// `ignite user disable <email>`. Returns the exit code. A user who is already disabled is
 /// reported, and is not an error.
 fn disable_user(email: &str) -> i32 {
-    let mut conn = match connect_with_roles() {
-        Ok(conn) => conn,
+    let (runtime, db) = match connect_with_roles() {
+        Ok(connection) => connection,
         Err(code) => return code,
     };
-    report(authz::disable_user(&mut conn, email).map(|changed| {
-        if changed {
-            format!("Disabled {email}. Their sessions have ended.")
-        } else {
-            format!("{email} is already disabled.")
-        }
-    }))
+    report(
+        runtime
+            .block_on(authz::disable_user(&db, email))
+            .map(|changed| {
+                if changed {
+                    format!("Disabled {email}. Their sessions have ended.")
+                } else {
+                    format!("{email} is already disabled.")
+                }
+            }),
+    )
 }
 
 /// `ignite user enable <email>`. Returns the exit code. A user who is already enabled is
 /// reported, and is not an error.
 fn enable_user(email: &str) -> i32 {
-    let mut conn = match connect_with_roles() {
-        Ok(conn) => conn,
+    let (runtime, db) = match connect_with_roles() {
+        Ok(connection) => connection,
         Err(code) => return code,
     };
-    report(authz::enable_user(&mut conn, email).map(|changed| {
-        if changed {
-            format!("Enabled {email}.")
-        } else {
-            format!("{email} is already enabled.")
-        }
-    }))
+    report(
+        runtime
+            .block_on(authz::enable_user(&db, email))
+            .map(|changed| {
+                if changed {
+                    format!("Enabled {email}.")
+                } else {
+                    format!("{email} is already enabled.")
+                }
+            }),
+    )
 }
 
 /// `ignite user role add <email> <role>`. Returns the exit code.
 fn assign_role(email: &str, role: &str) -> i32 {
-    let mut conn = match connect_with_roles() {
-        Ok(conn) => conn,
+    let (runtime, db) = match connect_with_roles() {
+        Ok(connection) => connection,
         Err(code) => return code,
     };
     report(
-        authz::assign_role(&mut conn, email, role)
+        runtime
+            .block_on(authz::assign_role(&db, email, role))
             .map(|()| format!("Added role {role} to {email}.")),
     )
 }
@@ -506,26 +501,30 @@ fn assign_role(email: &str, role: &str) -> i32 {
 /// `ignite user role remove <email> <role>`. Returns the exit code. A user who did not have
 /// the role is reported, and is not an error.
 fn remove_role(email: &str, role: &str) -> i32 {
-    let mut conn = match connect_with_roles() {
-        Ok(conn) => conn,
+    let (runtime, db) = match connect_with_roles() {
+        Ok(connection) => connection,
         Err(code) => return code,
     };
-    report(authz::remove_role(&mut conn, email, role).map(|removed| {
-        if removed {
-            format!("Removed role {role} from {email}.")
-        } else {
-            format!("{email} did not have the role {role}.")
-        }
-    }))
+    report(
+        runtime
+            .block_on(authz::remove_role(&db, email, role))
+            .map(|removed| {
+                if removed {
+                    format!("Removed role {role} from {email}.")
+                } else {
+                    format!("{email} did not have the role {role}.")
+                }
+            }),
+    )
 }
 
 /// `ignite user roles <email>`. Returns the exit code.
 fn list_user_roles(email: &str) -> i32 {
-    let mut conn = match connect_with_roles() {
-        Ok(conn) => conn,
+    let (runtime, db) = match connect_with_roles() {
+        Ok(connection) => connection,
         Err(code) => return code,
     };
-    match authz::user_roles(&mut conn, email) {
+    match runtime.block_on(authz::user_roles(&db, email)) {
         Ok(roles) if roles.is_empty() => {
             println!("{email} has no roles.");
             0

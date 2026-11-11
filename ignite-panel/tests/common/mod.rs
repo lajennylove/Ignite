@@ -2,22 +2,23 @@
 //! Fixtures shared by the panel tests: a `Widgets` resource, the `ignite_test`
 //! database, and the client helpers. The tests share one table, so they run one at a time.
 
+use std::future::Future;
 use std::sync::{Mutex, MutexGuard};
 
-use diesel::dsl::sql;
-use diesel::mysql::MysqlConnection;
-use diesel::prelude::*;
-use diesel::result::{Error as DieselError, QueryResult};
-use diesel::sql_query;
-use diesel::sql_types::BigInt;
 use ignite_core::{
     escape_like, Column, Direction, Field, FieldErrors, FieldKind, FormInput, IgniteResource,
     LatestRecords, ListQuery, Page, StatWidget,
 };
 use ignite_panel::authz::{self, SUPER_ADMIN};
 use ignite_panel::{rollback, run_migrations, users, Ignite, RecordingMailer};
+use orbit_orm::__sqlx as sqlx;
+use orbit_orm::{
+    raw, Database, Direction as OrbitDirection, Error as OrbitError, Model, Operator, OrbitModel,
+    Value,
+};
 use rocket::http::{ContentType, Status};
 use rocket::local::blocking::Client;
+use rocket::tokio::runtime::Runtime;
 use serde::Serialize;
 
 pub static LOCK: Mutex<()> = Mutex::new(());
@@ -27,26 +28,20 @@ pub const PASSWORD: &str = "correct horse battery";
 /// The email of the test user created by `reset`.
 pub const EMAIL: &str = "admin@example.test";
 
-diesel::table! {
-    widgets (id) {
-        id -> Integer,
-        name -> Text,
-        price -> Integer,
-        note -> Nullable<Text>,
-    }
-}
-
-#[derive(Queryable, Selectable, Serialize)]
-#[diesel(table_name = widgets)]
+/// A row of the `widgets` table, which the tests share.
+#[derive(Debug, Clone, OrbitModel, Serialize)]
+#[orbit(table = "widgets")]
 pub struct WidgetRow {
     id: i32,
+    #[orbit(fillable)]
     name: String,
+    #[orbit(fillable)]
     price: i32,
+    #[orbit(fillable)]
     note: Option<String>,
 }
 
-#[derive(Insertable, AsChangeset)]
-#[diesel(table_name = widgets)]
+/// The values a widget form writes.
 pub struct WidgetInput {
     pub name: String,
     pub price: i32,
@@ -103,58 +98,74 @@ impl IgniteResource for Widgets {
         ]
     }
 
-    fn list(conn: &mut MysqlConnection, query: &ListQuery) -> QueryResult<Page<WidgetRow>> {
+    async fn list(db: &Database, query: &ListQuery) -> Result<Page<WidgetRow>, OrbitError> {
         let pattern = query
             .search
             .as_ref()
             .map(|s| format!("%{}%", escape_like(s)));
-        let mut rows = widgets::table.into_boxed();
-        let mut count = widgets::table.into_boxed();
+        let mut rows = WidgetRow::query();
+        let mut count = WidgetRow::query();
         if let Some(pattern) = &pattern {
-            rows = rows.filter(widgets::name.like(pattern.clone()));
-            count = count.filter(widgets::name.like(pattern.clone()));
+            rows = rows.where_op("name", Operator::Like, pattern.as_str());
+            count = count.where_op("name", Operator::Like, pattern.as_str());
         }
         let asc = !matches!(query.sort, Some((_, Direction::Desc)));
-        rows = match (query.sort.as_ref().map(|(k, _)| k.as_str()), asc) {
-            (Some("name"), true) => rows.order(widgets::name.asc()),
-            (Some("name"), false) => rows.order(widgets::name.desc()),
-            (Some("price"), true) => rows.order(widgets::price.asc()),
-            (Some("price"), false) => rows.order(widgets::price.desc()),
-            _ => rows.order(widgets::id.asc()),
+        let (column, direction) = match (query.sort.as_ref().map(|(k, _)| k.as_str()), asc) {
+            (Some("name"), true) => ("name", OrbitDirection::Asc),
+            (Some("name"), false) => ("name", OrbitDirection::Desc),
+            (Some("price"), true) => ("price", OrbitDirection::Asc),
+            (Some("price"), false) => ("price", OrbitDirection::Desc),
+            _ => ("id", OrbitDirection::Asc),
         };
-        let total: i64 = count.count().get_result(conn)?;
+        rows = rows.order_by(column, direction);
+        let total = count.count(db).await?;
         let rows = rows
-            .limit(query.per_page)
-            .offset(query.offset())
-            .select(WidgetRow::as_select())
-            .load(conn)?;
+            .limit(query.per_page as u64)
+            .offset(query.offset() as u64)
+            .get(db)
+            .await?;
         Ok(Page { rows, total })
     }
 
-    fn find(conn: &mut MysqlConnection, id: i64) -> QueryResult<Option<WidgetRow>> {
-        widgets::table
-            .find(id as i32)
-            .select(WidgetRow::as_select())
-            .first(conn)
-            .optional()
+    async fn find(db: &Database, id: i64) -> Result<Option<WidgetRow>, OrbitError> {
+        WidgetRow::query().find(db, id).await
     }
 
-    fn create(conn: &mut MysqlConnection, input: WidgetInput) -> QueryResult<WidgetRow> {
-        diesel::insert_into(widgets::table)
-            .values(&input)
-            .execute(conn)?;
-        let id: i64 = diesel::select(sql::<BigInt>("LAST_INSERT_ID()")).get_result(conn)?;
-        Self::find(conn, id)?.ok_or(DieselError::NotFound)
+    async fn create(db: &Database, input: WidgetInput) -> Result<WidgetRow, OrbitError> {
+        let id = WidgetRow::query()
+            .insert(
+                db,
+                &[
+                    ("name", input.name.as_str().into()),
+                    ("price", input.price.into()),
+                    ("note", input.note.as_deref().into()),
+                ],
+            )
+            .await?;
+        Self::find(db, id as i64)
+            .await?
+            .ok_or(OrbitError::NotFound { table: "widgets" })
     }
 
-    fn update(conn: &mut MysqlConnection, id: i64, input: WidgetInput) -> QueryResult<WidgetRow> {
-        let changed = diesel::update(widgets::table.find(id as i32))
-            .set(&input)
-            .execute(conn)?;
-        if changed == 0 {
-            return Err(DieselError::NotFound);
+    async fn update(db: &Database, id: i64, input: WidgetInput) -> Result<WidgetRow, OrbitError> {
+        // A `None` note is left as it is, as the derive does for an optional field on update.
+        let mut values: Vec<(&str, Value)> = vec![
+            ("name", input.name.as_str().into()),
+            ("price", input.price.into()),
+        ];
+        if let Some(note) = &input.note {
+            values.push(("note", note.as_str().into()));
         }
-        Self::find(conn, id)?.ok_or(DieselError::NotFound)
+        let changed = WidgetRow::query()
+            .where_eq("id", id)
+            .update(db, &values)
+            .await?;
+        if changed == 0 {
+            return Err(OrbitError::NotFound { table: "widgets" });
+        }
+        Self::find(db, id)
+            .await?
+            .ok_or(OrbitError::NotFound { table: "widgets" })
     }
 
     fn latest_records() -> Option<LatestRecords> {
@@ -165,24 +176,24 @@ impl IgniteResource for Widgets {
         })
     }
 
-    fn latest(conn: &mut MysqlConnection, limit: i64) -> QueryResult<Vec<WidgetRow>> {
-        widgets::table
-            .order(widgets::id.desc())
-            .limit(limit)
-            .select(WidgetRow::as_select())
-            .load(conn)
+    async fn latest(db: &Database, limit: i64) -> Result<Vec<WidgetRow>, OrbitError> {
+        WidgetRow::query()
+            .order_by("id", OrbitDirection::Desc)
+            .limit(limit as u64)
+            .get(db)
+            .await
     }
 
-    fn widgets(conn: &mut MysqlConnection) -> QueryResult<Vec<StatWidget>> {
-        let value: i64 = widgets::table.count().get_result(conn)?;
+    async fn widgets(db: &Database) -> Result<Vec<StatWidget>, OrbitError> {
+        let value = WidgetRow::query().count(db).await?;
         Ok(vec![StatWidget {
             label: "Widgets",
             value,
         }])
     }
 
-    fn delete(conn: &mut MysqlConnection, id: i64) -> QueryResult<usize> {
-        diesel::delete(widgets::table.find(id as i32)).execute(conn)
+    async fn delete(db: &Database, id: i64) -> Result<u64, OrbitError> {
+        WidgetRow::query().where_eq("id", id).delete(db).await
     }
 
     fn validate(form: &FormInput) -> Result<WidgetInput, FieldErrors> {
@@ -209,37 +220,61 @@ impl IgniteResource for Widgets {
     }
 }
 
-/// Runs `future` to completion on a runtime of its own, for the Orbit calls the tests make.
-pub fn block_on<F: std::future::Future>(future: F) -> F::Output {
-    rocket::tokio::runtime::Runtime::new()
-        .expect("a runtime for the test")
-        .block_on(future)
+/// A test database connection: a runtime of its own and an Orbit database on it. Every call
+/// runs on that runtime, so the pool and its connections stay with the runtime that made them.
+pub struct TestDb {
+    runtime: Runtime,
+    pub db: Database,
 }
 
-/// Puts the test database into the state where exactly `applied` are applied: every panel
-/// migration is rolled back, the `applied` ones run their `up.sql` through Diesel, and Orbit's
-/// table records them as one batch. The remaining migrations are left for `migrate` to run.
-/// Hold the guard from `reset` while calling this.
-pub fn rewind_to(applied: &[&str]) {
-    use diesel::connection::SimpleConnection;
-    block_on(async {
-        let db = orbit_orm::Database::connect(&database_url())
-            .await
-            .expect("connect to ignite_test through Orbit");
-        while !rollback(&db).await.expect("rollback").is_empty() {}
-        db.close().await;
-    });
-    let root = concat!(env!("CARGO_MANIFEST_DIR"), "/migrations/");
-    let mut conn = MysqlConnection::establish(&database_url()).expect("connect to ignite_test");
-    for name in applied {
-        let up = std::fs::read_to_string(format!("{root}{name}/up.sql")).expect("read up.sql");
-        conn.batch_execute(&up).expect("apply up.sql");
-        sql_query(format!(
-            "INSERT INTO migrations (migration, batch) VALUES ('{name}', 1)"
-        ))
-        .execute(&mut conn)
-        .expect("record the migration");
+impl TestDb {
+    /// Runs `future` to completion on the runtime of this connection.
+    pub fn run<F: Future>(&self, future: F) -> F::Output {
+        self.runtime.block_on(future)
     }
+
+    /// Runs SQL that may hold several statements, such as a migration's `up.sql`.
+    pub fn exec(&self, sql: impl AsRef<str>) {
+        let sql = sql.as_ref();
+        self.run(async {
+            sqlx::raw_sql(sqlx::AssertSqlSafe(sql))
+                .execute(self.db.pool())
+                .await
+                .expect("run the SQL")
+        });
+    }
+
+    /// Runs one statement that may fail, and returns the error instead of panicking.
+    pub fn try_exec(&self, sql: &str) -> Result<(), OrbitError> {
+        self.run(async { raw::execute(&self.db, sql, &[]).await.map(|_| ()) })
+    }
+
+    /// Runs one statement with `binds`, and returns the rows affected.
+    pub fn exec_with(&self, sql: &str, binds: &[Value]) -> u64 {
+        self.run(async {
+            raw::execute(&self.db, sql, binds)
+                .await
+                .expect("run the statement")
+        })
+    }
+
+    /// Reads one integer from a statement, such as a `COUNT`.
+    pub fn count(&self, sql: &str, binds: &[Value]) -> i64 {
+        self.run(async {
+            raw::fetch_scalar::<i64>(&self.db, sql, binds)
+                .await
+                .expect("count")
+        })
+    }
+}
+
+/// A connection to the test database, on a runtime of its own.
+pub fn test_db() -> TestDb {
+    let runtime = Runtime::new().expect("a runtime for the test");
+    let db = runtime
+        .block_on(Database::connect(&database_url()))
+        .expect("connect to ignite_test through Orbit");
+    TestDb { runtime, db }
 }
 
 pub fn database_url() -> String {
@@ -247,57 +282,69 @@ pub fn database_url() -> String {
         .expect("set DATABASE_URL to the test database, such as mysql://user@localhost/ignite_test")
 }
 
+/// Puts the test database into the state where exactly `applied` are applied: every panel
+/// migration is rolled back, the `applied` ones run their `up.sql`, and Orbit's table records
+/// them as one batch. The remaining migrations are left for `migrate` to run. Hold the guard
+/// from `reset` while calling this.
+pub fn rewind_to(applied: &[&str]) {
+    let t = test_db();
+    t.run(async { while !rollback(&t.db).await.expect("rollback").is_empty() {} });
+    let root = concat!(env!("CARGO_MANIFEST_DIR"), "/migrations/");
+    for name in applied {
+        let up = std::fs::read_to_string(format!("{root}{name}/up.sql")).expect("read up.sql");
+        t.exec(&up);
+        t.exec_with(
+            "INSERT INTO migrations (migration, batch) VALUES (?, 1)",
+            &[(*name).into()],
+        );
+    }
+}
+
 /// Locks the shared tables, resets them, seeds three rows and one user.
 pub fn reset() -> MutexGuard<'static, ()> {
     let guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     std::env::set_var("DATABASE_URL", database_url());
-    let mut conn = MysqlConnection::establish(&database_url()).expect("connect to ignite_test");
-    sql_query("DROP TABLE IF EXISTS widgets")
-        .execute(&mut conn)
-        .unwrap();
-    sql_query(
+    let t = test_db();
+    t.exec("DROP TABLE IF EXISTS widgets");
+    t.exec(
         "CREATE TABLE widgets (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(255) NOT NULL, price INT NOT NULL, note TEXT NULL)",
-    )
-    .execute(&mut conn)
-    .unwrap();
-    sql_query("INSERT INTO widgets (name, price, note) VALUES ('Apple', 3, NULL), ('Banana', 1, 'Yellow'), ('Cherry', 2, NULL)")
-        .execute(&mut conn)
-        .unwrap();
+    );
+    t.exec("INSERT INTO widgets (name, price, note) VALUES ('Apple', 3, NULL), ('Banana', 1, 'Yellow'), ('Cherry', 2, NULL)");
 
     // Roll the panel back to nothing, then apply every migration: one batch, the same each time.
-    block_on(async {
-        let db = orbit_orm::Database::connect(&database_url())
-            .await
-            .expect("connect to ignite_test through Orbit");
-        while !rollback(&db).await.expect("rollback").is_empty() {}
-        run_migrations(&db).await.expect("migrations");
-        db.close().await;
+    t.run(async {
+        while !rollback(&t.db).await.expect("rollback").is_empty() {}
+        run_migrations(&t.db).await.expect("migrations");
     });
-    sql_query("DELETE FROM users").execute(&mut conn).unwrap();
-    sql_query("DELETE FROM sessions")
-        .execute(&mut conn)
-        .unwrap();
-    sql_query("DELETE FROM login_throttles")
-        .execute(&mut conn)
-        .unwrap();
-    sql_query("DELETE FROM password_reset_tokens")
-        .execute(&mut conn)
-        .unwrap();
-    for table in ["role_user", "role_permission", "permissions", "roles"] {
-        sql_query(format!("DELETE FROM {table}"))
-            .execute(&mut conn)
-            .unwrap();
+    for table in [
+        "users",
+        "sessions",
+        "login_throttles",
+        "password_reset_tokens",
+        "role_user",
+        "role_permission",
+        "permissions",
+        "roles",
+    ] {
+        t.exec(format!("DELETE FROM {table}"));
     }
-    users::create_user(&mut conn, "Admin", EMAIL, PASSWORD).expect("create test user");
-    // The test user is a super-admin, so the tests that are not about roles pass every check.
-    authz::create_role(&mut conn, SUPER_ADMIN).expect("create super-admin");
-    authz::assign_role(&mut conn, EMAIL, SUPER_ADMIN).expect("make the test user a super-admin");
+    t.run(async {
+        users::create_user(&t.db, "Admin", EMAIL, PASSWORD)
+            .await
+            .expect("create test user");
+        // The test user is a super-admin, so the tests that are not about roles pass every check.
+        authz::create_role(&t.db, SUPER_ADMIN)
+            .await
+            .expect("create super-admin");
+        authz::assign_role(&t.db, EMAIL, SUPER_ADMIN)
+            .await
+            .expect("make the test user a super-admin");
+    });
     guard
 }
 
 pub fn count_widgets() -> i64 {
-    let mut conn = MysqlConnection::establish(&database_url()).unwrap();
-    widgets::table.count().get_result(&mut conn).unwrap()
+    test_db().count("SELECT COUNT(*) FROM widgets", &[])
 }
 
 /// Sets a random `IGNITE_SECRET_KEY` when none is set. A release build refuses to

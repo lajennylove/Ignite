@@ -3,8 +3,7 @@
 mod common;
 
 use common::*;
-use diesel::mysql::MysqlConnection;
-use diesel::prelude::*;
+use orbit_orm::raw;
 use rocket::http::{ContentType, Cookie, Status};
 
 const SESSION: &str = "ignite_session";
@@ -217,22 +216,17 @@ fn the_flash_message_shows_once() {
 #[test]
 fn the_panel_stores_argon2_hashes_not_passwords() {
     let _guard = reset();
-    let mut conn = MysqlConnection::establish(&database_url()).unwrap();
-    let hash: String =
-        diesel::sql_query("SELECT password_hash AS value FROM users WHERE email = ?")
-            .bind::<diesel::sql_types::Text, _>(EMAIL)
-            .get_result::<StringValue>(&mut conn)
-            .unwrap()
-            .value;
+    let conn = test_db();
+    let hash: String = conn
+        .run(raw::fetch_scalar(
+            &conn.db,
+            "SELECT password_hash FROM users WHERE email = ?",
+            &[EMAIL.into()],
+        ))
+        .expect("read the stored hash");
 
     assert!(hash.starts_with("$argon2id$"), "unexpected hash: {hash}");
     assert!(!hash.contains(PASSWORD));
-}
-
-#[derive(diesel::QueryableByName)]
-struct StringValue {
-    #[diesel(sql_type = diesel::sql_types::Text)]
-    value: String,
 }
 
 #[test]
@@ -320,10 +314,8 @@ fn an_expired_session_row_is_refused() {
     let client = signed_in(None);
     assert_eq!(client.get("/admin/widgets").dispatch().status(), Status::Ok);
 
-    let mut conn = MysqlConnection::establish(&database_url()).unwrap();
-    diesel::sql_query("UPDATE sessions SET expires_at = '2000-01-01 00:00:00'")
-        .execute(&mut conn)
-        .unwrap();
+    let conn = test_db();
+    conn.exec("UPDATE sessions SET expires_at = '2000-01-01 00:00:00'");
 
     assert_eq!(
         client.get("/admin/widgets").dispatch().status(),

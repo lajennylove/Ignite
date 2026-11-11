@@ -1,10 +1,9 @@
 //! Derive macro for Ignite resources: `#[derive(IgniteResource)]`.
 //!
-//! The derive reads a Diesel model and writes the [`IgniteResource`] impl that
+//! The derive reads an Orbit model and writes the [`IgniteResource`] impl that
 //! the panel needs: the form fields, the list columns, the query methods, and
 //! the input struct that create and update take. The model must also derive
-//! `Queryable`, `Selectable` and `Serialize`, because the derive does not write
-//! them.
+//! `OrbitModel` and `Serialize`, because the derive does not write them.
 //!
 //! [`IgniteResource`]: https://docs.rs/ignite-core/latest/ignite_core/trait.IgniteResource.html
 
@@ -19,7 +18,9 @@ use syn::{
 /// Writes `impl ignite_core::IgniteResource` for a struct that models a table.
 ///
 /// Struct attributes:
-/// - `#[ignite(table = widgets)]`: the Diesel table module, required. Its name is the URL slug.
+/// - `#[ignite(table = widgets)]`: the table, required. Its name is the URL slug, and it must be the
+///   table of the model's `#[orbit(table = ...)]` (or the default name of the struct). A mismatch is a
+///   compile error.
 /// - `#[ignite(title = "Widgets")]`: the heading and nav label. Defaults to the table name, capitalized.
 /// - `#[ignite(singular = "Widget")]`: the name of one record, for "New Widget". Defaults to the title without a trailing `s`.
 ///
@@ -28,8 +29,8 @@ use syn::{
 /// - `label = "..."`: the label. Defaults to the field name, capitalized and spaced.
 /// - `form_type = "text" | "textarea" | "password" | "number" | "checkbox" | "date"`: the input. Defaults from the type.
 /// - `options = [("draft", "Draft"), ...]`: a select with a fixed list of choices. The field must be a `String`.
-/// - `options = load_choices`: a select whose choices come from a function, `fn(&mut MysqlConnection) -> QueryResult<Vec<(String, String)>>`, called each time the form is shown. The field must be a `String` or an integer.
-/// - `belongs_to = schema::categories, display = name`: a relation. The field stores the related row's `id`, the select lists the related table's rows by `display`, and the list shows that name. The field must be an `i32` or `i64`, and the related table's key must be `id`.
+/// - `options = load_choices`: a select whose choices come from an async function, `async fn(&Database) -> Result<Vec<(String, String)>, orbit_orm::Error>`, called each time the form is shown. The field must be a `String` or an integer.
+/// - `belongs_to = Category, display = name`: a relation. `Category` is the related model (an `OrbitModel`). The field stores the related row's key, the select lists the related table's rows by `display`, and the list shows that name. The field must be an `i32` or `i64`.
 /// - `step = "0.01"`: the browser's step for an `f32` or `f64` input. The default is `"any"`.
 /// - `required` or `required = false`: whether a blank value is rejected. Non-`Option` fields are required by default.
 /// - `searchable`, `sortable`: the list's search and sort columns.
@@ -165,7 +166,7 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
         ));
     }
     let pk_ident = primary.ident.clone();
-    let pk_ty = primary.inner.clone();
+    let pk_name = pk_ident.to_string();
 
     let latest_records = match &latest {
         Some(spec) => latest_records_tokens(spec, &fields, &title, name)?,
@@ -190,9 +191,6 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
         }
     }
 
-    // The table module, aliased so the generated code can refer to it.
-    let table_path = &table;
-
     let input_fields = form_fields.iter().map(|f| {
         let ident = &f.ident;
         // A password is Option<String> on input, so a blank edit leaves the column as it is.
@@ -204,12 +202,13 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
         }
     });
     let input_struct = quote! {
-        #[derive(::diesel::Insertable, ::diesel::AsChangeset)]
-        #[diesel(table_name = #table_path)]
         #vis struct #input_name {
             #(#input_fields,)*
         }
     };
+
+    // The columns an insert or update writes, from the input struct.
+    let value_steps = form_fields.iter().map(|f| value_step(f));
 
     let lookup_fields: Vec<&Field> = form_fields
         .iter()
@@ -251,39 +250,34 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
             }
         });
 
-    let searchable: Vec<&Field> = fields.iter().filter(|f| f.searchable).collect();
-    // One LIKE per searchable column, joined with OR. Each query gets its own
-    // copy of the condition, because a boxed filter takes its expression by value.
-    let search_condition = || {
-        let mut conditions = searchable.iter().map(|f| {
-            let col = &f.ident;
-            quote! { __table::#col.like(pattern.clone()) }
-        });
-        let first = conditions
-            .next()
-            .expect("checked: at least one searchable column");
-        conditions.fold(first, |acc, next| quote! { #acc.or(#next) })
-    };
+    let searchable: Vec<String> = fields
+        .iter()
+        .filter(|f| f.searchable)
+        .map(|f| f.ident.to_string())
+        .collect();
+    // One LIKE per searchable column, joined with OR inside a group, as the search always was.
     let search_filter = if searchable.is_empty() {
         quote! {}
     } else {
-        let rows_condition = search_condition();
-        let count_condition = search_condition();
+        let first = &searchable[0];
+        let rest = &searchable[1..];
         quote! {
-            if let Some(pattern) = &pattern {
-                rows = rows.filter(#rows_condition);
-                count = count.filter(#count_condition);
+            if let ::core::option::Option::Some(pattern) = &pattern {
+                let like = |q: ::orbit_orm::Query<#name>| {
+                    q.where_group(|q| {
+                        q.where_op(#first, ::orbit_orm::Operator::Like, pattern.clone())
+                            #(.or_where_op(#rest, ::orbit_orm::Operator::Like, pattern.clone()))*
+                    })
+                };
+                rows = like(rows);
+                count = like(count);
             }
         }
     };
 
-    let sort_arms = fields.iter().filter(|f| f.sortable).flat_map(|f| {
+    let sort_arms = fields.iter().filter(|f| f.sortable).map(|f| {
         let key = f.ident.to_string();
-        let col = &f.ident;
-        vec![
-            quote! { (::core::option::Option::Some(#key), true) => rows.order(__table::#col.asc()), },
-            quote! { (::core::option::Option::Some(#key), false) => rows.order(__table::#col.desc()), },
-        ]
+        quote! { (::core::option::Option::Some(#key), true) => (#key, ::orbit_orm::Direction::Asc), (::core::option::Option::Some(#key), false) => (#key, ::orbit_orm::Direction::Desc), }
     });
 
     let validate_steps = form_fields.iter().map(|f| validate_expr(f));
@@ -297,165 +291,33 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
         }
     });
 
+    let table_check = quote! {
+        const _: () = ::core::assert!(
+            ::ignite_core::table_name_is(<#name as ::orbit_orm::Model>::TABLE, #table_name),
+            "the #[ignite(table = ...)] attribute must name the table of the model's #[orbit(table = ...)]"
+        );
+    };
+
     Ok(quote! {
+        #table_check
+
         #input_struct
 
-        impl ::ignite_core::IgniteResource for #name {
-            type Record = #name;
-            type Input = #input_name;
-
-            const SLUG: &'static str = #table_name;
-            const TITLE: &'static str = #title;
-            const SINGULAR: &'static str = #singular;
-
-            fn fields() -> &'static [::ignite_core::Field] {
-                &[#(#field_defs),*]
-            }
-
-            fn columns() -> &'static [::ignite_core::Column] {
-                &[#(#column_defs),*]
-            }
-
-            fn list(
-                conn: &mut ::diesel::mysql::MysqlConnection,
-                query: &::ignite_core::ListQuery,
-            ) -> ::diesel::result::QueryResult<::ignite_core::Page<#name>> {
-                #[allow(unused_imports)]
-                use ::diesel::prelude::*;
-                #[allow(unused_imports)]
-                use #table_path as __table;
-
-                let pattern = query
-                    .search
-                    .as_ref()
-                    .map(|s| format!("%{}%", ::ignite_core::escape_like(s)));
-                let mut rows = __table::table.into_boxed();
-                let mut count = __table::table.into_boxed();
-                let _ = &pattern;
-                #search_filter
-
-                let asc = !matches!(query.sort, ::core::option::Option::Some((_, ::ignite_core::Direction::Desc)));
-                rows = match (query.sort.as_ref().map(|(k, _)| k.as_str()), asc) {
-                    #(#sort_arms)*
-                    _ => rows.order(__table::#pk_ident.asc()),
-                };
-
-                let total: i64 = count.count().get_result(conn)?;
-                let rows = rows
-                    .limit(query.per_page)
-                    .offset(query.offset())
-                    .select(<#name as ::diesel::SelectableHelper<::diesel::mysql::Mysql>>::as_select())
-                    .load(conn)?;
-                Ok(::ignite_core::Page { rows, total })
-            }
-
-            fn find(
-                conn: &mut ::diesel::mysql::MysqlConnection,
-                id: i64,
-            ) -> ::diesel::result::QueryResult<::core::option::Option<#name>> {
-                #[allow(unused_imports)]
-                use ::diesel::prelude::*;
-                #[allow(unused_imports)]
-                use #table_path as __table;
-
-                let Ok(key) = <#pk_ty as ::core::convert::TryFrom<i64>>::try_from(id) else {
-                    return Ok(None);
-                };
-                __table::table
-                    .find(key)
-                    .select(<#name as ::diesel::SelectableHelper<::diesel::mysql::Mysql>>::as_select())
-                    .first(conn)
-                    .optional()
-            }
-
-            fn latest_records() -> ::core::option::Option<::ignite_core::LatestRecords> {
-                #latest_records
-            }
-
-            fn latest(
-                conn: &mut ::diesel::mysql::MysqlConnection,
-                limit: i64,
-            ) -> ::diesel::result::QueryResult<::std::vec::Vec<#name>> {
-                #[allow(unused_imports)]
-                use ::diesel::prelude::*;
-                #[allow(unused_imports)]
-                use #table_path as __table;
-
-                __table::table
-                    .order(__table::#pk_ident.desc())
-                    .limit(limit)
-                    .select(<#name as ::diesel::SelectableHelper<::diesel::mysql::Mysql>>::as_select())
-                    .load(conn)
-            }
-
-            fn create(
-                conn: &mut ::diesel::mysql::MysqlConnection,
-                input: #input_name,
-            ) -> ::diesel::result::QueryResult<#name> {
-                #[allow(unused_imports)]
-                use ::diesel::prelude::*;
-                #[allow(unused_imports)]
-                use #table_path as __table;
-
-                ::diesel::insert_into(__table::table).values(&input).execute(conn)?;
-                let id: i64 = ::diesel::select(::diesel::dsl::sql::<::diesel::sql_types::BigInt>("LAST_INSERT_ID()"))
-                    .get_result(conn)?;
-                <#name as ::ignite_core::IgniteResource>::find(conn, id)?
-                    .ok_or(::diesel::result::Error::NotFound)
-            }
-
-            fn update(
-                conn: &mut ::diesel::mysql::MysqlConnection,
-                id: i64,
-                input: #input_name,
-            ) -> ::diesel::result::QueryResult<#name> {
-                #[allow(unused_imports)]
-                use ::diesel::prelude::*;
-                #[allow(unused_imports)]
-                use #table_path as __table;
-
-                let Ok(key) = <#pk_ty as ::core::convert::TryFrom<i64>>::try_from(id) else {
-                    return Err(::diesel::result::Error::NotFound);
-                };
-                let changed = ::diesel::update(__table::table.find(key)).set(&input).execute(conn)?;
-                if changed == 0 {
-                    return Err(::diesel::result::Error::NotFound);
-                }
-                <#name as ::ignite_core::IgniteResource>::find(conn, id)?
-                    .ok_or(::diesel::result::Error::NotFound)
-            }
-
-            fn delete(
-                conn: &mut ::diesel::mysql::MysqlConnection,
-                id: i64,
-            ) -> ::diesel::result::QueryResult<usize> {
-                #[allow(unused_imports)]
-                use ::diesel::prelude::*;
-                #[allow(unused_imports)]
-                use #table_path as __table;
-
-                let Ok(key) = <#pk_ty as ::core::convert::TryFrom<i64>>::try_from(id) else {
-                    return Ok(0);
-                };
-                ::diesel::delete(__table::table.find(key)).execute(conn)
-            }
-
-            fn validate(
-                form: &::ignite_core::FormInput,
-            ) -> ::core::result::Result<#input_name, ::ignite_core::FieldErrors> {
-                #name::__ignite_validate(form, true)
-            }
-
-            fn validate_update(
-                form: &::ignite_core::FormInput,
-            ) -> ::core::result::Result<#input_name, ::ignite_core::FieldErrors> {
-                #name::__ignite_validate(form, false)
-            }
-
-            #options_fn
-        }
-
         impl #name {
+            /// The columns that an insert (`creating`) or an update write, from the input.
+            /// An update skips an `Option` that is `None`, as the derive always has.
+            #[doc(hidden)]
+            #[allow(unused_mut)]
+            fn __ignite_values(
+                input: &#input_name,
+                creating: bool,
+            ) -> ::std::vec::Vec<(&'static str, ::orbit_orm::Value)> {
+                let _ = creating;
+                let mut values = ::std::vec::Vec::new();
+                #(#value_steps)*
+                values
+            }
+
             /// Shared by `validate` and `validate_update`. `creating` decides
             /// whether a blank password is an error.
             #[doc(hidden)]
@@ -476,7 +338,162 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
             }
         }
 
+        impl ::ignite_core::IgniteResource for #name {
+            type Record = #name;
+            type Input = #input_name;
+
+            const SLUG: &'static str = #table_name;
+            const TITLE: &'static str = #title;
+            const SINGULAR: &'static str = #singular;
+
+            fn fields() -> &'static [::ignite_core::Field] {
+                &[#(#field_defs),*]
+            }
+
+            fn columns() -> &'static [::ignite_core::Column] {
+                &[#(#column_defs),*]
+            }
+
+            async fn list(
+                db: &::ignite_core::Database,
+                query: &::ignite_core::ListQuery,
+            ) -> ::core::result::Result<::ignite_core::Page<#name>, ::orbit_orm::Error> {
+                let pattern = query
+                    .search
+                    .as_ref()
+                    .map(|s| format!("%{}%", ::ignite_core::escape_like(s)));
+                let mut rows = <#name as ::orbit_orm::Model>::query();
+                let mut count = <#name as ::orbit_orm::Model>::query();
+                #search_filter
+
+                let asc = !matches!(query.sort, ::core::option::Option::Some((_, ::ignite_core::Direction::Desc)));
+                let (column, direction) = match (query.sort.as_ref().map(|(k, _)| k.as_str()), asc) {
+                    #(#sort_arms)*
+                    _ => (#pk_name, ::orbit_orm::Direction::Asc),
+                };
+                rows = rows.order_by(column, direction);
+
+                let total = count.count(db).await?;
+                let rows = rows
+                    .limit(query.per_page.max(0) as u64)
+                    .offset(query.offset().max(0) as u64)
+                    .get(db)
+                    .await?;
+                Ok(::ignite_core::Page { rows, total })
+            }
+
+            async fn find(
+                db: &::ignite_core::Database,
+                id: i64,
+            ) -> ::core::result::Result<::core::option::Option<#name>, ::orbit_orm::Error> {
+                <#name as ::orbit_orm::Model>::query().find(db, id).await
+            }
+
+            fn latest_records() -> ::core::option::Option<::ignite_core::LatestRecords> {
+                #latest_records
+            }
+
+            async fn latest(
+                db: &::ignite_core::Database,
+                limit: i64,
+            ) -> ::core::result::Result<::std::vec::Vec<#name>, ::orbit_orm::Error> {
+                <#name as ::orbit_orm::Model>::query()
+                    .order_by(#pk_name, ::orbit_orm::Direction::Desc)
+                    .limit(limit.max(0) as u64)
+                    .get(db)
+                    .await
+            }
+
+            async fn create(
+                db: &::ignite_core::Database,
+                input: #input_name,
+            ) -> ::core::result::Result<#name, ::orbit_orm::Error> {
+                let values = #name::__ignite_values(&input, true);
+                let id = <#name as ::orbit_orm::Model>::query().insert(db, &values).await?;
+                <#name as ::ignite_core::IgniteResource>::find(db, id as i64)
+                    .await?
+                    .ok_or(::orbit_orm::Error::NotFound { table: <#name as ::orbit_orm::Model>::TABLE })
+            }
+
+            async fn update(
+                db: &::ignite_core::Database,
+                id: i64,
+                input: #input_name,
+            ) -> ::core::result::Result<#name, ::orbit_orm::Error> {
+                let values = #name::__ignite_values(&input, false);
+                let changed = <#name as ::orbit_orm::Model>::query()
+                    .where_eq(#pk_name, id)
+                    .update(db, &values)
+                    .await?;
+                if changed == 0 {
+                    return Err(::orbit_orm::Error::NotFound { table: <#name as ::orbit_orm::Model>::TABLE });
+                }
+                <#name as ::ignite_core::IgniteResource>::find(db, id)
+                    .await?
+                    .ok_or(::orbit_orm::Error::NotFound { table: <#name as ::orbit_orm::Model>::TABLE })
+            }
+
+            async fn delete(
+                db: &::ignite_core::Database,
+                id: i64,
+            ) -> ::core::result::Result<u64, ::orbit_orm::Error> {
+                <#name as ::orbit_orm::Model>::query()
+                    .where_eq(#pk_name, id)
+                    .delete(db)
+                    .await
+            }
+
+            fn validate(
+                form: &::ignite_core::FormInput,
+            ) -> ::core::result::Result<#input_name, ::ignite_core::FieldErrors> {
+                #name::__ignite_validate(form, true)
+            }
+
+            fn validate_update(
+                form: &::ignite_core::FormInput,
+            ) -> ::core::result::Result<#input_name, ::ignite_core::FieldErrors> {
+                #name::__ignite_validate(form, false)
+            }
+
+            #options_fn
+        }
     })
+}
+
+/// One block of the generated `__ignite_values`: pushes the column of `field` when the input
+/// has a value for it. An `Option` that is `None` is written as NULL on create and skipped on
+/// update.
+fn value_step(field: &Field) -> TokenStream2 {
+    let ident = &field.ident;
+    let column = ident.to_string();
+    let convert = value_of(field.base, quote! { x });
+    // A password's input is an `Option` too, so a blank edit leaves the column alone.
+    if field.optional || field.is_password {
+        quote! {
+            match &input.#ident {
+                ::core::option::Option::Some(x) => values.push((#column, #convert)),
+                ::core::option::Option::None if creating => values.push((#column, ::orbit_orm::Value::Null)),
+                ::core::option::Option::None => {}
+            }
+        }
+    } else {
+        quote! {
+            {
+                let x = &input.#ident;
+                values.push((#column, #convert));
+            }
+        }
+    }
+}
+
+/// The `Value` of a reference `x` to a field's base value.
+fn value_of(base: Base, x: TokenStream2) -> TokenStream2 {
+    match base {
+        Base::Text => quote! { ::orbit_orm::Value::from(#x.as_str()) },
+        Base::Integer => quote! { ::orbit_orm::Value::from(*#x as i64) },
+        Base::Decimal => quote! { ::orbit_orm::Value::from(*#x as f64) },
+        Base::Bool | Base::Date | Base::DateTime => quote! { ::orbit_orm::Value::from(*#x) },
+    }
 }
 
 /// The `#[ignite(latest_records(...))]` attribute, as written.
@@ -529,7 +546,7 @@ fn struct_attrs(input: &DeriveInput) -> syn::Result<StructAttrs> {
     let table = table.ok_or_else(|| {
         syn::Error::new_spanned(
             &input.ident,
-            "IgniteResource needs #[ignite(table = <diesel table module>)]",
+            "IgniteResource needs #[ignite(table = <table name>)]",
         )
     })?;
     Ok((table, title, singular, latest))
@@ -698,7 +715,7 @@ fn field_attrs(field: &syn::Field) -> syn::Result<Field> {
     if belongs_to.is_some() != display.is_some() {
         return Err(syn::Error::new_spanned(
             &ty,
-            "belongs_to and display go together: belongs_to = <table module>, display = <column>",
+            "belongs_to and display go together: belongs_to = <model type>, display = <column>",
         ));
     }
     if options.is_some() && belongs_to.is_some() {
@@ -995,17 +1012,18 @@ fn options_method(lookups: &[&Field]) -> TokenStream2 {
     let arms = lookups.iter().map(|f| {
         let name_lit = f.ident.to_string();
         match f.lookup.as_ref().expect("checked: a lookup field") {
-            Lookup::Dynamic(path) => quote! { #name_lit => #path(conn), },
+            Lookup::Dynamic(path) => quote! { #name_lit => #path(db).await, },
             Lookup::Related { table, display } => {
                 let key_ty = &f.inner;
+                let display_lit = display.to_string();
                 quote! {
                     #name_lit => {
-                        #[allow(unused_imports)]
-                        use #table as __related;
-                        let rows: ::std::vec::Vec<(#key_ty, ::std::string::String)> = __related::table
-                            .select((__related::id, __related::#display))
-                            .order(__related::#display.asc())
-                            .load(conn)?;
+                        let rows: ::std::vec::Vec<(#key_ty, ::std::string::String)> =
+                            <#table as ::orbit_orm::Model>::query()
+                                .select(&[<#table as ::orbit_orm::Model>::PRIMARY_KEY, #display_lit])
+                                .order_by(#display_lit, ::orbit_orm::Direction::Asc)
+                                .get_as(db)
+                                .await?;
                         ::core::result::Result::Ok(
                             rows.into_iter().map(|(id, label)| (id.to_string(), label)).collect(),
                         )
@@ -1015,12 +1033,10 @@ fn options_method(lookups: &[&Field]) -> TokenStream2 {
         }
     });
     quote! {
-        fn options(
-            conn: &mut ::diesel::mysql::MysqlConnection,
+        async fn options(
+            db: &::ignite_core::Database,
             field: &str,
-        ) -> ::diesel::result::QueryResult<::std::vec::Vec<(::std::string::String, ::std::string::String)>> {
-            #[allow(unused_imports)]
-            use ::diesel::prelude::*;
+        ) -> ::core::result::Result<::std::vec::Vec<(::std::string::String, ::std::string::String)>, ::orbit_orm::Error> {
             match field {
                 #(#arms)*
                 _ => ::core::result::Result::Ok(::std::vec::Vec::new()),

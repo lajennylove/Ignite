@@ -15,7 +15,7 @@ fn list_shows_the_first_row_text() {
         .into_string()
         .unwrap();
 
-    // The first row of a text query used to come back empty. See the Diesel fork pinned in Cargo.toml.
+    // The first row of a text query must not come back empty.
     assert!(body.contains("Apple"), "first row missing: {body}");
     assert!(body.contains("Banana"));
     assert!(!body.contains("Cherry"), "page should hold two rows");

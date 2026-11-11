@@ -1,5 +1,5 @@
 error: unknown ignite attribute; expected label, form_type, required, primary_key, searchable, sortable, hidden_on_index, options, belongs_to, display or step
-  --> tests/fail/unknown_attribute.rs:16:14
-   |
-16 |     #[ignite(colour = "red")]
-   |              ^^^^^^
+ --> tests/fail/unknown_attribute.rs:8:14
+  |
+8 |     #[ignite(colour = "red")]
+  |              ^^^^^^

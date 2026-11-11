@@ -4,30 +4,23 @@
 
 mod common;
 
-use common::{client, reset, signed_in};
-use diesel::mysql::MysqlConnection;
-use diesel::prelude::*;
-use diesel::sql_query;
+use common::{client, reset, signed_in, test_db};
 use rocket::http::Status;
 
 #[test]
 fn a_failed_session_query_is_500_and_does_not_redirect_to_login() {
     let _guard = reset();
     let client = signed_in(None);
-    let mut conn = MysqlConnection::establish(&common::database_url()).expect("connect");
+    let conn = test_db();
 
     // Make the session lookup fail. The table comes back before any assertion runs,
     // so a failed assertion does not leave the next test without its table.
-    sql_query("RENAME TABLE sessions TO sessions_away")
-        .execute(&mut conn)
-        .unwrap();
+    conn.exec("RENAME TABLE sessions TO sessions_away");
     let response = client.get("/admin").dispatch();
     let status = response.status();
     let location = response.headers().get_one("Location").map(str::to_string);
     let body = response.into_string().unwrap_or_default();
-    sql_query("RENAME TABLE sessions_away TO sessions")
-        .execute(&mut conn)
-        .unwrap();
+    conn.exec("RENAME TABLE sessions_away TO sessions");
 
     assert_eq!(status, Status::InternalServerError);
     assert!(

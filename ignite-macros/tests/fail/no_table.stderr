@@ -1,4 +1,4 @@
-error: IgniteResource needs #[ignite(table = <diesel table module>)]
+error: IgniteResource needs #[ignite(table = <table name>)]
  --> tests/fail/no_table.rs:4:12
   |
 4 | pub struct Widget {

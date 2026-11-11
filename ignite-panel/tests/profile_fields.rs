@@ -3,8 +3,7 @@
 
 mod common;
 
-use common::{reset, with_token, Widgets, EMAIL, PASSWORD};
-use diesel::Connection;
+use common::{reset, test_db, with_token, Widgets, EMAIL, PASSWORD};
 use ignite_core::{Field, FieldKind};
 use ignite_panel::{users, Ignite};
 use rocket::http::{ContentType, Status};
@@ -64,8 +63,8 @@ fn save<'c>(client: &'c Client, body: &str) -> rocket::local::blocking::LocalRes
 
 /// The stored profile JSON of the test user, read straight from the database.
 fn stored_profile() -> String {
-    let mut conn = diesel::mysql::MysqlConnection::establish(&common::database_url()).unwrap();
-    users::find_by_email(&mut conn, "ada@example.test")
+    let conn = test_db();
+    conn.run(users::find_by_email(&conn.db, "ada@example.test"))
         .unwrap()
         .expect("the user")
         .profile

@@ -5,11 +5,8 @@
 mod common;
 
 use chrono::{Duration, Utc};
-use common::{client, reset, with_token, EMAIL, PASSWORD};
-use diesel::mysql::MysqlConnection;
-use diesel::prelude::*;
-use diesel::sql_query;
-use diesel::sql_types::{Datetime, Text};
+use common::{client, reset, test_db, with_token, EMAIL, PASSWORD};
+use orbit_orm::{raw, Value};
 use rocket::http::{ContentType, Status};
 use rocket::local::blocking::{Client, LocalResponse};
 
@@ -139,30 +136,31 @@ fn one_address_does_not_lock_out_other_emails() {
 #[test]
 fn a_failure_deletes_the_rows_whose_window_has_ended() {
     let _guard = reset();
-    let mut conn = MysqlConnection::establish(&common::database_url()).unwrap();
+    let conn = test_db();
     let long_ago = Utc::now().naive_utc() - Duration::hours(1);
     let recent = Utc::now().naive_utc() - Duration::seconds(10);
     for (key, start) in [
         ("stale@example.test|203.0.113.1", long_ago),
         ("live@example.test|203.0.113.1", recent),
     ] {
-        sql_query(
+        conn.exec_with(
             "INSERT INTO login_throttles (throttle_key, hits, window_start) VALUES (?, 2, ?)",
-        )
-        .bind::<Text, _>(key)
-        .bind::<Datetime, _>(start)
-        .execute(&mut conn)
-        .unwrap();
+            &[Value::from(key), Value::from(start)],
+        );
     }
 
     let client = client(None);
     attempt(&client, "random@example.test", "wrong-password", HOME);
 
-    let keys: Vec<String> = sql_query("SELECT throttle_key FROM login_throttles")
-        .load::<KeyRow>(&mut conn)
-        .unwrap()
+    let keys: Vec<String> = conn
+        .run(raw::fetch_all::<(String,)>(
+            &conn.db,
+            "SELECT throttle_key FROM login_throttles",
+            &[],
+        ))
+        .expect("read the throttle keys")
         .into_iter()
-        .map(|row| row.throttle_key)
+        .map(|(key,)| key)
         .collect();
     assert!(
         !keys.iter().any(|k| k.starts_with("stale@")),
@@ -172,10 +170,4 @@ fn a_failure_deletes_the_rows_whose_window_has_ended() {
         keys.iter().any(|k| k.starts_with("live@")),
         "live row kept: {keys:?}"
     );
-}
-
-#[derive(QueryableByName)]
-struct KeyRow {
-    #[diesel(sql_type = Text)]
-    throttle_key: String,
 }

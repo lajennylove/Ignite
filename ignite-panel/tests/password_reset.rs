@@ -4,10 +4,6 @@
 mod common;
 
 use common::*;
-use diesel::mysql::MysqlConnection;
-use diesel::prelude::*;
-use diesel::sql_query;
-use diesel::sql_types::{BigInt, Text};
 use ignite_panel::authz::{self, SUPER_ADMIN};
 use ignite_panel::{users, Message, RecordingMailer};
 use rocket::http::{ContentType, Status};
@@ -17,35 +13,30 @@ const ADA: &str = "ada@example.test";
 const ADA_PASSWORD: &str = "a-long-password";
 const NEW_PASSWORD: &str = "a-brand-new-password";
 
-#[derive(QueryableByName)]
-struct CountRow {
-    #[diesel(sql_type = BigInt)]
-    count: i64,
-}
-
-fn connection() -> MysqlConnection {
-    MysqlConnection::establish(&database_url()).expect("connect to ignite_test")
+fn connection() -> TestDb {
+    test_db()
 }
 
 /// Creates Ada, a super-admin, next to the test user.
-fn reset_with_ada() -> (std::sync::MutexGuard<'static, ()>, MysqlConnection) {
+fn reset_with_ada() -> (std::sync::MutexGuard<'static, ()>, TestDb) {
     let guard = reset();
-    let mut conn = connection();
-    users::create_user(&mut conn, "Ada", ADA, ADA_PASSWORD).expect("create Ada");
-    authz::assign_role(&mut conn, ADA, SUPER_ADMIN).expect("make Ada a super-admin");
+    let conn = connection();
+    conn.run(users::create_user(&conn.db, "Ada", ADA, ADA_PASSWORD))
+        .expect("create Ada");
+    conn.run(authz::assign_role(&conn.db, ADA, SUPER_ADMIN))
+        .expect("make Ada a super-admin");
     (guard, conn)
 }
 
-fn sessions_of(conn: &mut MysqlConnection, user_id: i64) -> i64 {
-    sql_query("SELECT COUNT(*) AS count FROM sessions WHERE user_id = ?")
-        .bind::<BigInt, _>(user_id)
-        .get_result::<CountRow>(conn)
-        .expect("count the sessions")
-        .count
+fn sessions_of(conn: &TestDb, user_id: i64) -> i64 {
+    conn.count(
+        "SELECT COUNT(*) FROM sessions WHERE user_id = ?",
+        &[user_id.into()],
+    )
 }
 
-fn user_id(conn: &mut MysqlConnection, email: &str) -> i64 {
-    users::find_by_email(conn, email)
+fn user_id(conn: &TestDb, email: &str) -> i64 {
+    conn.run(users::find_by_email(&conn.db, email))
         .unwrap()
         .expect("the user exists")
         .id
@@ -199,23 +190,24 @@ fn a_failing_mailer_does_not_change_the_answer() {
 
 #[test]
 fn an_expired_link_is_rejected() {
-    let (_guard, mut conn) = reset_with_ada();
+    let (_guard, conn) = reset_with_ada();
     let mailer = RecordingMailer::new();
     let client = client_with_mailer(None, mailer.clone());
     request_link(&client, ADA);
     let path = link_path(&mailer.sent()[0]);
     let token = token_of(&path);
 
-    sql_query("UPDATE password_reset_tokens SET created_at = created_at - INTERVAL 2 HOUR WHERE email = ?")
-        .bind::<Text, _>(ADA)
-        .execute(&mut conn)
-        .unwrap();
+    conn.exec_with(
+        "UPDATE password_reset_tokens SET created_at = created_at - INTERVAL 2 HOUR WHERE email = ?",
+        &[ADA.into()],
+    );
 
     let status = reset_with(&client, &token, ADA, NEW_PASSWORD);
     assert_eq!(status, Status::UnprocessableEntity);
-    let id = user_id(&mut conn, ADA);
+    let id = user_id(&conn, ADA);
     assert!(users::verify_password(
-        &users::find_by_id(&mut conn, id)
+        &conn
+            .run(users::find_by_id(&conn.db, id))
             .unwrap()
             .unwrap()
             .password_hash,
@@ -240,21 +232,20 @@ fn a_link_works_once() {
         Status::UnprocessableEntity,
         "the used link is refused"
     );
-    let mut conn = connection();
-    let rows = sql_query("SELECT COUNT(*) AS count FROM password_reset_tokens WHERE email = ?")
-        .bind::<Text, _>(ADA)
-        .get_result::<CountRow>(&mut conn)
-        .unwrap()
-        .count;
+    let conn = connection();
+    let rows = conn.count(
+        "SELECT COUNT(*) FROM password_reset_tokens WHERE email = ?",
+        &[ADA.into()],
+    );
     assert_eq!(rows, 0, "the used link is deleted");
 }
 
 #[test]
 fn a_reset_ends_every_session_of_the_user() {
-    let (_guard, mut conn) = reset_with_ada();
-    let id = user_id(&mut conn, ADA);
+    let (_guard, conn) = reset_with_ada();
+    let id = user_id(&conn, ADA);
     let ada = signed_in_as(None, ADA, ADA_PASSWORD);
-    assert!(sessions_of(&mut conn, id) > 0, "Ada is signed in");
+    assert!(sessions_of(&conn, id) > 0, "Ada is signed in");
 
     let mailer = RecordingMailer::new();
     let forgot = client_with_mailer(None, mailer.clone());
@@ -265,7 +256,7 @@ fn a_reset_ends_every_session_of_the_user() {
         Status::SeeOther
     );
 
-    assert_eq!(sessions_of(&mut conn, id), 0, "every session of Ada ended");
+    assert_eq!(sessions_of(&conn, id), 0, "every session of Ada ended");
     let page = ada.get("/admin").dispatch();
     assert_eq!(
         page.status(),
@@ -298,9 +289,9 @@ fn the_forgot_endpoint_is_throttled() {
 
 #[test]
 fn a_disabled_user_gets_no_link_and_the_same_answer() {
-    let (_guard, mut conn) = reset_with_ada();
-    let id = user_id(&mut conn, ADA);
-    users::disable(&mut conn, id).expect("disable Ada");
+    let (_guard, conn) = reset_with_ada();
+    let id = user_id(&conn, ADA);
+    conn.run(users::disable(&conn.db, id)).expect("disable Ada");
 
     let mailer = RecordingMailer::new();
     let client = client_with_mailer(None, mailer.clone());

@@ -1,7 +1,8 @@
 //! The trait a table implements to be managed by the admin panel.
 
-use diesel::mysql::MysqlConnection;
-use diesel::result::QueryResult;
+use std::future::Future;
+
+use orbit_orm::{Database, Error};
 use serde::Serialize;
 
 use crate::field::{Column, Field};
@@ -9,11 +10,28 @@ use crate::form::{FieldErrors, FormInput};
 use crate::query::{ListQuery, Page};
 use crate::widget::{LatestRecords, StatWidget};
 
+/// Checks at compile time that `table` is `expected`. The derive uses it to check that the
+/// `table` attribute names the same table as the Orbit model's `TABLE`.
+pub const fn table_name_is(table: &str, expected: &str) -> bool {
+    let (a, b) = (table.as_bytes(), expected.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < a.len() {
+        if a[i] != b[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
 /// A table of records the panel can list, create, edit and delete.
 ///
-/// Implement it by hand, or with `#[derive(IgniteResource)]`. The panel calls the query methods with a connection borrowed
-/// from the pool, and renders the forms from [`fields`](Self::fields) and the
-/// list from [`columns`](Self::columns).
+/// Implement it by hand, or with `#[derive(IgniteResource)]`. The panel calls the query methods
+/// with the app's [`Database`], and renders the forms from [`fields`](Self::fields) and the list
+/// from [`columns`](Self::columns). The query methods are async, so each returns a future.
 pub trait IgniteResource: Send + Sync + 'static {
     /// One row, as the database returns it. It must serialize to JSON with
     /// field names matching `fields()` and `columns()`.
@@ -32,9 +50,9 @@ pub trait IgniteResource: Send + Sync + 'static {
 
     /// Stat cards for the dashboard, in display order. The default is none.
     /// Override it to show counts, such as the total number of rows.
-    fn widgets(conn: &mut MysqlConnection) -> QueryResult<Vec<StatWidget>> {
-        let _ = conn;
-        Ok(Vec::new())
+    fn widgets(db: &Database) -> impl Future<Output = Result<Vec<StatWidget>, Error>> + Send {
+        let _ = db;
+        async { Ok(Vec::new()) }
     }
 
     /// The dashboard table of the newest records, or `None` for no table (added in v1).
@@ -44,9 +62,12 @@ pub trait IgniteResource: Send + Sync + 'static {
 
     /// Up to `limit` records, newest first (added in v1). The panel calls it with the
     /// `limit` of [`latest_records`](Self::latest_records). The default is no records.
-    fn latest(conn: &mut MysqlConnection, limit: i64) -> QueryResult<Vec<Self::Record>> {
-        let _ = (conn, limit);
-        Ok(Vec::new())
+    fn latest(
+        db: &Database,
+        limit: i64,
+    ) -> impl Future<Output = Result<Vec<Self::Record>, Error>> + Send {
+        let _ = (db, limit);
+        async { Ok(Vec::new()) }
     }
 
     /// Form fields, in display order.
@@ -59,22 +80,37 @@ pub trait IgniteResource: Send + Sync + 'static {
     /// shows the form, to fill the select, and when it checks a submitted value. The
     /// default is no choices. `#[derive(IgniteResource)]` writes it for `options = ...`
     /// and `belongs_to = ...`.
-    fn options(conn: &mut MysqlConnection, field: &str) -> QueryResult<Vec<(String, String)>> {
-        let _ = (conn, field);
-        Ok(Vec::new())
+    fn options(
+        db: &Database,
+        field: &str,
+    ) -> impl Future<Output = Result<Vec<(String, String)>, Error>> + Send {
+        let _ = (db, field);
+        async { Ok(Vec::new()) }
     }
 
     /// Returns one page of rows that match `query`.
-    fn list(conn: &mut MysqlConnection, query: &ListQuery) -> QueryResult<Page<Self::Record>>;
+    fn list(
+        db: &Database,
+        query: &ListQuery,
+    ) -> impl Future<Output = Result<Page<Self::Record>, Error>> + Send;
     /// Returns the row with `id`, or `None` if there is no such row.
-    fn find(conn: &mut MysqlConnection, id: i64) -> QueryResult<Option<Self::Record>>;
+    fn find(
+        db: &Database,
+        id: i64,
+    ) -> impl Future<Output = Result<Option<Self::Record>, Error>> + Send;
     /// Inserts a row from `input` and returns it.
-    fn create(conn: &mut MysqlConnection, input: Self::Input) -> QueryResult<Self::Record>;
+    fn create(
+        db: &Database,
+        input: Self::Input,
+    ) -> impl Future<Output = Result<Self::Record, Error>> + Send;
     /// Updates the row with `id` from `input` and returns it.
-    fn update(conn: &mut MysqlConnection, id: i64, input: Self::Input)
-        -> QueryResult<Self::Record>;
+    fn update(
+        db: &Database,
+        id: i64,
+        input: Self::Input,
+    ) -> impl Future<Output = Result<Self::Record, Error>> + Send;
     /// Deletes the row with `id` and returns the number of rows deleted.
-    fn delete(conn: &mut MysqlConnection, id: i64) -> QueryResult<usize>;
+    fn delete(db: &Database, id: i64) -> impl Future<Output = Result<u64, Error>> + Send;
 
     /// Turns the submitted form into `Input` for a create, or returns one message
     /// per field. Call [`Field::check_required`] for required fields.

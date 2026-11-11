@@ -1,16 +1,8 @@
 use ignite_core::IgniteResource;
 
-mod schema {
-    diesel::table! {
-        widgets (id) {
-            id -> Integer,
-            pin -> Text,
-        }
-    }
-}
-
-#[derive(serde::Serialize, IgniteResource)]
-#[ignite(table = schema::widgets)]
+#[derive(orbit_orm::OrbitModel, serde::Serialize, IgniteResource)]
+#[orbit(table = "widgets")]
+#[ignite(table = widgets)]
 #[ignite(latest_records(columns = "pin"))]
 pub struct Widget {
     id: i32,

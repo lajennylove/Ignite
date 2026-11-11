@@ -4,9 +4,7 @@ mod common;
 
 use std::process::{Command, Stdio};
 
-use common::{client, database_url, reset, EMAIL};
-use diesel::mysql::MysqlConnection;
-use diesel::Connection;
+use common::{client, database_url, reset, test_db, TestDb, EMAIL};
 use ignite_panel::authz::SUPER_ADMIN;
 use ignite_panel::users;
 
@@ -28,8 +26,8 @@ fn text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
 
-fn connection() -> MysqlConnection {
-    MysqlConnection::establish(&database_url()).expect("connect to ignite_test")
+fn connection() -> TestDb {
+    test_db()
 }
 
 #[test]
@@ -89,8 +87,14 @@ fn role_grant_gives_a_permission_that_the_app_registered_and_refuses_an_unknown_
 fn user_role_add_lists_and_removes_a_role() {
     let _guard = reset();
     let _ = client(None);
-    let mut conn = connection();
-    users::create_user(&mut conn, "Ada", "ada@example.test", "a-long-password").unwrap();
+    let conn = connection();
+    conn.run(users::create_user(
+        &conn.db,
+        "Ada",
+        "ada@example.test",
+        "a-long-password",
+    ))
+    .unwrap();
     assert_eq!(
         ignite(&["role", "create", "editors"]).status.code(),
         Some(0)
@@ -143,13 +147,13 @@ fn the_cli_refuses_to_remove_the_last_super_admin() {
     let listed = ignite(&["user", "roles", EMAIL]);
     assert_eq!(text(&listed.stdout).trim(), SUPER_ADMIN);
 
-    let mut conn = connection();
-    users::create_user(
-        &mut conn,
+    let conn = connection();
+    conn.run(users::create_user(
+        &conn.db,
         "Second",
         "second@example.test",
         "a-long-password",
-    )
+    ))
     .unwrap();
     assert_eq!(
         ignite(&["user", "role", "add", "second@example.test", SUPER_ADMIN])

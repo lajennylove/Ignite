@@ -5,106 +5,78 @@
 mod common;
 
 use chrono::NaiveDate;
-use common::{reset, with_token, EMAIL, PASSWORD};
-use diesel::mysql::MysqlConnection;
-use diesel::prelude::*;
-use diesel::result::QueryResult;
-use diesel::sql_query;
-use ignite_core::IgniteResource;
+use common::{reset, test_db, with_token, EMAIL, PASSWORD};
+use ignite_core::{Database, IgniteResource};
 use ignite_panel::Ignite;
+use orbit_orm::{Direction, Model, OrbitModel};
 use rocket::http::{ContentType, Status};
 use rocket::local::blocking::Client;
 use serde::Serialize;
 
-mod schema {
-    diesel::table! {
-        categories (id) {
-            id -> Integer,
-            name -> Text,
-        }
-    }
-
-    diesel::table! {
-        products (id) {
-            id -> Integer,
-            name -> Text,
-            category_id -> Nullable<Integer>,
-            status -> Text,
-            tag -> Nullable<Text>,
-            price -> Double,
-            stock -> SmallInt,
-            launch -> Nullable<Timestamp>,
-        }
-    }
-}
-
-#[derive(diesel::Queryable, diesel::Selectable, Serialize, IgniteResource)]
-#[diesel(table_name = schema::categories)]
-#[ignite(table = schema::categories, title = "Categories")]
+#[derive(Debug, Clone, OrbitModel, Serialize, IgniteResource)]
+#[orbit(table = "categories")]
+#[ignite(table = categories, title = "Categories")]
 pub struct Category {
     id: i32,
+    #[orbit(fillable)]
     #[ignite(searchable)]
     name: String,
 }
 
 /// The tags a product may take: the names of the categories, loaded when the form shows.
-fn tag_choices(conn: &mut MysqlConnection) -> QueryResult<Vec<(String, String)>> {
-    schema::categories::table
-        .select(schema::categories::name)
-        .order(schema::categories::name.asc())
-        .load::<String>(conn)
-        .map(|names| names.into_iter().map(|name| (name.clone(), name)).collect())
+async fn tag_choices(db: &Database) -> Result<Vec<(String, String)>, orbit_orm::Error> {
+    let names: Vec<(String,)> = Category::query()
+        .select(&["name"])
+        .order_by("name", Direction::Asc)
+        .get_as(db)
+        .await?;
+    Ok(names
+        .into_iter()
+        .map(|(name,)| (name.clone(), name))
+        .collect())
 }
 
-#[derive(diesel::Queryable, diesel::Selectable, Serialize, IgniteResource)]
-#[diesel(table_name = schema::products)]
-#[ignite(table = schema::products, title = "Products")]
+#[derive(Debug, Clone, OrbitModel, Serialize, IgniteResource)]
+#[orbit(table = "products")]
+#[ignite(table = products, title = "Products")]
 pub struct Product {
     id: i32,
+    #[orbit(fillable)]
     #[ignite(searchable, sortable)]
     name: String,
-    #[ignite(belongs_to = schema::categories, display = name, label = "Category")]
+    #[orbit(fillable)]
+    #[ignite(belongs_to = Category, display = name, label = "Category")]
     category_id: Option<i32>,
+    #[orbit(fillable)]
     #[ignite(options = [("draft", "Draft"), ("published", "Published")])]
     status: String,
+    #[orbit(fillable)]
     #[ignite(options = tag_choices)]
     tag: Option<String>,
+    #[orbit(fillable)]
     #[ignite(step = "0.01", sortable)]
     price: f64,
+    #[orbit(fillable)]
     stock: i16,
+    #[orbit(fillable)]
     launch: Option<chrono::NaiveDateTime>,
-}
-
-fn database_url() -> String {
-    std::env::var("DATABASE_URL")
-        .expect("set DATABASE_URL to the test database, such as mysql://user@localhost/ignite_test")
 }
 
 /// Resets the shared database, creates the two tables, and seeds two categories.
 fn setup() -> std::sync::MutexGuard<'static, ()> {
     let guard = reset();
-    let mut conn = MysqlConnection::establish(&database_url()).unwrap();
-    sql_query("DROP TABLE IF EXISTS products")
-        .execute(&mut conn)
-        .unwrap();
-    sql_query("DROP TABLE IF EXISTS categories")
-        .execute(&mut conn)
-        .unwrap();
-    sql_query(
+    let conn = test_db();
+    conn.exec("DROP TABLE IF EXISTS products");
+    conn.exec("DROP TABLE IF EXISTS categories");
+    conn.exec(
         "CREATE TABLE categories (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(255) NOT NULL)",
-    )
-    .execute(&mut conn)
-    .unwrap();
-    sql_query(
+    );
+    conn.exec(
         "CREATE TABLE products (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(255) NOT NULL, \
          category_id INT NULL, status VARCHAR(20) NOT NULL, tag VARCHAR(255) NULL, \
          price DOUBLE NOT NULL, stock SMALLINT NOT NULL, launch DATETIME NULL)",
-    )
-    .execute(&mut conn)
-    .unwrap();
-    sql_query("INSERT INTO categories (name) VALUES ('Books'), ('Games')")
-        .execute(&mut conn)
-        .unwrap();
+    );
+    conn.exec("INSERT INTO categories (name) VALUES ('Books'), ('Games')");
     guard
 }
 
@@ -134,11 +106,7 @@ fn signed_in() -> Client {
 }
 
 fn product_count() -> i64 {
-    let mut conn = MysqlConnection::establish(&database_url()).unwrap();
-    schema::products::table
-        .count()
-        .get_result(&mut conn)
-        .unwrap()
+    test_db().count("SELECT COUNT(*) FROM products", &[])
 }
 
 /// A valid product form, with the given overrides applied to the defaults.
@@ -295,10 +263,7 @@ fn a_select_loaded_at_request_time_accepts_only_the_loaded_choices() {
         .contains("Choose one of the options."));
 
     // A category added after the app started is a valid choice at once.
-    let mut conn = MysqlConnection::establish(&database_url()).unwrap();
-    sql_query("INSERT INTO categories (name) VALUES ('Puzzles')")
-        .execute(&mut conn)
-        .unwrap();
+    test_db().exec("INSERT INTO categories (name) VALUES ('Puzzles')");
     let created = client
         .post("/admin/products")
         .header(ContentType::Form)
@@ -344,12 +309,12 @@ fn a_decimal_is_stored_as_a_number() {
         .dispatch();
     assert_eq!(created.status(), Status::SeeOther);
 
-    let mut conn = MysqlConnection::establish(&database_url()).unwrap();
-    let price: f64 = schema::products::table
-        .find(1)
-        .select(schema::products::price)
-        .first(&mut conn)
-        .unwrap();
+    let conn = test_db();
+    let price = conn
+        .run(Product::query().find(&conn.db, 1))
+        .unwrap()
+        .expect("the product")
+        .price;
     assert_eq!(price, 12.25);
 }
 
@@ -390,12 +355,12 @@ fn a_date_time_refuses_what_is_not_one_and_shows_readably() {
         .unwrap();
     assert!(list.contains("10 Nov 2026, 14:30"));
 
-    let mut conn = MysqlConnection::establish(&database_url()).unwrap();
-    let launch: Option<chrono::NaiveDateTime> = schema::products::table
-        .find(1)
-        .select(schema::products::launch)
-        .first(&mut conn)
-        .unwrap();
+    let conn = test_db();
+    let launch = conn
+        .run(Product::query().find(&conn.db, 1))
+        .unwrap()
+        .expect("the product")
+        .launch;
     assert_eq!(
         launch,
         NaiveDate::from_ymd_opt(2026, 11, 10)

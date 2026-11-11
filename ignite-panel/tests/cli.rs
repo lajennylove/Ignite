@@ -1,5 +1,7 @@
 //! The `ignite` command checks its configuration before it asks for a password.
 
+mod common;
+
 use std::process::{Command, Stdio};
 
 #[test]
@@ -86,10 +88,9 @@ fn a_piped_password_creates_the_user_with_an_argon2_hash() {
     );
     assert!(String::from_utf8_lossy(&output.stdout).contains("Created user"));
 
-    let url = std::env::var("DATABASE_URL").unwrap();
-    use diesel::Connection;
-    let mut conn = diesel::mysql::MysqlConnection::establish(&url).unwrap();
-    let user = ignite_panel::users::find_by_email(&mut conn, &email)
+    let conn = common::test_db();
+    let user = conn
+        .run(ignite_panel::users::find_by_email(&conn.db, &email))
         .unwrap()
         .expect("created");
     assert!(user.password_hash.starts_with("$argon2id$"));

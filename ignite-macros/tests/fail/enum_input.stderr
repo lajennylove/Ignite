@@ -1,5 +1,5 @@
 error: IgniteResource can only be derived for a struct
-  --> tests/fail/enum_input.rs:13:10
-   |
-13 | pub enum Widget {
-   |          ^^^^^^
+ --> tests/fail/enum_input.rs:5:10
+  |
+5 | pub enum Widget {
+  |          ^^^^^^

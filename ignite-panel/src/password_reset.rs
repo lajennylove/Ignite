@@ -12,10 +12,8 @@ use std::net::IpAddr;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use chrono::{Duration, NaiveDateTime, Utc};
-use diesel::mysql::MysqlConnection;
-use diesel::prelude::*;
-use diesel::result::QueryResult;
-use ignite_core::{FieldErrors, Pool};
+use ignite_core::FieldErrors;
+use orbit_orm::{Database, Error, Executor, Model, Operator, OrbitModel};
 use propel_rocket::PropelView;
 use rocket::data::Data;
 use rocket::http::{CookieJar, Status};
@@ -28,7 +26,7 @@ use crate::ignite::Registry;
 use crate::mail::Message;
 use crate::profile::MIN_PASSWORD_CHARS;
 use crate::proxy::{self, TrustedProxies};
-use crate::routes::{blocking, db_status, read_form, ClientIp, Reply};
+use crate::routes::{db_status, read_form, ClientIp, Reply};
 use crate::session::{check_csrf, csrf_token, set_flash, take_flash};
 use crate::sessions;
 use crate::throttle;
@@ -50,13 +48,17 @@ const SENT_MESSAGE: &str =
 /// The answer to a reset whose link is wrong, used, or too old.
 const INVALID_LINK: &str = "This password reset link is invalid or has expired. Request a new one.";
 
-diesel::table! {
-    /// The reset links, one row for each email. See `migrations/20261115000000_password_reset_tokens`.
-    password_reset_tokens (email) {
-        email -> Text,
-        token -> Text,
-        created_at -> Timestamp,
-    }
+/// A reset link, one row for each email. See `migrations/20261115000000_password_reset_tokens`.
+#[derive(Debug, Clone, OrbitModel)]
+#[orbit(table = "password_reset_tokens", primary_key = "email")]
+#[allow(dead_code)]
+struct PasswordResetToken {
+    #[orbit(fillable)]
+    email: String,
+    #[orbit(fillable)]
+    token: String,
+    #[orbit(fillable)]
+    created_at: NaiveDateTime,
 }
 
 /// The routes of the reset, mounted under the panel's prefix with the other routes.
@@ -73,16 +75,16 @@ struct Issued {
 /// Makes a new link for `email`, replacing the earlier one. Returns `None` when a link was
 /// made in the last [`RESEND_SECONDS`], so nothing is made or sent. The row is locked while
 /// it is read, so two submits at once cannot both pass the check.
-fn issue(conn: &mut MysqlConnection, email: &str) -> QueryResult<Option<Issued>> {
-    conn.transaction(|conn| {
+async fn issue(db: &Database, email: &str) -> Result<Option<Issued>, Error> {
+    db.transaction(async |tx| {
         let now = Utc::now().naive_utc();
-        let last: Option<NaiveDateTime> = password_reset_tokens::table
-            .find(email)
-            .select(password_reset_tokens::created_at)
+        let last: Option<(NaiveDateTime,)> = PasswordResetToken::query()
+            .where_eq("email", email)
+            .select(&["created_at"])
             .for_update()
-            .first(conn)
-            .optional()?;
-        if let Some(sent) = last {
+            .first_as(&mut *tx)
+            .await?;
+        if let Some((sent,)) = last {
             if sent > now - Duration::seconds(RESEND_SECONDS) {
                 return Ok(None);
             }
@@ -90,38 +92,41 @@ fn issue(conn: &mut MysqlConnection, email: &str) -> QueryResult<Option<Issued>>
 
         let token = random_token();
         let hash = users::hash_password(&token).map_err(hash_error)?;
-        diesel::replace_into(password_reset_tokens::table)
-            .values((
-                password_reset_tokens::email.eq(email),
-                password_reset_tokens::token.eq(hash),
-                password_reset_tokens::created_at.eq(now),
-            ))
-            .execute(conn)?;
+        PasswordResetToken::query()
+            .replace(
+                &mut *tx,
+                &[
+                    ("email", email.into()),
+                    ("token", hash.as_str().into()),
+                    ("created_at", now.into()),
+                ],
+            )
+            .await?;
         // Links older than the expiry can never work again, so the table keeps none of them.
-        diesel::delete(
-            password_reset_tokens::table.filter(
-                password_reset_tokens::created_at.lt(now - Duration::minutes(EXPIRE_MINUTES)),
-            ),
-        )
-        .execute(conn)?;
+        PasswordResetToken::query()
+            .where_op(
+                "created_at",
+                Operator::Lt,
+                now - Duration::minutes(EXPIRE_MINUTES),
+            )
+            .delete(&mut *tx)
+            .await?;
         Ok(Some(Issued {
             token,
             idempotency_key: idempotency_key(email, now),
         }))
     })
+    .await
 }
 
 /// Whether `token` is the live link of `email`: the stored hash matches, and the link was
 /// made within [`EXPIRE_MINUTES`]. It does not use the link up.
-fn is_valid(conn: &mut MysqlConnection, email: &str, token: &str) -> QueryResult<bool> {
-    let row: Option<(String, NaiveDateTime)> = password_reset_tokens::table
-        .find(email)
-        .select((
-            password_reset_tokens::token,
-            password_reset_tokens::created_at,
-        ))
-        .first(conn)
-        .optional()?;
+async fn is_valid<'a>(db: impl Executor<'a>, email: &str, token: &str) -> Result<bool, Error> {
+    let row: Option<(String, NaiveDateTime)> = PasswordResetToken::query()
+        .where_eq("email", email)
+        .select(&["token", "created_at"])
+        .first_as(db)
+        .await?;
     let Some((hash, created_at)) = row else {
         return Ok(false);
     };
@@ -150,13 +155,18 @@ fn idempotency_key(email: &str, made: NaiveDateTime) -> String {
 }
 
 /// Turns a hashing failure into a database error, so the handlers have one error type.
-fn hash_error(error: impl std::fmt::Display) -> diesel::result::Error {
-    diesel::result::Error::SerializationError(Box::new(std::io::Error::other(error.to_string())))
+fn hash_error(error: impl std::fmt::Display) -> Error {
+    Error::Database(orbit_orm::__sqlx::Error::Protocol(format!(
+        "could not hash the password: {error}"
+    )))
 }
 
 /// Deletes the link of `email`, after it is used.
-fn consume(conn: &mut MysqlConnection, email: &str) -> QueryResult<usize> {
-    diesel::delete(password_reset_tokens::table.find(email)).execute(conn)
+async fn consume<'a>(db: impl Executor<'a>, email: &str) -> Result<u64, Error> {
+    PasswordResetToken::query()
+        .where_eq("email", email)
+        .delete(db)
+        .await
 }
 
 /// The panel's base URL for the links: `IGNITE_APP_URL` when the app set it, otherwise the
@@ -257,7 +267,7 @@ async fn forgot_send(
     client_ip: ClientIp,
     cookies: &CookieJar<'_>,
     registry: &State<Registry>,
-    pool: &State<Pool>,
+    db: &State<Database>,
     base: AppBase,
 ) -> Result<Reply, Status> {
     let form = read_form(body).await?;
@@ -266,11 +276,9 @@ async fn forgot_send(
     let key = forgot_key(&email, client_ip.0);
 
     // Refuse before any link is made while the key is at its limit.
-    let check = key.clone();
-    let waiting = blocking(pool, move |conn| {
-        throttle::retry_after(conn, &check, throttle::LIMIT).map_err(db_status)
-    })
-    .await?;
+    let waiting = throttle::retry_after(db.inner(), &key, throttle::LIMIT)
+        .await
+        .map_err(db_status)?;
     if let Some(seconds) = waiting {
         let message = format!("Too many requests. Try again in {seconds} seconds.");
         let page = forgot_view(
@@ -283,20 +291,20 @@ async fn forgot_send(
         return Ok(Reply::Throttled(seconds, page));
     }
 
-    let lookup = email.clone();
-    let issued = blocking(pool, move |conn| {
-        throttle::record_failure(conn, &key).map_err(db_status)?;
-        let user = users::find_by_email(conn, &lookup).map_err(db_status)?;
-        match user.filter(|user| user.disabled_at.is_none()) {
-            Some(_) => issue(conn, &lookup).map_err(db_status),
-            None => {
-                // Hash a value anyway, so an unknown email takes about as long as a known one.
-                let _ = users::hash_password(&lookup);
-                Ok(None)
-            }
+    throttle::record_failure(db.inner(), &key)
+        .await
+        .map_err(db_status)?;
+    let user = users::find_by_email(db.inner(), &email)
+        .await
+        .map_err(db_status)?;
+    let issued = match user.filter(|user| user.disabled_at.is_none()) {
+        Some(_) => issue(db.inner(), &email).await.map_err(db_status)?,
+        None => {
+            // Hash a value anyway, so an unknown email takes about as long as a known one.
+            let _ = users::hash_password(&email);
+            None
         }
-    })
-    .await?;
+    };
 
     if let Some(issued) = issued {
         let link = format!(
@@ -399,7 +407,7 @@ async fn reset_save(
     body: Data<'_>,
     cookies: &CookieJar<'_>,
     registry: &State<Registry>,
-    pool: &State<Pool>,
+    db: &State<Database>,
 ) -> Result<Reply, Status> {
     let form = read_form(body).await?;
     check_csrf(cookies, &registry.secret, form.get("_token"))?;
@@ -422,24 +430,9 @@ async fn reset_save(
         return Ok(Reply::Page(Status::UnprocessableEntity, page));
     }
 
-    let lookup = email.clone();
-    let reset = blocking(pool, move |conn| {
-        let user = users::find_by_email(conn, &lookup).map_err(db_status)?;
-        let Some(user) = user.filter(|user| user.disabled_at.is_none()) else {
-            return Ok(false);
-        };
-        if !is_valid(conn, &lookup, &token).map_err(db_status)? {
-            return Ok(false);
-        }
-        conn.transaction(|conn| {
-            users::update_password(conn, user.id, &password)?;
-            sessions::delete_for_user(conn, user.id)?;
-            consume(conn, &lookup)?;
-            Ok(true)
-        })
-        .map_err(db_status)
-    })
-    .await?;
+    let reset = finish_reset(db.inner(), &email, &token, &password)
+        .await
+        .map_err(db_status)?;
 
     if !reset {
         let page = reset_view(
@@ -462,6 +455,30 @@ async fn reset_save(
         "{}/login",
         registry.mount
     )))))
+}
+
+/// Sets the password of the user with `email` when the link is live. It ends the sessions and
+/// uses the link up in one transaction. Returns `false` when the link or the user is not valid.
+async fn finish_reset(
+    db: &Database,
+    email: &str,
+    token: &str,
+    password: &str,
+) -> Result<bool, Error> {
+    let user = users::find_by_email(db, email).await?;
+    let Some(user) = user.filter(|user| user.disabled_at.is_none()) else {
+        return Ok(false);
+    };
+    if !is_valid(db, email, token).await? {
+        return Ok(false);
+    }
+    db.transaction(async |tx| {
+        users::update_password(&mut *tx, user.id, password).await?;
+        sessions::delete_for_user(&mut *tx, user.id).await?;
+        consume(&mut *tx, email).await?;
+        Ok::<bool, Error>(true)
+    })
+    .await
 }
 
 /// Checks the new password: at least [`MIN_PASSWORD_CHARS`] characters, and the same twice.

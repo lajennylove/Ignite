@@ -1,19 +1,11 @@
 use ignite_core::IgniteResource;
 
-mod schema {
-    diesel::table! {
-        widgets (id) {
-            id -> Integer,
-            category_id -> Integer,
-        }
-    }
-}
-
-#[derive(serde::Serialize, IgniteResource)]
-#[ignite(table = schema::widgets)]
+#[derive(orbit_orm::OrbitModel, serde::Serialize, IgniteResource)]
+#[orbit(table = "widgets")]
+#[ignite(table = widgets)]
 pub struct Widget {
     id: i32,
-    #[ignite(belongs_to = schema::categories)]
+    #[ignite(belongs_to = Category)]
     category_id: i32,
 }
 

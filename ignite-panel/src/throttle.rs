@@ -9,24 +9,21 @@
 //! failure, so the table holds only live windows.
 
 use chrono::{Duration, NaiveDateTime, Utc};
-use diesel::mysql::MysqlConnection;
-use diesel::prelude::*;
-use diesel::result::QueryResult;
-use diesel::sql_query;
-use diesel::sql_types::{Datetime, Text};
+use orbit_orm::{raw, Database, Error, Executor, Model, Operator, OrbitModel};
 
 /// The failed attempts allowed per key (an email and an IP) in one window.
 pub(crate) const LIMIT: i64 = 5;
 /// The length of a window, in seconds.
 pub(crate) const WINDOW_SECONDS: i64 = 60;
 
-diesel::table! {
-    /// The login throttle counts. See `migrations/20261108020000_create_login_throttles`.
-    login_throttles (throttle_key) {
-        throttle_key -> Text,
-        hits -> Integer,
-        window_start -> Timestamp,
-    }
+/// A row of the `login_throttles` table. See `migrations/20261108020000_create_login_throttles`.
+#[derive(Debug, Clone, OrbitModel)]
+#[orbit(table = "login_throttles", primary_key = "throttle_key")]
+#[allow(dead_code)]
+pub(crate) struct LoginThrottle {
+    pub throttle_key: String,
+    pub hits: i32,
+    pub window_start: NaiveDateTime,
 }
 
 /// The key for an email and a client address: the lowercased, trimmed email, a `|`, and
@@ -47,21 +44,21 @@ pub(crate) fn password_key(email: &str, ip: Option<std::net::IpAddr>) -> String 
 }
 
 /// How many seconds until `key` may try again, if it is at its limit.
-pub(crate) fn retry_after(
-    conn: &mut MysqlConnection,
+pub(crate) async fn retry_after(
+    db: &Database,
     key: &str,
     limit: i64,
-) -> QueryResult<Option<i64>> {
+) -> Result<Option<i64>, Error> {
     let now = Utc::now().naive_utc();
-    let row: Option<(i64, NaiveDateTime)> = login_throttles::table
-        .filter(login_throttles::throttle_key.eq(key))
-        .select((login_throttles::hits, login_throttles::window_start))
-        .first::<(i32, NaiveDateTime)>(conn)
-        .optional()?
-        .map(|(hits, start)| (i64::from(hits), start));
+    let row: Option<(i32, NaiveDateTime)> = LoginThrottle::query()
+        .where_eq("throttle_key", key)
+        .select(&["hits", "window_start"])
+        .first_as(db)
+        .await?;
     let Some((hits, start)) = row else {
         return Ok(None);
     };
+    let hits = i64::from(hits);
     let ends = start + Duration::seconds(WINDOW_SECONDS);
     if ends <= now || hits < limit {
         return Ok(None);
@@ -72,36 +69,43 @@ pub(crate) fn retry_after(
 /// Counts one failed attempt against `key`. A window that has ended starts again at 1.
 /// Then deletes every row whose window has ended, for any key, so the table does not
 /// grow with every email that was ever tried.
-pub(crate) fn record_failure(conn: &mut MysqlConnection, key: &str) -> QueryResult<()> {
+pub(crate) async fn record_failure(db: &Database, key: &str) -> Result<(), Error> {
     let now = Utc::now().naive_utc();
     let cutoff = now - Duration::seconds(WINDOW_SECONDS);
-    sql_query(
+    raw::execute(
+        db,
         "INSERT INTO login_throttles (throttle_key, hits, window_start) VALUES (?, 1, ?) \
          ON DUPLICATE KEY UPDATE \
          hits = IF(window_start < ?, 1, hits + 1), \
          window_start = IF(window_start < ?, ?, window_start)",
+        &[
+            key.into(),
+            now.into(),
+            cutoff.into(),
+            cutoff.into(),
+            now.into(),
+        ],
     )
-    .bind::<Text, _>(key)
-    .bind::<Datetime, _>(now)
-    .bind::<Datetime, _>(cutoff)
-    .bind::<Datetime, _>(cutoff)
-    .bind::<Datetime, _>(now)
-    .execute(conn)?;
-    prune(conn, cutoff)?;
+    .await?;
+    prune(db, cutoff).await?;
     Ok(())
 }
 
 /// Deletes the rows whose window started before `cutoff`, which have ended. Uses the
 /// index on `window_start`.
-fn prune(conn: &mut MysqlConnection, cutoff: NaiveDateTime) -> QueryResult<usize> {
-    diesel::delete(login_throttles::table.filter(login_throttles::window_start.lt(cutoff)))
-        .execute(conn)
+async fn prune<'a>(db: impl Executor<'a>, cutoff: NaiveDateTime) -> Result<u64, Error> {
+    LoginThrottle::query()
+        .where_op("window_start", Operator::Lt, cutoff)
+        .delete(db)
+        .await
 }
 
 /// Clears the count for `key`, after a successful sign-in or password change.
-pub(crate) fn clear(conn: &mut MysqlConnection, key: &str) -> QueryResult<usize> {
-    diesel::delete(login_throttles::table.filter(login_throttles::throttle_key.eq(key)))
-        .execute(conn)
+pub(crate) async fn clear<'a>(db: impl Executor<'a>, key: &str) -> Result<u64, Error> {
+    LoginThrottle::query()
+        .where_eq("throttle_key", key)
+        .delete(db)
+        .await
 }
 
 #[cfg(test)]

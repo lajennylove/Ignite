@@ -3,9 +3,6 @@
 mod common;
 
 use common::{reset, signed_in, with_token, PASSWORD};
-use diesel::mysql::MysqlConnection;
-use diesel::prelude::*;
-use diesel::sql_query;
 use rocket::http::{ContentType, Header, Status};
 
 const PNG: &[u8] = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR";
@@ -36,11 +33,14 @@ fn picture_upload(token: &str, file: &[u8]) -> (Header<'static>, Vec<u8>) {
 }
 
 fn another_user(email: &str) {
-    use diesel::mysql::MysqlConnection;
-    let mut conn =
-        MysqlConnection::establish(&common::database_url()).expect("connect to ignite_test");
-    ignite_panel::users::create_user(&mut conn, "Other", email, "another password")
-        .expect("create the other user");
+    let conn = common::test_db();
+    conn.run(ignite_panel::users::create_user(
+        &conn.db,
+        "Other",
+        email,
+        "another password",
+    ))
+    .expect("create the other user");
 }
 
 #[test]
@@ -95,18 +95,30 @@ fn an_email_taken_between_the_check_and_the_update_is_a_field_error() {
     let _guard = reset();
     let client = signed_in(None);
 
-    let mut other =
-        MysqlConnection::establish(&common::database_url()).expect("connect to ignite_test");
-    sql_query("START TRANSACTION").execute(&mut other).unwrap();
-    sql_query(
-        "INSERT INTO users (name, email, password_hash) VALUES ('Racer', 'race@example.test', 'x')",
-    )
-    .execute(&mut other)
-    .unwrap();
+    // The racer's insert is uncommitted until its transaction ends, half a second after it
+    // signals that the insert ran. The save goes ahead meanwhile, so its update waits on it.
+    let (ready_tx, ready_rx) = std::sync::mpsc::channel();
     let committer = std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(500));
-        sql_query("COMMIT").execute(&mut other).unwrap();
+        let racer = common::test_db();
+        racer.run(async {
+            racer
+                .db
+                .transaction(async |tx| {
+                    orbit_orm::raw::execute(
+                        &mut *tx,
+                        "INSERT INTO users (name, email, password_hash) VALUES ('Racer', 'race@example.test', 'x')",
+                        &[],
+                    )
+                    .await?;
+                    ready_tx.send(()).expect("signal the insert");
+                    rocket::tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    Ok::<(), orbit_orm::Error>(())
+                })
+                .await
+                .expect("commit the racer");
+        });
     });
+    ready_rx.recv().expect("the insert ran");
 
     let response = client
         .post("/admin/profile")

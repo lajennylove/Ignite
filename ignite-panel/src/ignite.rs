@@ -3,7 +3,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use ignite_core::{build_pool, Field, IgniteResource, Pool};
+use ignite_core::{Database, Field, IgniteResource};
+use orbit_orm::PoolOptions;
 use rocket::catchers;
 use rocket::fairing::{self, AdHoc, Fairing, Info, Kind};
 use rocket::{Build, Request, Response, Rocket};
@@ -74,7 +75,7 @@ impl Registry {
 /// Builds the admin panel. Add resources with [`resource`](Self::resource),
 /// then attach [`fairing`](Self::fairing) to a Rocket instance.
 pub struct Ignite {
-    pool: Pool,
+    database_url: String,
     mount: String,
     resources: Vec<Arc<dyn Erased>>,
     profile_fields: Vec<Field>,
@@ -89,15 +90,18 @@ pub struct Ignite {
 impl Ignite {
     /// Loads a `.env` file from the working directory, if there is one, then reads
     /// `DATABASE_URL`, `IGNITE_SECRET_KEY`, `IGNITE_TRUSTED_PROXIES`, `IGNITE_APP_URL` and
-    /// `IGNITE_VIEWS_DIR` and builds the connection pool. Variables already set in the environment win
-    /// over the `.env` file, as in Laravel. The `ignite` view namespace is registered
-    /// when the fairing is built.
+    /// `IGNITE_VIEWS_DIR`. Variables already set in the environment win over the `.env` file,
+    /// as in Laravel. The `ignite` view namespace is registered when the fairing is built.
+    ///
+    /// The database connects when Rocket ignites, not here, because connecting is async. A
+    /// connection that fails stops the launch with an error, as the panel's own pool did
+    /// before the move to Orbit it stopped the process at this call.
     ///
     /// The panel does not run migrations here. Run `ignite migrate` before the first start.
     ///
     /// # Panics
     ///
-    /// Panics if `DATABASE_URL` is not set, if the pool cannot connect, if
+    /// Panics if `DATABASE_URL` is not set, if
     /// `IGNITE_TRUSTED_PROXIES` has an entry that is not an address or a range, if
     /// `IGNITE_APP_URL` is not an `http://` or `https://` URL, or if a release build has no
     /// valid `IGNITE_SECRET_KEY`. These are configuration errors
@@ -106,9 +110,8 @@ impl Ignite {
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         crate::load_env();
-        let url = std::env::var("DATABASE_URL")
+        let database_url = std::env::var("DATABASE_URL")
             .expect("DATABASE_URL must be set to a mysql:// URL for the Ignite panel");
-        let pool = build_pool(&url).expect("Ignite could not connect to DATABASE_URL");
         // Debug builds render the embedded views unless a directory overrides them.
         // The override is read here and checked when the fairing is built, so a
         // builder call to `views_dir` can still replace it.
@@ -131,7 +134,7 @@ impl Ignite {
         }
 
         Ignite {
-            pool,
+            database_url,
             mount: DEFAULT_MOUNT.to_string(),
             resources: Vec::new(),
             profile_fields: Vec::new(),
@@ -225,7 +228,7 @@ impl Ignite {
     /// made over HTTPS.
     pub fn fairing(self) -> PanelFairing {
         let Ignite {
-            pool,
+            database_url,
             mount,
             resources,
             profile_fields,
@@ -239,10 +242,17 @@ impl Ignite {
         // The panel registers its own assets, so an app adds nothing for its styling.
         crate::assets::register(&mount);
         register_views(views.as_deref());
-        let ignite = AdHoc::on_ignite("Ignite", move |rocket| async move {
+        let ignite = AdHoc::try_on_ignite("Ignite", move |rocket| async move {
+            let db = match connect(&database_url).await {
+                Ok(db) => db,
+                Err(error) => {
+                    rocket::error!("Ignite could not connect to DATABASE_URL: {error}");
+                    return Err(rocket);
+                }
+            };
             // Each resource's abilities get a permission row, so roles can be granted them.
             let abilities = crate::authz::resource_abilities(&resources);
-            crate::authz::register_at_start(pool.clone(), abilities).await;
+            crate::authz::register_at_start(&db, abilities).await;
             let registry = Registry {
                 mount: mount.clone(),
                 resources,
@@ -253,8 +263,8 @@ impl Ignite {
                 mailer,
                 app_url,
             };
-            rocket
-                .manage(pool)
+            Ok(rocket
+                .manage(db)
                 .manage(registry)
                 .register(
                     "/",
@@ -265,10 +275,25 @@ impl Ignite {
                     ],
                 )
                 .mount("/", routes::health())
-                .mount(mount, routes::all())
+                .mount(mount, routes::all()))
         });
         PanelFairing { ignite }
     }
+}
+
+/// The pool size: 10 connections, the same number the panel used before the move to Orbit.
+const POOL_CONNECTIONS: u32 = 10;
+
+/// Connects the app's database pool with [`POOL_CONNECTIONS`] connections.
+async fn connect(url: &str) -> Result<Database, orbit_orm::Error> {
+    Database::connect_with(
+        url,
+        PoolOptions {
+            max_connections: POOL_CONNECTIONS,
+            ..PoolOptions::default()
+        },
+    )
+    .await
 }
 
 /// The fairing [`Ignite::fairing`] returns. Its ignite hook is the panel's setup. Its

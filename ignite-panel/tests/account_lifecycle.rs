@@ -7,10 +7,6 @@ use std::io::Write;
 use std::process::{Command, Stdio};
 
 use common::*;
-use diesel::mysql::MysqlConnection;
-use diesel::prelude::*;
-use diesel::sql_query;
-use diesel::sql_types::BigInt;
 use ignite_panel::authz::{self, SUPER_ADMIN};
 use ignite_panel::users;
 use rocket::http::{ContentType, Status};
@@ -18,12 +14,6 @@ use rocket::local::blocking::Client;
 
 const ADA: &str = "ada@example.test";
 const ADA_PASSWORD: &str = "a-long-password";
-
-#[derive(QueryableByName)]
-struct CountRow {
-    #[diesel(sql_type = BigInt)]
-    count: i64,
-}
 
 /// Runs `ignite` with the test database, the given arguments and standard input, from the
 /// temp dir so no `.env` file is read.
@@ -48,27 +38,25 @@ fn text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
 
-fn connection() -> MysqlConnection {
-    MysqlConnection::establish(&database_url()).expect("connect to ignite_test")
+fn connection() -> TestDb {
+    test_db()
 }
 
 /// The number of session rows of the user with `user_id`.
-fn sessions_of(conn: &mut MysqlConnection, user_id: i64) -> i64 {
-    sql_query("SELECT COUNT(*) AS count FROM sessions WHERE user_id = ?")
-        .bind::<BigInt, _>(user_id)
-        .get_result::<CountRow>(conn)
-        .expect("count the sessions")
-        .count
+fn sessions_of(conn: &TestDb, user_id: i64) -> i64 {
+    conn.count(
+        "SELECT COUNT(*) FROM sessions WHERE user_id = ?",
+        &[user_id.into()],
+    )
 }
 
-fn user_id(conn: &mut MysqlConnection, email: &str) -> i64 {
-    users::find_by_email(conn, email)
+fn user_id(conn: &TestDb, email: &str) -> i64 {
+    conn.run(users::find_by_email(&conn.db, email))
         .unwrap()
         .expect("the user exists")
         .id
 }
 
-/// Posts the sign-in form from `client` and returns the status the panel answers with.
 fn sign_in(client: &Client, email: &str, password: &str) -> Status {
     client.get("/admin/login").dispatch();
     let body = with_token(client, &format!("email={email}&password={password}"));
@@ -81,11 +69,13 @@ fn sign_in(client: &Client, email: &str, password: &str) -> Status {
 }
 
 /// A test user, Ada, who is also a super-admin, so she can open the widgets list.
-fn reset_with_ada() -> (std::sync::MutexGuard<'static, ()>, MysqlConnection) {
+fn reset_with_ada() -> (std::sync::MutexGuard<'static, ()>, TestDb) {
     let guard = reset();
-    let mut conn = connection();
-    users::create_user(&mut conn, "Ada", ADA, ADA_PASSWORD).expect("create Ada");
-    authz::assign_role(&mut conn, ADA, SUPER_ADMIN).expect("make Ada a super-admin");
+    let conn = connection();
+    conn.run(users::create_user(&conn.db, "Ada", ADA, ADA_PASSWORD))
+        .expect("create Ada");
+    conn.run(authz::assign_role(&conn.db, ADA, SUPER_ADMIN))
+        .expect("make Ada a super-admin");
     (guard, conn)
 }
 
@@ -125,12 +115,12 @@ fn a_disabled_user_gets_the_wrong_password_message_and_cannot_sign_in() {
 
 #[test]
 fn disabling_a_user_ends_their_sessions_at_once() {
-    let (_guard, mut conn) = reset_with_ada();
+    let (_guard, conn) = reset_with_ada();
     let ada = client(None);
     assert_eq!(sign_in(&ada, ADA, ADA_PASSWORD), Status::SeeOther);
     assert_eq!(ada.get("/admin/widgets").dispatch().status(), Status::Ok);
-    let ada_id = user_id(&mut conn, ADA);
-    assert_eq!(sessions_of(&mut conn, ada_id), 1);
+    let ada_id = user_id(&conn, ADA);
+    assert_eq!(sessions_of(&conn, ada_id), 1);
 
     let disabled = ignite(&["user", "disable", ADA], "");
     assert_eq!(
@@ -149,7 +139,7 @@ fn disabling_a_user_ends_their_sessions_at_once() {
         "the old cookie is refused like a signed-out request"
     );
     assert_eq!(
-        sessions_of(&mut conn, ada_id),
+        sessions_of(&conn, ada_id),
         0,
         "the session rows are deleted"
     );
@@ -176,7 +166,7 @@ fn disabling_or_enabling_twice_is_reported_and_is_not_an_error() {
 
 #[test]
 fn the_last_enabled_super_admin_cannot_be_disabled_or_lose_the_role() {
-    let (_guard, mut conn) = reset_with_ada();
+    let (_guard, conn) = reset_with_ada();
     // Ada and the test user are both super-admins, so either one can be disabled.
     assert_eq!(ignite(&["user", "disable", ADA], "").status.code(), Some(0));
 
@@ -188,7 +178,8 @@ fn the_last_enabled_super_admin_cannot_be_disabled_or_lose_the_role() {
         "stderr: {}",
         text(&refused.stderr)
     );
-    assert!(users::find_by_email(&mut conn, EMAIL)
+    assert!(conn
+        .run(users::find_by_email(&conn.db, EMAIL))
         .unwrap()
         .unwrap()
         .disabled_at
@@ -215,11 +206,11 @@ fn a_super_admin_can_be_disabled_while_another_enabled_super_admin_remains() {
 
 #[test]
 fn a_password_reset_from_the_cli_replaces_the_password_and_ends_sessions() {
-    let (_guard, mut conn) = reset_with_ada();
+    let (_guard, conn) = reset_with_ada();
     let ada = client(None);
     assert_eq!(sign_in(&ada, ADA, ADA_PASSWORD), Status::SeeOther);
-    let ada_id = user_id(&mut conn, ADA);
-    assert_eq!(sessions_of(&mut conn, ada_id), 1);
+    let ada_id = user_id(&conn, ADA);
+    assert_eq!(sessions_of(&conn, ada_id), 1);
 
     let reset = ignite(
         &["user", "password", ADA, "--password-stdin"],
@@ -233,7 +224,7 @@ fn a_password_reset_from_the_cli_replaces_the_password_and_ends_sessions() {
     );
     assert!(text(&reset.stdout)
         .contains("Changed the password of ada@example.test. Their sessions have ended."));
-    assert_eq!(sessions_of(&mut conn, ada_id), 0);
+    assert_eq!(sessions_of(&conn, ada_id), 0);
     assert_eq!(
         ada.get("/admin/widgets").dispatch().status(),
         Status::SeeOther
@@ -281,19 +272,16 @@ fn a_password_reset_refuses_a_short_password_and_an_unknown_user() {
 
 #[test]
 fn deleting_a_user_deletes_their_session_rows() {
-    let (_guard, mut conn) = reset_with_ada();
+    let (_guard, conn) = reset_with_ada();
     let ada = client(None);
     assert_eq!(sign_in(&ada, ADA, ADA_PASSWORD), Status::SeeOther);
-    let ada_id = user_id(&mut conn, ADA);
-    assert_eq!(sessions_of(&mut conn, ada_id), 1);
+    let ada_id = user_id(&conn, ADA);
+    assert_eq!(sessions_of(&conn, ada_id), 1);
 
-    sql_query("DELETE FROM users WHERE id = ?")
-        .bind::<BigInt, _>(ada_id)
-        .execute(&mut conn)
-        .expect("delete the user");
+    conn.exec_with("DELETE FROM users WHERE id = ?", &[ada_id.into()]);
 
     assert_eq!(
-        sessions_of(&mut conn, ada_id),
+        sessions_of(&conn, ada_id),
         0,
         "the sessions go with the user"
     );
@@ -317,15 +305,11 @@ const BEFORE_LIFECYCLE: [&str; 7] = [
 #[test]
 fn the_migration_removes_session_rows_that_have_no_user_and_then_keeps_new_ones_out() {
     let _guard = reset();
-    let mut conn = connection();
+    let conn = connection();
     // Rewind to the state before the account lifecycle migration, so the test can leave an
     // orphan row the way an old database has one.
     common::rewind_to(&BEFORE_LIFECYCLE);
-    sql_query(
-        "INSERT INTO sessions (id, user_id, expires_at) VALUES ('orphan-session', 999999, NOW() + INTERVAL 1 DAY)",
-    )
-    .execute(&mut conn)
-    .expect("insert an orphan session");
+    conn.exec("INSERT INTO sessions (id, user_id, expires_at) VALUES ('orphan-session', 999999, NOW() + INTERVAL 1 DAY)");
 
     let migrated = ignite(&["migrate"], "");
     assert_eq!(
@@ -334,18 +318,15 @@ fn the_migration_removes_session_rows_that_have_no_user_and_then_keeps_new_ones_
         "stderr: {}",
         text(&migrated.stderr)
     );
-    let orphans = sql_query("SELECT COUNT(*) AS count FROM sessions WHERE id = 'orphan-session'")
-        .get_result::<CountRow>(&mut conn)
-        .unwrap()
-        .count;
+    let orphans = conn.count(
+        "SELECT COUNT(*) FROM sessions WHERE id = 'orphan-session'",
+        &[],
+    );
     assert_eq!(
         orphans, 0,
         "the orphan row is removed before the key is added"
     );
 
-    let no_user = sql_query(
-        "INSERT INTO sessions (id, user_id, expires_at) VALUES ('no-user', 999999, NOW() + INTERVAL 1 DAY)",
-    )
-    .execute(&mut conn);
+    let no_user = conn.try_exec("INSERT INTO sessions (id, user_id, expires_at) VALUES ('no-user', 999999, NOW() + INTERVAL 1 DAY)");
     assert!(no_user.is_err(), "a session must belong to a user");
 }

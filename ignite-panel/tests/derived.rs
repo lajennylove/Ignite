@@ -4,89 +4,71 @@
 mod common;
 
 use chrono::NaiveDate;
-use common::{reset, with_token, EMAIL, PASSWORD};
-use diesel::mysql::MysqlConnection;
-use diesel::prelude::*;
-use diesel::sql_query;
+use common::{reset, test_db, with_token, EMAIL, PASSWORD};
 use ignite_core::IgniteResource;
 use ignite_panel::Ignite;
+use orbit_orm::{Model, OrbitModel, Value};
 use rocket::http::{ContentType, Status};
 use rocket::local::blocking::Client;
 use serde::Serialize;
 
-mod schema {
-    diesel::table! {
-        gadgets (id) {
-            id -> Integer,
-            name -> Text,
-            price -> Integer,
-            note -> Nullable<Text>,
-            active -> Bool,
-            due -> Nullable<Date>,
-            secret -> Text,
-        }
-    }
-}
-
-#[derive(diesel::Queryable, diesel::Selectable, Serialize, IgniteResource)]
-#[diesel(table_name = schema::gadgets)]
-#[ignite(table = schema::gadgets, title = "Gadgets")]
+#[derive(Debug, Clone, OrbitModel, Serialize, IgniteResource)]
+#[orbit(table = "gadgets")]
+#[ignite(table = gadgets, title = "Gadgets")]
 #[ignite(latest_records(limit = 1, columns = "name,price"))]
 pub struct Gadget {
     id: i32,
+    #[orbit(fillable)]
     #[ignite(searchable, sortable)]
     name: String,
+    #[orbit(fillable)]
     #[ignite(sortable, label = "Price (cents)")]
     price: i32,
+    #[orbit(fillable)]
     #[ignite(form_type = "textarea")]
     note: Option<String>,
+    #[orbit(fillable)]
     active: bool,
+    #[orbit(fillable)]
     due: Option<NaiveDate>,
+    #[orbit(fillable)]
     #[ignite(form_type = "password")]
     secret: String,
-}
-
-fn database_url() -> String {
-    std::env::var("DATABASE_URL")
-        .expect("set DATABASE_URL to the test database, such as mysql://user@localhost/ignite_test")
 }
 
 /// Resets the shared database, creates the `gadgets` table, and seeds two rows.
 fn setup() -> std::sync::MutexGuard<'static, ()> {
     let guard = reset();
-    let mut conn = MysqlConnection::establish(&database_url()).unwrap();
-    sql_query("DROP TABLE IF EXISTS gadgets")
-        .execute(&mut conn)
-        .unwrap();
-    sql_query(
+    let conn = test_db();
+    conn.exec("DROP TABLE IF EXISTS gadgets");
+    conn.exec(
         "CREATE TABLE gadgets (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(255) NOT NULL, price INT NOT NULL, \
          note TEXT NULL, active TINYINT(1) NOT NULL, due DATE NULL, secret VARCHAR(255) NOT NULL, \
          UNIQUE KEY gadgets_name_unique (name))",
-    )
-    .execute(&mut conn)
-    .unwrap();
+    );
     let seed = ignite_core::hash_password("seed-password").unwrap();
-    diesel::insert_into(schema::gadgets::table)
-        .values(vec![
-            (
-                schema::gadgets::name.eq("Anchor"),
-                schema::gadgets::price.eq(5),
-                schema::gadgets::note.eq(None::<String>),
-                schema::gadgets::active.eq(true),
-                schema::gadgets::due.eq(None::<NaiveDate>),
-                schema::gadgets::secret.eq(seed.clone()),
-            ),
-            (
-                schema::gadgets::name.eq("Beacon"),
-                schema::gadgets::price.eq(9),
-                schema::gadgets::note.eq(Some("Bright".to_string())),
-                schema::gadgets::active.eq(false),
-                schema::gadgets::due.eq(NaiveDate::from_ymd_opt(2026, 3, 1)),
-                schema::gadgets::secret.eq(seed),
-            ),
-        ])
-        .execute(&mut conn)
-        .unwrap();
+    conn.exec_with(
+        "INSERT INTO gadgets (name, price, note, active, due, secret) VALUES (?, ?, ?, ?, ?, ?)",
+        &[
+            "Anchor".into(),
+            5.into(),
+            Value::Null,
+            true.into(),
+            Value::Null,
+            seed.as_str().into(),
+        ],
+    );
+    conn.exec_with(
+        "INSERT INTO gadgets (name, price, note, active, due, secret) VALUES (?, ?, ?, ?, ?, ?)",
+        &[
+            "Beacon".into(),
+            9.into(),
+            "Bright".into(),
+            false.into(),
+            NaiveDate::from_ymd_opt(2026, 3, 1).unwrap().into(),
+            seed.as_str().into(),
+        ],
+    );
     guard
 }
 
@@ -110,20 +92,15 @@ fn signed_in() -> Client {
 }
 
 fn stored_secret(id: i32) -> String {
-    let mut conn = MysqlConnection::establish(&database_url()).unwrap();
-    schema::gadgets::table
-        .find(id)
-        .select(schema::gadgets::secret)
-        .first(&mut conn)
+    let conn = test_db();
+    conn.run(Gadget::query().find(&conn.db, id))
         .unwrap()
+        .expect("the gadget")
+        .secret
 }
 
 fn gadget_count() -> i64 {
-    let mut conn = MysqlConnection::establish(&database_url()).unwrap();
-    schema::gadgets::table
-        .count()
-        .get_result(&mut conn)
-        .unwrap()
+    test_db().count("SELECT COUNT(*) FROM gadgets", &[])
 }
 
 #[test]
@@ -217,17 +194,18 @@ fn the_derived_resource_creates_updates_and_deletes() {
 #[test]
 fn the_derived_model_reads_its_rows() {
     let _guard = setup();
-    let mut conn = MysqlConnection::establish(&database_url()).unwrap();
-    let page = <Gadget as IgniteResource>::list(
-        &mut conn,
-        &ignite_core::ListQuery {
-            page: 1,
-            per_page: 20,
-            search: None,
-            sort: None,
-        },
-    )
-    .unwrap();
+    let conn = test_db();
+    let page = conn
+        .run(<Gadget as IgniteResource>::list(
+            &conn.db,
+            &ignite_core::ListQuery {
+                page: 1,
+                per_page: 20,
+                search: None,
+                sort: None,
+            },
+        ))
+        .unwrap();
 
     assert_eq!(page.total, 2);
     assert_eq!(
@@ -400,8 +378,10 @@ fn headings_use_the_singular_name_and_dates_read_readably() {
 #[test]
 fn the_derived_latest_returns_the_newest_rows_first() {
     let _guard = setup();
-    let mut conn = MysqlConnection::establish(&database_url()).unwrap();
-    let rows = <Gadget as IgniteResource>::latest(&mut conn, 1).unwrap();
+    let conn = test_db();
+    let rows = conn
+        .run(<Gadget as IgniteResource>::latest(&conn.db, 1))
+        .unwrap();
 
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].name, "Beacon", "the highest id is the newest");

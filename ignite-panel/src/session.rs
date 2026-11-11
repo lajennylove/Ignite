@@ -20,7 +20,7 @@ use crate::authz::{self, Abilities, Action};
 use crate::ignite::Registry;
 use crate::proxy::{request_is_secure, TrustedProxies};
 use crate::{sessions, users};
-use ignite_core::Pool;
+use orbit_orm::Database;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -315,22 +315,16 @@ impl<'r> FromRequest<'r> for AdminUser {
     type Error = ();
 
     async fn from_request(request: &'r Request<'_>) -> Outcome<Self, ()> {
-        let (Some(registry), Some(pool)) = (
+        let (Some(registry), Some(db)) = (
             request.rocket().state::<Registry>(),
-            request.rocket().state::<Pool>(),
+            request.rocket().state::<Database>(),
         ) else {
             return Outcome::Error((Status::InternalServerError, ()));
         };
         let Some(sid) = session_id(request.cookies(), &registry.secret) else {
             return Outcome::Error((Status::Unauthorized, ()));
         };
-        let pool = pool.clone();
-        let lookup = sid.clone();
-        let joined = rocket::tokio::task::spawn_blocking(move || lookup_user(&pool, &lookup)).await;
-        let found = match joined {
-            Ok(result) => classify(result),
-            Err(error) => classify::<(users::User, Abilities), _>(Err(error)),
-        };
+        let found = classify(lookup_user(db, &sid).await);
         match found {
             Lookup::Unknown => Outcome::Error((Status::Unauthorized, ())),
             // A database outage is not a sign-out, so it must not reach the 401 catcher,
@@ -370,17 +364,15 @@ fn classify<T, E: std::fmt::Display>(result: Result<Option<T>, E>) -> Lookup<T> 
     }
 }
 
-/// Reads the user of a session on a blocking thread. The error covers both a failed
-/// pool checkout and a failed query.
-fn lookup_user(
-    pool: &Pool,
+/// Reads the user of a session. The error is a failed query, which is an outage.
+async fn lookup_user(
+    db: &Database,
     sid: &str,
-) -> Result<Option<(users::User, Abilities)>, Box<dyn std::error::Error + Send + Sync>> {
-    let mut conn = pool.get()?;
-    let Some(user_id) = sessions::user_for(&mut conn, sid)? else {
+) -> Result<Option<(users::User, Abilities)>, orbit_orm::Error> {
+    let Some(user_id) = sessions::user_for(db, sid).await? else {
         return Ok(None);
     };
-    let Some(user) = users::find_by_id(&mut conn, user_id)? else {
+    let Some(user) = users::find_by_id(db, user_id).await? else {
         return Ok(None);
     };
     // A disabled user's sessions end, so the guard refuses them like a signed-out request.
@@ -388,7 +380,7 @@ fn lookup_user(
         return Ok(None);
     }
     // A failed read of the roles is an outage, not a sign-out, so it answers 500.
-    let abilities = authz::load(&mut conn, user.id)?;
+    let abilities = authz::load(db, user.id).await?;
     Ok(Some((user, abilities)))
 }
 

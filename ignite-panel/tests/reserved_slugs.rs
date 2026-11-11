@@ -3,10 +3,11 @@
 
 mod common;
 
-use diesel::mysql::MysqlConnection;
-use diesel::result::QueryResult;
-use ignite_core::{Column, Field, FieldErrors, FormInput, IgniteResource, ListQuery, Page};
+use ignite_core::{
+    Column, Database, Field, FieldErrors, FormInput, IgniteResource, ListQuery, Page,
+};
 use ignite_panel::Ignite;
+use orbit_orm::Error as OrbitError;
 
 /// Declares a resource with only a slug. The builder reads the slug and never calls
 /// the query methods, so they are unreachable here.
@@ -29,23 +30,23 @@ macro_rules! named_resource {
                 &[]
             }
 
-            fn list(_: &mut MysqlConnection, _: &ListQuery) -> QueryResult<Page<()>> {
+            async fn list(_: &Database, _: &ListQuery) -> Result<Page<()>, OrbitError> {
                 unreachable!("the builder does not query")
             }
 
-            fn find(_: &mut MysqlConnection, _: i64) -> QueryResult<Option<()>> {
+            async fn find(_: &Database, _: i64) -> Result<Option<()>, OrbitError> {
                 unreachable!("the builder does not query")
             }
 
-            fn create(_: &mut MysqlConnection, _: ()) -> QueryResult<()> {
+            async fn create(_: &Database, _: ()) -> Result<(), OrbitError> {
                 unreachable!("the builder does not query")
             }
 
-            fn update(_: &mut MysqlConnection, _: i64, _: ()) -> QueryResult<()> {
+            async fn update(_: &Database, _: i64, _: ()) -> Result<(), OrbitError> {
                 unreachable!("the builder does not query")
             }
 
-            fn delete(_: &mut MysqlConnection, _: i64) -> QueryResult<usize> {
+            async fn delete(_: &Database, _: i64) -> Result<u64, OrbitError> {
                 unreachable!("the builder does not query")
             }
 

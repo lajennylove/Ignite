@@ -1,5 +1,5 @@
 error: a field with a list of options must be a String (or Option<String>)
-  --> tests/fail/options_on_integer.rs:17:11
-   |
-17 |     size: i32,
-   |           ^^^
+ --> tests/fail/options_on_integer.rs:9:11
+  |
+9 |     size: i32,
+  |           ^^^

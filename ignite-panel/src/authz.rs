@@ -16,12 +16,7 @@ use std::collections::HashSet;
 use std::fmt;
 use std::sync::Arc;
 
-use diesel::mysql::MysqlConnection;
-use diesel::prelude::*;
-use diesel::result::Error as DieselError;
-use diesel::sql_query;
-use diesel::sql_types::{BigInt, Text};
-use ignite_core::Pool;
+use orbit_orm::{raw, Database, Error, Executor, Model, OrbitModel};
 
 use crate::erased::Erased;
 use crate::users;
@@ -92,75 +87,87 @@ impl Abilities {
     }
 }
 
-#[derive(QueryableByName)]
-struct NameRow {
-    #[diesel(sql_type = Text)]
+/// A row of the `roles` table. Its names are unique.
+#[derive(Debug, Clone, OrbitModel)]
+#[orbit(table = "roles")]
+#[allow(dead_code)]
+struct Role {
+    id: i64,
+    #[orbit(fillable)]
     name: String,
 }
 
-#[derive(QueryableByName)]
-struct IdRow {
-    #[diesel(sql_type = BigInt)]
+/// A row of the `permissions` table. Its names are unique.
+#[derive(Debug, Clone, OrbitModel)]
+#[orbit(table = "permissions")]
+#[allow(dead_code)]
+struct Permission {
     id: i64,
+    #[orbit(fillable)]
+    name: String,
 }
 
-#[derive(QueryableByName)]
-struct CountRow {
-    #[diesel(sql_type = BigInt)]
-    count: i64,
+/// Whether the user with `user_id` holds the super-admin role. Reads only.
+async fn is_super_admin<'a>(db: impl Executor<'a>, user_id: i64) -> Result<bool, Error> {
+    let roles: Vec<(String,)> = raw::fetch_all(
+        db,
+        "SELECT roles.name AS name FROM roles \
+         INNER JOIN role_user ON role_user.role_id = roles.id \
+         WHERE role_user.user_id = ? AND roles.name = ?",
+        &[user_id.into(), SUPER_ADMIN.into()],
+    )
+    .await?;
+    Ok(!roles.is_empty())
 }
 
 /// Reads the roles and permissions of the user with `user_id`. Reads only.
-pub(crate) fn load(conn: &mut MysqlConnection, user_id: i64) -> Result<Abilities, DieselError> {
-    let roles: Vec<NameRow> = sql_query(
+pub(crate) async fn load(db: &Database, user_id: i64) -> Result<Abilities, Error> {
+    let roles: Vec<(String,)> = raw::fetch_all(
+        db,
         "SELECT roles.name AS name FROM roles \
          INNER JOIN role_user ON role_user.role_id = roles.id \
          WHERE role_user.user_id = ?",
+        &[user_id.into()],
     )
-    .bind::<BigInt, _>(user_id)
-    .load(conn)?;
-    let permissions: Vec<NameRow> = sql_query(
+    .await?;
+    let permissions: Vec<(String,)> = raw::fetch_all(
+        db,
         "SELECT DISTINCT permissions.name AS name FROM permissions \
          INNER JOIN role_permission ON role_permission.permission_id = permissions.id \
          INNER JOIN role_user ON role_user.role_id = role_permission.role_id \
          WHERE role_user.user_id = ?",
+        &[user_id.into()],
     )
-    .bind::<BigInt, _>(user_id)
-    .load(conn)?;
+    .await?;
     Ok(Abilities {
-        super_admin: roles.iter().any(|role| role.name == SUPER_ADMIN),
-        names: permissions.into_iter().map(|row| row.name).collect(),
+        super_admin: roles.iter().any(|(name,)| name == SUPER_ADMIN),
+        names: permissions.into_iter().map(|(name,)| name).collect(),
     })
 }
 
 /// Makes sure each ability has a row in `permissions`. Running it again changes nothing.
 /// The panel calls it when the app starts, so a grant can name any of its abilities.
-pub(crate) fn register(conn: &mut MysqlConnection, names: &[String]) -> Result<(), DieselError> {
-    conn.transaction(|conn| {
+pub(crate) async fn register(db: &Database, names: &[String]) -> Result<(), Error> {
+    db.transaction(async |tx| {
         for name in names {
-            sql_query(
+            raw::execute(
+                &mut *tx,
                 "INSERT INTO permissions (name) VALUES (?) ON DUPLICATE KEY UPDATE name = name",
+                &[name.as_str().into()],
             )
-            .bind::<Text, _>(name)
-            .execute(conn)?;
+            .await?;
         }
-        Ok(())
+        Ok::<(), Error>(())
     })
+    .await
 }
 
-/// Registers the abilities on a blocking thread when the app starts. A failure is logged
-/// and the app still starts, so the panel can be migrated after the first start. Until the
-/// rows exist, no grant can name the abilities, and nobody is allowed them.
-pub(crate) async fn register_at_start(pool: Pool, names: Vec<String>) {
-    let outcome = rocket::tokio::task::spawn_blocking(move || {
-        let mut conn = pool.get().map_err(|e| e.to_string())?;
-        register(&mut conn, &names).map_err(|e| e.to_string())
-    })
-    .await;
-    match outcome {
-        Ok(Ok(())) => {}
-        Ok(Err(error)) => rocket::error!("ignite: could not register permissions: {error}"),
-        Err(error) => rocket::error!("ignite: could not register permissions: {error}"),
+/// Registers the abilities when the app starts. A failure is logged and the app still starts,
+/// so the panel can be migrated after the first start. Until the rows exist, no grant can name
+/// the abilities, and nobody is allowed them.
+pub(crate) async fn register_at_start(db: &Database, names: Vec<String>) {
+    if let Err(error) = register(db, &names).await {
+        rocket::error!("ignite: could not register permissions: {error}");
     }
 }
 
@@ -176,7 +183,7 @@ pub enum AuthzError {
     /// Disabling the user would leave no enabled super-admin, so the user is kept enabled.
     CannotDisableLastSuperAdmin,
     /// The database failed.
-    Database(DieselError),
+    Database(Error),
 }
 
 impl fmt::Display for AuthzError {
@@ -201,180 +208,190 @@ impl fmt::Display for AuthzError {
 
 impl std::error::Error for AuthzError {}
 
-impl From<DieselError> for AuthzError {
-    fn from(error: DieselError) -> Self {
+impl From<Error> for AuthzError {
+    fn from(error: Error) -> Self {
         AuthzError::Database(error)
     }
 }
 
-fn role_id(conn: &mut MysqlConnection, name: &str) -> Result<Option<i64>, DieselError> {
-    let rows: Vec<IdRow> = sql_query("SELECT id FROM roles WHERE name = ?")
-        .bind::<Text, _>(name)
-        .load(conn)?;
-    Ok(rows.first().map(|row| row.id))
+async fn role_id<'a>(db: impl Executor<'a>, name: &str) -> Result<Option<i64>, Error> {
+    Ok(Role::query()
+        .where_eq("name", name)
+        .first(db)
+        .await?
+        .map(|role| role.id))
 }
 
-fn permission_id(conn: &mut MysqlConnection, name: &str) -> Result<Option<i64>, DieselError> {
-    let rows: Vec<IdRow> = sql_query("SELECT id FROM permissions WHERE name = ?")
-        .bind::<Text, _>(name)
-        .load(conn)?;
-    Ok(rows.first().map(|row| row.id))
+async fn permission_id<'a>(db: impl Executor<'a>, name: &str) -> Result<Option<i64>, Error> {
+    Ok(Permission::query()
+        .where_eq("name", name)
+        .first(db)
+        .await?
+        .map(|permission| permission.id))
 }
 
 /// Creates a role. Its name is unique.
-pub fn create_role(conn: &mut MysqlConnection, name: &str) -> Result<(), AuthzError> {
-    if role_id(conn, name)?.is_some() {
+pub async fn create_role(db: &Database, name: &str) -> Result<(), AuthzError> {
+    if role_id(db, name).await?.is_some() {
         return Err(AuthzError::Exists(name.to_string()));
     }
-    sql_query("INSERT INTO roles (name) VALUES (?)")
-        .bind::<Text, _>(name)
-        .execute(conn)?;
+    Role::query().insert(db, &[("name", name.into())]).await?;
     Ok(())
 }
 
 /// Gives the role `role` the permission `permission`, such as `users.delete`. Both must
 /// exist. A permission exists once the app has started with its resource. Granting it
 /// again changes nothing.
-pub fn grant_permission(
-    conn: &mut MysqlConnection,
+pub async fn grant_permission(
+    db: &Database,
     role: &str,
     permission: &str,
 ) -> Result<(), AuthzError> {
-    let role_row =
-        role_id(conn, role)?.ok_or_else(|| AuthzError::NotFound(format!("The role {role}")))?;
-    let permission_row = permission_id(conn, permission)?.ok_or_else(|| {
+    let role_row = role_id(db, role)
+        .await?
+        .ok_or_else(|| AuthzError::NotFound(format!("The role {role}")))?;
+    let permission_row = permission_id(db, permission).await?.ok_or_else(|| {
         AuthzError::NotFound(format!(
             "The permission {permission}. Start the app once so the panel registers \
              its permissions, then try again"
         ))
     })?;
-    sql_query("INSERT IGNORE INTO role_permission (role_id, permission_id) VALUES (?, ?)")
-        .bind::<BigInt, _>(role_row)
-        .bind::<BigInt, _>(permission_row)
-        .execute(conn)?;
+    raw::execute(
+        db,
+        "INSERT IGNORE INTO role_permission (role_id, permission_id) VALUES (?, ?)",
+        &[role_row.into(), permission_row.into()],
+    )
+    .await?;
     Ok(())
 }
 
 /// Gives the user with `email` the role `role`. Giving a role twice changes nothing.
-pub fn assign_role(conn: &mut MysqlConnection, email: &str, role: &str) -> Result<(), AuthzError> {
-    let (user_row, role_row) = user_and_role(conn, email, role)?;
-    sql_query("INSERT IGNORE INTO role_user (user_id, role_id) VALUES (?, ?)")
-        .bind::<BigInt, _>(user_row)
-        .bind::<BigInt, _>(role_row)
-        .execute(conn)?;
+pub async fn assign_role(db: &Database, email: &str, role: &str) -> Result<(), AuthzError> {
+    let (user_row, role_row) = user_and_role(db, email, role).await?;
+    raw::execute(
+        db,
+        "INSERT IGNORE INTO role_user (user_id, role_id) VALUES (?, ?)",
+        &[user_row.into(), role_row.into()],
+    )
+    .await?;
     Ok(())
 }
 
 /// Takes the role `role` from the user with `email`. Returns `false` when the user did not
 /// have it. Refuses to remove super-admin from the last enabled user who has it, so nobody is locked out.
-pub fn remove_role(
-    conn: &mut MysqlConnection,
-    email: &str,
-    role: &str,
-) -> Result<bool, AuthzError> {
-    let (user_row, role_row) = user_and_role(conn, email, role)?;
-    conn.transaction(|conn| {
-        // Locking the super-admin role row serializes two removals, so both cannot pass the count.
-        sql_query("SELECT id FROM roles WHERE id = ? FOR UPDATE")
-            .bind::<BigInt, _>(role_row)
-            .execute(conn)?;
-        let holds: Vec<IdRow> =
-            sql_query("SELECT role_id AS id FROM role_user WHERE user_id = ? AND role_id = ?")
-                .bind::<BigInt, _>(user_row)
-                .bind::<BigInt, _>(role_row)
-                .load(conn)?;
+pub async fn remove_role(db: &Database, email: &str, role: &str) -> Result<bool, AuthzError> {
+    let (user_row, role_row) = user_and_role(db, email, role).await?;
+    db.transaction(async |tx| {
+        // Locking the role row serializes two removals, so both cannot pass the count.
+        raw::execute(
+            &mut *tx,
+            "SELECT id FROM roles WHERE id = ? FOR UPDATE",
+            &[role_row.into()],
+        )
+        .await?;
+        let holds: Vec<(i64,)> = raw::fetch_all(
+            &mut *tx,
+            "SELECT role_id AS id FROM role_user WHERE user_id = ? AND role_id = ?",
+            &[user_row.into(), role_row.into()],
+        )
+        .await?;
         if holds.is_empty() {
             return Ok(false);
         }
-        if role == SUPER_ADMIN && enabled_super_admins_besides(conn, user_row)? == 0 {
+        if role == SUPER_ADMIN && enabled_super_admins_besides(&mut *tx, user_row).await? == 0 {
             return Err(AuthzError::LastSuperAdmin);
         }
-        sql_query("DELETE FROM role_user WHERE user_id = ? AND role_id = ?")
-            .bind::<BigInt, _>(user_row)
-            .bind::<BigInt, _>(role_row)
-            .execute(conn)?;
+        raw::execute(
+            &mut *tx,
+            "DELETE FROM role_user WHERE user_id = ? AND role_id = ?",
+            &[user_row.into(), role_row.into()],
+        )
+        .await?;
         Ok(true)
     })
+    .await
 }
 
 /// How many enabled users other than `user_id` hold super-admin. A disabled user cannot
 /// sign in, so they do not keep the panel open for anyone.
-fn enabled_super_admins_besides(
-    conn: &mut MysqlConnection,
+async fn enabled_super_admins_besides<'a>(
+    db: impl Executor<'a>,
     user_id: i64,
-) -> Result<i64, DieselError> {
-    let rows: Vec<CountRow> = sql_query(
+) -> Result<i64, Error> {
+    let rows: Vec<(i64,)> = raw::fetch_all(
+        db,
         "SELECT COUNT(*) AS count FROM role_user \
          INNER JOIN roles ON roles.id = role_user.role_id \
          INNER JOIN users ON users.id = role_user.user_id \
          WHERE roles.name = ? AND role_user.user_id <> ? AND users.disabled_at IS NULL",
+        &[SUPER_ADMIN.into(), user_id.into()],
     )
-    .bind::<Text, _>(SUPER_ADMIN)
-    .bind::<BigInt, _>(user_id)
-    .load(conn)?;
-    Ok(rows.first().map_or(0, |row| row.count))
+    .await?;
+    Ok(rows.first().map_or(0, |row| row.0))
 }
 
 /// Disables the user with `email`: they cannot sign in, and their sessions end. Returns
 /// `false` when the user was already disabled. Refuses to disable the last enabled super-admin.
-pub fn disable_user(conn: &mut MysqlConnection, email: &str) -> Result<bool, AuthzError> {
-    let user = find_user(conn, email)?;
+pub async fn disable_user(db: &Database, email: &str) -> Result<bool, AuthzError> {
+    let user = find_user(db, email).await?;
     if user.disabled_at.is_some() {
         return Ok(false);
     }
-    conn.transaction(|conn| {
+    db.transaction(async |tx| {
         // The same lock as `remove_role`, so two changes to the super-admins cannot both pass.
-        sql_query("SELECT id FROM roles WHERE name = ? FOR UPDATE")
-            .bind::<Text, _>(SUPER_ADMIN)
-            .execute(conn)?;
-        let abilities = load(conn, user.id)?;
-        if abilities.super_admin && enabled_super_admins_besides(conn, user.id)? == 0 {
+        raw::execute(
+            &mut *tx,
+            "SELECT id FROM roles WHERE name = ? FOR UPDATE",
+            &[SUPER_ADMIN.into()],
+        )
+        .await?;
+        if is_super_admin(&mut *tx, user.id).await?
+            && enabled_super_admins_besides(&mut *tx, user.id).await? == 0
+        {
             return Err(AuthzError::CannotDisableLastSuperAdmin);
         }
-        users::disable(conn, user.id)?;
+        users::disable_in(tx, user.id).await?;
         Ok(true)
     })
+    .await
 }
 
 /// Enables the user with `email` again. Returns `false` when the user was already enabled.
-pub fn enable_user(conn: &mut MysqlConnection, email: &str) -> Result<bool, AuthzError> {
-    let user = find_user(conn, email)?;
+pub async fn enable_user(db: &Database, email: &str) -> Result<bool, AuthzError> {
+    let user = find_user(db, email).await?;
     if user.disabled_at.is_none() {
         return Ok(false);
     }
-    users::enable(conn, user.id)?;
+    users::enable(db, user.id).await?;
     Ok(true)
 }
 
 /// The user with `email`. The user must exist.
-fn find_user(conn: &mut MysqlConnection, email: &str) -> Result<users::User, AuthzError> {
-    users::find_by_email(conn, email)?
+async fn find_user(db: &Database, email: &str) -> Result<users::User, AuthzError> {
+    users::find_by_email(db, email)
+        .await?
         .ok_or_else(|| AuthzError::NotFound(format!("The user {email}")))
 }
 
 /// The names of the roles of the user with `email`, in name order.
-pub fn user_roles(conn: &mut MysqlConnection, email: &str) -> Result<Vec<String>, AuthzError> {
-    let user = users::find_by_email(conn, email)?
-        .ok_or_else(|| AuthzError::NotFound(format!("The user {email}")))?;
-    let rows: Vec<NameRow> = sql_query(
+pub async fn user_roles(db: &Database, email: &str) -> Result<Vec<String>, AuthzError> {
+    let user = find_user(db, email).await?;
+    let rows: Vec<(String,)> = raw::fetch_all(
+        db,
         "SELECT roles.name AS name FROM roles \
          INNER JOIN role_user ON role_user.role_id = roles.id \
          WHERE role_user.user_id = ? ORDER BY roles.name",
+        &[user.id.into()],
     )
-    .bind::<BigInt, _>(user.id)
-    .load(conn)?;
-    Ok(rows.into_iter().map(|row| row.name).collect())
+    .await?;
+    Ok(rows.into_iter().map(|(name,)| name).collect())
 }
 
 /// The ids of the user with `email` and of the role `role`. Both must exist.
-fn user_and_role(
-    conn: &mut MysqlConnection,
-    email: &str,
-    role: &str,
-) -> Result<(i64, i64), AuthzError> {
-    let user = users::find_by_email(conn, email)?
-        .ok_or_else(|| AuthzError::NotFound(format!("The user {email}")))?;
-    let role_row =
-        role_id(conn, role)?.ok_or_else(|| AuthzError::NotFound(format!("The role {role}")))?;
+async fn user_and_role(db: &Database, email: &str, role: &str) -> Result<(i64, i64), AuthzError> {
+    let user = find_user(db, email).await?;
+    let role_row = role_id(db, role)
+        .await?
+        .ok_or_else(|| AuthzError::NotFound(format!("The role {role}")))?;
     Ok((user.id, role_row))
 }

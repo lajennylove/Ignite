@@ -3,16 +3,16 @@
 
 use std::marker::PhantomData;
 
-use diesel::mysql::MysqlConnection;
-use diesel::result::{DatabaseErrorKind, Error as DieselError, QueryResult};
 use ignite_core::{
-    Column, Field, FieldErrors, FieldKind, FormInput, IgniteResource, LatestRecords, ListQuery,
-    StatWidget,
+    Column, Database, Field, FieldErrors, FieldKind, FormInput, IgniteResource, LatestRecords,
+    ListQuery, StatWidget,
 };
+use orbit_orm::Error;
 use serde::Serialize;
 use serde_json::Value;
 
 /// The operations the routes need from a resource, without its type.
+#[rocket::async_trait]
 pub(crate) trait Erased: Send + Sync {
     fn slug(&self) -> &'static str;
     fn title(&self) -> &'static str;
@@ -21,34 +21,29 @@ pub(crate) trait Erased: Send + Sync {
     fn fields(&self) -> &'static [Field];
     fn columns(&self) -> &'static [Column];
     /// One page of records as JSON, and the total count.
-    fn list(&self, conn: &mut MysqlConnection, query: &ListQuery)
-        -> QueryResult<(Vec<Value>, i64)>;
-    fn find(&self, conn: &mut MysqlConnection, id: i64) -> QueryResult<Option<Value>>;
+    async fn list(&self, db: &Database, query: &ListQuery) -> Result<(Vec<Value>, i64), Error>;
+    async fn find(&self, db: &Database, id: i64) -> Result<Option<Value>, Error>;
     /// `Err(errors)` when the form does not validate; the database is not touched then.
-    fn create(
+    async fn create(
         &self,
-        conn: &mut MysqlConnection,
+        db: &Database,
         form: &FormInput,
-    ) -> QueryResult<Result<Value, FieldErrors>>;
-    fn update(
+    ) -> Result<Result<Value, FieldErrors>, Error>;
+    async fn update(
         &self,
-        conn: &mut MysqlConnection,
+        db: &Database,
         id: i64,
         form: &FormInput,
-    ) -> QueryResult<Result<Value, FieldErrors>>;
-    fn delete(&self, conn: &mut MysqlConnection, id: i64) -> QueryResult<usize>;
+    ) -> Result<Result<Value, FieldErrors>, Error>;
+    async fn delete(&self, db: &Database, id: i64) -> Result<u64, Error>;
     /// The dashboard cards this resource provides.
-    fn widgets(&self, conn: &mut MysqlConnection) -> QueryResult<Vec<StatWidget>>;
+    async fn widgets(&self, db: &Database) -> Result<Vec<StatWidget>, Error>;
     /// The dashboard table this resource declares, if any.
     fn latest_records(&self) -> Option<LatestRecords>;
     /// The newest records as JSON, up to `limit`.
-    fn latest(&self, conn: &mut MysqlConnection, limit: i64) -> QueryResult<Vec<Value>>;
+    async fn latest(&self, db: &Database, limit: i64) -> Result<Vec<Value>, Error>;
     /// The choices of a lookup field, as `(value, label)` pairs.
-    fn options(
-        &self,
-        conn: &mut MysqlConnection,
-        field: &str,
-    ) -> QueryResult<Vec<(String, String)>>;
+    async fn options(&self, db: &Database, field: &str) -> Result<Vec<(String, String)>, Error>;
 }
 
 /// Wraps an [`IgniteResource`] type as an [`Erased`] value.
@@ -60,6 +55,7 @@ impl<R> Adapter<R> {
     }
 }
 
+#[rocket::async_trait]
 impl<R: IgniteResource> Erased for Adapter<R> {
     fn slug(&self) -> &'static str {
         R::SLUG
@@ -85,31 +81,27 @@ impl<R: IgniteResource> Erased for Adapter<R> {
         R::columns()
     }
 
-    fn list(
-        &self,
-        conn: &mut MysqlConnection,
-        query: &ListQuery,
-    ) -> QueryResult<(Vec<Value>, i64)> {
-        let page = R::list(conn, query)?;
+    async fn list(&self, db: &Database, query: &ListQuery) -> Result<(Vec<Value>, i64), Error> {
+        let page = R::list(db, query).await?;
         let rows = page
             .rows
             .into_iter()
             .map(to_json)
-            .collect::<QueryResult<Vec<_>>>()?;
+            .collect::<Result<Vec<_>, _>>()?;
         Ok((rows, page.total))
     }
 
-    fn find(&self, conn: &mut MysqlConnection, id: i64) -> QueryResult<Option<Value>> {
-        R::find(conn, id)?.map(to_json).transpose()
+    async fn find(&self, db: &Database, id: i64) -> Result<Option<Value>, Error> {
+        R::find(db, id).await?.map(to_json).transpose()
     }
 
-    fn create(
+    async fn create(
         &self,
-        conn: &mut MysqlConnection,
+        db: &Database,
         form: &FormInput,
-    ) -> QueryResult<Result<Value, FieldErrors>> {
-        match checked::<R>(conn, form, R::validate(form))? {
-            Ok(input) => match R::create(conn, input) {
+    ) -> Result<Result<Value, FieldErrors>, Error> {
+        match checked::<R>(db, form, R::validate(form)).await? {
+            Ok(input) => match R::create(db, input).await {
                 Ok(record) => to_json(record).map(Ok),
                 Err(error) => unique_violation(error, R::SLUG, R::fields()).map(Err),
             },
@@ -117,14 +109,14 @@ impl<R: IgniteResource> Erased for Adapter<R> {
         }
     }
 
-    fn update(
+    async fn update(
         &self,
-        conn: &mut MysqlConnection,
+        db: &Database,
         id: i64,
         form: &FormInput,
-    ) -> QueryResult<Result<Value, FieldErrors>> {
-        match checked::<R>(conn, form, R::validate_update(form))? {
-            Ok(input) => match R::update(conn, id, input) {
+    ) -> Result<Result<Value, FieldErrors>, Error> {
+        match checked::<R>(db, form, R::validate_update(form)).await? {
+            Ok(input) => match R::update(db, id, input).await {
                 Ok(record) => to_json(record).map(Ok),
                 Err(error) => unique_violation(error, R::SLUG, R::fields()).map(Err),
             },
@@ -132,28 +124,28 @@ impl<R: IgniteResource> Erased for Adapter<R> {
         }
     }
 
-    fn delete(&self, conn: &mut MysqlConnection, id: i64) -> QueryResult<usize> {
-        R::delete(conn, id)
+    async fn delete(&self, db: &Database, id: i64) -> Result<u64, Error> {
+        R::delete(db, id).await
     }
 
-    fn widgets(&self, conn: &mut MysqlConnection) -> QueryResult<Vec<StatWidget>> {
-        R::widgets(conn)
+    async fn widgets(&self, db: &Database) -> Result<Vec<StatWidget>, Error> {
+        R::widgets(db).await
     }
 
     fn latest_records(&self) -> Option<LatestRecords> {
         R::latest_records()
     }
 
-    fn latest(&self, conn: &mut MysqlConnection, limit: i64) -> QueryResult<Vec<Value>> {
-        R::latest(conn, limit)?.into_iter().map(to_json).collect()
+    async fn latest(&self, db: &Database, limit: i64) -> Result<Vec<Value>, Error> {
+        R::latest(db, limit)
+            .await?
+            .into_iter()
+            .map(to_json)
+            .collect()
     }
 
-    fn options(
-        &self,
-        conn: &mut MysqlConnection,
-        field: &str,
-    ) -> QueryResult<Vec<(String, String)>> {
-        R::options(conn, field)
+    async fn options(&self, db: &Database, field: &str) -> Result<Vec<(String, String)>, Error> {
+        R::options(db, field).await
     }
 }
 
@@ -161,17 +153,17 @@ impl<R: IgniteResource> Erased for Adapter<R> {
 /// one of the field's choices, so a row that does not exist is refused. A field that
 /// already has an error keeps it. The database is read only for the lookup fields the
 /// form submits.
-fn checked<R: IgniteResource>(
-    conn: &mut MysqlConnection,
+async fn checked<R: IgniteResource>(
+    db: &Database,
     form: &FormInput,
     validated: Result<R::Input, FieldErrors>,
-) -> QueryResult<Result<R::Input, FieldErrors>> {
+) -> Result<Result<R::Input, FieldErrors>, Error> {
     let mut errors = validated.as_ref().err().cloned().unwrap_or_default();
     for field in R::fields().iter().filter(|f| f.kind == FieldKind::Lookup) {
         let Some(value) = form.get(field.name) else {
             continue;
         };
-        let choices = R::options(conn, field.name)?;
+        let choices = R::options(db, field.name).await?;
         if !choices.iter().any(|(choice, _)| choice == value.trim()) {
             errors
                 .entry(field.name)
@@ -192,22 +184,6 @@ pub(crate) fn unique_index_name(table: &str, field: &str) -> String {
     format!("{table}_{field}_unique")
 }
 
-/// The index a unique-violation message names, if `error` is one. MySQL says
-/// `for key 'index'`, and MySQL 8.0.19 and later say `for key 'table.index'`; the
-/// table part is dropped.
-pub(crate) fn unique_index(error: &DieselError) -> Option<&str> {
-    let DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, info) = error else {
-        return None;
-    };
-    index_in_message(info.message())
-}
-
-fn index_in_message(message: &str) -> Option<&str> {
-    let start = message.rfind("for key '")? + "for key '".len();
-    let key = message[start..].trim_end_matches(['\'', '`']);
-    key.rsplit('.').next()
-}
-
 /// The field whose unique index is `index`, under the one rule of
 /// [`unique_index_name`]: the names must match exactly. A name that only contains
 /// a field's name, such as `users_username_unique` for `name`, matches nothing.
@@ -225,8 +201,11 @@ fn field_for_index<'a>(index: &str, table: &str, fields: &'a [Field]) -> Option<
 /// resource's SLUG and `field` is a form field's name. Matching is exact, so `name`
 /// does not claim `users_username_unique`. Any other error, or a violation whose
 /// index names no field, is returned unchanged.
-fn unique_violation(error: DieselError, table: &str, fields: &[Field]) -> QueryResult<FieldErrors> {
-    let field = unique_index(&error).and_then(|index| field_for_index(index, table, fields));
+fn unique_violation(error: Error, table: &str, fields: &[Field]) -> Result<FieldErrors, Error> {
+    let field = match &error {
+        Error::UniqueViolation { index: Some(index) } => field_for_index(index, table, fields),
+        _ => None,
+    };
     match field {
         Some(field) => {
             let mut errors = FieldErrors::new();
@@ -237,8 +216,14 @@ fn unique_violation(error: DieselError, table: &str, fields: &[Field]) -> QueryR
     }
 }
 
-fn to_json<T: Serialize>(record: T) -> QueryResult<Value> {
-    serde_json::to_value(record).map_err(|e| DieselError::SerializationError(Box::new(e)))
+/// Serializes a row to JSON. A row that cannot serialize is a database error here, as the
+/// panel has always reported it.
+fn to_json<T: Serialize>(record: T) -> Result<Value, Error> {
+    serde_json::to_value(record).map_err(|e| {
+        Error::Database(orbit_orm::__sqlx::Error::Protocol(format!(
+            "could not serialize a record: {e}"
+        )))
+    })
 }
 
 #[cfg(test)]
@@ -273,31 +258,21 @@ mod tests {
     }
 
     #[test]
-    fn an_index_on_another_table_matches_nothing() {
-        let fields = [EMAIL];
-        assert!(field_for_index("accounts_email_unique", "users", &fields).is_none());
-    }
-
-    #[test]
-    fn mysql_8_table_qualified_key_is_read_as_the_index() {
-        let message = "Duplicate entry 'a@example.test' for key 'users.users_email_unique'";
-        assert_eq!(index_in_message(message), Some("users_email_unique"));
+    fn a_violation_maps_to_the_field_its_index_names() {
         let fields = [NAME, EMAIL];
-        let index = index_in_message(message).unwrap();
+        let error = Error::UniqueViolation {
+            index: Some("users_email_unique".to_string()),
+        };
+        let errors = unique_violation(error, "users", &fields).expect("a field error");
         assert_eq!(
-            field_for_index(index, "users", &fields).unwrap().name,
-            "email"
+            errors.get("email").map(String::as_str),
+            Some("Email is already taken.")
         );
     }
 
     #[test]
-    fn mariadb_key_without_table_is_read_as_the_index() {
-        let message = "Duplicate entry 'Ada' for key 'users_name_unique'";
-        assert_eq!(index_in_message(message), Some("users_name_unique"));
-    }
-
-    #[test]
-    fn a_message_without_a_key_names_no_index() {
-        assert_eq!(index_in_message("Lock wait timeout exceeded"), None);
+    fn an_index_on_another_table_matches_nothing() {
+        let fields = [EMAIL];
+        assert!(field_for_index("accounts_email_unique", "users", &fields).is_none());
     }
 }
