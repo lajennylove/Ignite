@@ -208,7 +208,7 @@ Set `EMAILIT_API_KEY` and `IGNITE_MAIL_FROM` in the `.env` file or the environme
 
 Password reset follows Laravel's:
 
-- `/admin/password/forgot` asks for an email. Every request gets the same answer, so the form does not show which emails have an account. A request counts against the same throttle as sign-in, five in a minute for each email and address.
+- `/admin/password/forgot` asks for an email. Every request gets the same answer, so the form does not show which emails have an account. A request counts under a throttle key of its own, with the same limit as sign-in: five requests in 60 seconds for each email and address.
 - A link is sent only to an account that is enabled. It carries a random token. The table keeps only a hash of it, and the link works for 60 minutes and once.
 - A link is not sent again within 60 seconds of the last one to the same email, as Laravel's `throttle` setting does. A double submit sends one message.
 - The reset form asks for the new password twice, with the same rules as the change-password form. A reset ends every session of the user, as a password change does.
