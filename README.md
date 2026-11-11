@@ -1,6 +1,6 @@
 # Ignite
 
-An admin panel for [Rocket.rs](https://rocket.rs). Ignite builds a back office for a MariaDB or MySQL table: a sign-in page, a dashboard, a profile page, and screens to list, search, sort, create, edit and delete its rows. It renders with [Propel](https://github.com/lajennylove/Propel) views and talks to the database through [Diesel](https://diesel.rs).
+An admin panel for [Rocket.rs](https://rocket.rs). Ignite builds a back office for a MariaDB or MySQL table: a sign-in page, a dashboard, a profile page, and screens to list, search, sort, create, edit and delete its rows. It renders with [Propel](https://github.com/lajennylove/Propel) views and talks to the database through [Orbit](https://github.com/lajennylove/Orbit), an ORM for Rocket.
 
 Documentation: [ignite.rocketboost.rs](https://ignite.rocketboost.rs). Changes between releases are in [CHANGELOG.md](CHANGELOG.md). Ignite is released under the [MIT License](LICENSE).
 
@@ -12,9 +12,8 @@ Ignite is not on crates.io. Add it from git, with the pins below. Each pin is ne
 [dependencies]
 # Rocket is pinned to a revision the panel is built against.
 rocket = { git = "https://github.com/rwf2/Rocket", rev = "3a54d079" }
-# Diesel is pinned to a fork. See "Why the Diesel fork" below.
-diesel = { git = "https://github.com/lajennylove/diesel", rev = "a07c4b2c20a466ef34f50ca283790f4df20b0699", features = ["mysql", "r2d2", "chrono"] }
-diesel_migrations = { git = "https://github.com/lajennylove/diesel", rev = "a07c4b2c20a466ef34f50ca283790f4df20b0699" }
+# Orbit is pinned to a revision of its main branch.
+orbit-orm = { git = "https://github.com/lajennylove/Orbit", rev = "2457a1b3e19ff840514613a7237bbc5ba8776b09" }
 ignite-core = { git = "https://github.com/lajennylove/Ignite", tag = "v0.2.0" }
 ignite-panel = { git = "https://github.com/lajennylove/Ignite", tag = "v0.2.0" }
 propel_rocket = { git = "https://github.com/lajennylove/Propel", rev = "09c8a02ba0f3ed75b02c7f3d36b5a0e6f4d047b7" }
@@ -24,12 +23,10 @@ propel_runtime = { git = "https://github.com/lajennylove/Propel", rev = "09c8a02
 
 - **Rocket** is pinned to revision `3a54d079`, the Rocket revision Ignite is built against. The panel uses Rocket APIs of this revision.
 - **Propel** is pinned to one revision, `09c8a02` (the commit of Propel's `v0.2.0` tag), for all the Propel crates. Pin the revision, not the tag: Cargo treats a tag and a revision as two different sources and would build Propel twice, and the panel's views would not be found. `propel_rocket` is the Rocket integration that renders the views.
-- **Why the Diesel fork.** Ignite uses Diesel `2.3.14` with one fix, on the `ignite-read-fix` branch of the fork. libmariadb 3.4.x zeroes text column lengths when a result is rebound after a truncated fetch, so the first row of a text query came back empty. The fork pins the same commit that the panel pins, so Cargo builds one copy. Remove the pin when a Diesel release contains the fix.
 
 ### Build requirements
 
 - Rust (stable).
-- The MariaDB or MySQL client library, with its development files. Diesel's `mysql` feature links to it through `pkg-config` (`libmariadb` or `mysqlclient`) or `mysql_config`. On Debian and Ubuntu, install `libmariadb-dev` and `pkg-config`.
 - Node.js is needed only to change the panel's own interface (its CSS and JavaScript under `ignite-panel/ui`). The built files are in the repository, so building and running an app does not need Node.
 
 ## Configure
@@ -114,7 +111,7 @@ The panel is served under `/admin`. Its health check is `GET /up`, at the applic
 
 ## Resources
 
-A resource is a Diesel model with `#[derive(IgniteResource)]`. The derive writes the form, the list and the queries. Each field's type sets its input and its check:
+A resource is an Orbit model with `#[derive(OrbitModel)]` and `#[derive(IgniteResource)]`. The derive writes the form, the list and the queries. Each field's type sets its input and its check:
 
 | Rust type | Input | Checked as |
 | --- | --- | --- |
@@ -134,11 +131,11 @@ status: String,
 #[ignite(options = load_categories)]
 tag: Option<String>,
 
-#[ignite(belongs_to = schema::categories, display = name)]
+#[ignite(belongs_to = Category, display = name)]
 category_id: Option<i32>,
 ```
 
-`load_categories` is a function `fn(&mut MysqlConnection) -> QueryResult<Vec<(String, String)>>`, called each time a form is shown. A `belongs_to` field stores the related row's `id`. Its select lists the rows of the related table by their `display` column, and the list shows that name. A submitted value must be one of the choices, so a value with no row is refused. The derive does not write a foreign key: add one in the migration if the database should enforce it.
+`load_categories` is an async function `async fn(&Database) -> Result<Vec<(String, String)>, orbit_orm::Error>`, called each time a form is shown. A `belongs_to` field stores the related row's `id`. Its select lists the rows of the related table by their `display` column, and the list shows that name. A submitted value must be one of the choices, so a value with no row is refused. The derive does not write a foreign key: add one in the migration if the database should enforce it.
 
 ## Roles and permissions
 

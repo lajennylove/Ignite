@@ -17,6 +17,17 @@ All notable changes to Ignite are listed here. The format follows
 - The migration functions `migrate`, `run_migrations`, `pending_migrations`, `migration_status`
   and `rollback` are async and take an `orbit_orm::Database`, not a Diesel connection. `rollback`
   returns the names it reverted.
+- The database layer is Orbit (`orbit-orm`) instead of Diesel. Diesel and r2d2 are gone from
+  Ignite and from the build, so no MariaDB client library is needed to build.
+- `IgniteResource` is async and takes an `orbit_orm::Database`. Its methods (`list`, `find`,
+  `create`, `update`, `delete`, `latest`, `widgets`, `options`) return futures. `Pool`, `Conn` and
+  `build_pool` are removed from `ignite-core`.
+- `#[derive(IgniteResource)]` takes `#[ignite(table = <name>)]`, which must match the model's
+  `#[orbit(table = ...)]`, checked at compile time. `belongs_to` takes the related model type, and
+  `options = <fn>` takes an async `fn(&Database)`. The model derives `OrbitModel` and marks its
+  writable columns `#[orbit(fillable)]`.
+- Connection failure at start stops the launch with an error. `Ignite::new()` reads the environment
+  and no longer connects.
 
 ### Added
 
