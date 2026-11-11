@@ -1319,7 +1319,8 @@ checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 [[package]]
 name = "orbit-macros"
 version = "0.1.0"
-source = "git+https://github.com/lajennylove/Orbit?rev=e3b8668270cc8c3f2c17b69b9257c442707be1a4#e3b8668270cc8c3f2c17b69b9257c442707be1a4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "64a978c7d570259712d39e76d20169d01d2ffb3790942162917cf702637f2f03"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1329,12 +1330,14 @@ dependencies = [
 [[package]]
 name = "orbit-orm"
 version = "0.1.0"
-source = "git+https://github.com/lajennylove/Orbit?rev=e3b8668270cc8c3f2c17b69b9257c442707be1a4#e3b8668270cc8c3f2c17b69b9257c442707be1a4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c04a1491c0638c597d0853d5b0259f52d28ee06710a955ee2f064e4077db29d5"
 dependencies = [
  "chrono",
  "orbit-macros",
  "sqlx",
  "thiserror",
+ "tokio",
 ]
 
 [[package]]

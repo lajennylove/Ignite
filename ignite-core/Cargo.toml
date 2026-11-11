@@ -6,7 +6,7 @@ edition = "2021"
 publish = false
 
 [dependencies]
-orbit-orm = { git = "https://github.com/lajennylove/Orbit", rev = "e3b8668270cc8c3f2c17b69b9257c442707be1a4" }
+orbit-orm = "0.1.0"
 serde = { version = "1", features = ["derive"] }
 ignite-macros = { path = "../ignite-macros" }
 argon2 = "0.5"

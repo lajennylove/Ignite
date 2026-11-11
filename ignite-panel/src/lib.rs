@@ -82,7 +82,6 @@ const MIGRATIONS_TABLE: &str = "__diesel_schema_migrations";
 /// nothing runs twice.
 pub async fn migrate(db: &Database) -> Result<Vec<String>, OrbitError> {
     let migrator = migrator()?;
-    migrator.import_diesel_history(db).await?;
     migrator.run(db).await
 }
 
@@ -122,7 +121,6 @@ pub async fn migration_status(db: &Database) -> Result<Vec<(String, bool)>, Orbi
 /// database are not touched. Returns nothing when no migration of the panel is applied.
 pub async fn rollback(db: &Database) -> Result<Vec<String>, OrbitError> {
     let migrator = migrator()?;
-    migrator.import_diesel_history(db).await?;
     migrator.rollback(db).await
 }
 
