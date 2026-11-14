@@ -46,8 +46,11 @@ All notable changes to Ignite are listed here. The format follows
 - The panel's layout and its navigation, top bar and flash partials moved to
   `views/ignite/themes/ignite`. `ignite::layouts.app` and `ignite::partials.nav`, `.topbar`
   and `.flash` still exist and resolve to the active theme's views, so an app view that
-  extends the layout is unchanged. In a views directory (`views_dir`, `IGNITE_VIEWS_DIR`),
-  edit the files under `themes/ignite` to change the look.
+  extends the layout is unchanged. A views directory (`views_dir`, `IGNITE_VIEWS_DIR`)
+  must now hold `themes/ignite` too: copy `views/ignite` again. The app stops at startup
+  when the theme's views are missing, and says where the layout moved when the directory
+  has a customised `layouts/app.propel`. Edit the files under `themes/ignite` to change
+  the look.
 
 ## [0.3.0] - unreleased
 

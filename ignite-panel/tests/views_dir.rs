@@ -51,6 +51,40 @@ fn a_missing_views_directory_stops_the_app_at_startup() {
     );
 }
 
+/// A copy of the panel's views without the `ignite` theme, as a directory copied before the
+/// theme system has. `layout` replaces `layouts/app.propel` when it is given.
+#[cfg(debug_assertions)]
+fn copy_without_theme(tag: &str, layout: Option<&str>) -> PathBuf {
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("views/ignite");
+    let copy = std::env::temp_dir().join(format!("ignite-views-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&copy);
+    copy_dir(&source, &copy);
+    std::fs::remove_dir_all(copy.join("themes")).unwrap();
+    if let Some(layout) = layout {
+        std::fs::write(copy.join("layouts/app.propel"), layout).unwrap();
+    }
+    copy
+}
+
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "could not find the ignite theme's views")]
+fn a_views_directory_without_the_theme_stops_the_app_at_startup() {
+    let copy = copy_without_theme("no-theme", None);
+    let _ = Client::tracked(rocket::build().attach(Ignite::new().views_dir(&copy).fairing()));
+}
+
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "The panel's layout moved to themes/ignite/layouts/app.propel")]
+fn a_customised_old_layout_says_where_the_layout_moved() {
+    let copy = copy_without_theme(
+        "old-layout",
+        Some("<!doctype html><html><body>@yield('content')</body></html>\n"),
+    );
+    let _ = Client::tracked(rocket::build().attach(Ignite::new().views_dir(&copy).fairing()));
+}
+
 #[cfg(not(debug_assertions))]
 #[test]
 fn a_release_build_ignores_the_views_directory_and_renders_compiled_views() {

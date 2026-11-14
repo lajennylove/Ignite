@@ -250,13 +250,16 @@ impl Ignite {
 
     /// Reads the panel's views from `path` instead of the views embedded in the
     /// binary. Use it to edit views without rebuilding. The directory must hold
-    /// `layouts/app.propel`, and an override here wins over `IGNITE_VIEWS_DIR`. The views are
-    /// served through the active admin theme (see [`crate::theme`]), so the `ignite` theme's
-    /// look is in the directory's `themes/ignite`.
+    /// `layouts/app.propel` and the `ignite` theme's views (`themes/ignite/layouts/app.propel`
+    /// and `themes/ignite/partials/nav.propel`, `topbar.propel` and `flash.propel`), and an
+    /// override here wins over `IGNITE_VIEWS_DIR`. The views are served through the active
+    /// admin theme (see [`crate::theme`]), so edit the `ignite` theme's look in the
+    /// directory's `themes/ignite`.
     ///
     /// # Panics
     ///
-    /// The check runs when the fairing is built, so this method does not panic.
+    /// The check runs when the fairing is built, so this method does not panic. The fairing
+    /// panics when a file above is missing, and names the one that is.
     pub fn views_dir(mut self, path: impl Into<PathBuf>) -> Self {
         self.views = Some(path.into());
         self
@@ -411,12 +414,53 @@ fn register_views(dir: Option<&Path>) {
 #[cfg(not(debug_assertions))]
 fn register_views(_dir: Option<&Path>) {}
 
-/// Checks that a views directory holds the panel's layout. Panics when it does not.
+/// The views of the `ignite` theme that a views directory must hold, besides the panel's
+/// `layouts/app.propel`. The panel renders through them (see [`crate::theme`]).
+#[cfg(debug_assertions)]
+const THEME_VIEWS: &[&str] = &[
+    "themes/ignite/layouts/app.propel",
+    "themes/ignite/partials/nav.propel",
+    "themes/ignite/partials/topbar.propel",
+    "themes/ignite/partials/flash.propel",
+];
+
+/// Checks that a views directory holds the panel's layout and the `ignite` theme's views.
+/// Panics when it does not, so a directory copied before the theme system stops the app at
+/// startup instead of failing on every page.
 #[cfg(debug_assertions)]
 fn check_views(dir: &Path) {
+    let layout = dir.join("layouts/app.propel");
     assert!(
-        dir.join("layouts/app.propel").is_file(),
+        layout.is_file(),
         "Ignite could not find its views in {}: ship the views/ignite directory, or set {VIEWS_DIR_ENV}",
         dir.display()
+    );
+    let missing: Vec<&str> = THEME_VIEWS
+        .iter()
+        .copied()
+        .filter(|view| !dir.join(view).is_file())
+        .collect();
+    if missing.is_empty() {
+        return;
+    }
+    // A layout that is not the panel's alias is a customised layout from before the theme
+    // system: say where it moved, so the change is not lost silently.
+    use propel_runtime::Loader;
+    let alias = crate::embedded::EmbeddedViews
+        .source("layouts.app")
+        .unwrap_or_default();
+    let customised = std::fs::read_to_string(&layout).is_ok_and(|source| source != alias);
+    let moved = if customised {
+        " The panel's layout moved to themes/ignite/layouts/app.propel: move your changes to \
+         layouts/app.propel there, and the navigation, top bar and flash partials to \
+         themes/ignite/partials."
+    } else {
+        ""
+    };
+    panic!(
+        "Ignite could not find the ignite theme's views in {} (missing: {}): copy the panel's \
+         views/ignite directory again.{moved}",
+        dir.display(),
+        missing.join(", ")
     );
 }
