@@ -3,7 +3,8 @@
 //!
 //! [`create_user`] and [`delete_user`] are the only ways Ignite creates and deletes a user,
 //! from the panel, the CLI or an app's resource. Each runs the app's lifecycle callbacks,
-//! registered with [`Ignite::on_user_created`](crate::Ignite::on_user_created) and
+//! registered with [`Ignite::on_user_created`](crate::Ignite::on_user_created),
+//! [`Ignite::on_user_deleting`](crate::Ignite::on_user_deleting) and
 //! [`Ignite::on_user_deleted`](crate::Ignite::on_user_deleted), in the transaction that
 //! writes the user, so the app's own rows are written or removed with it.
 
@@ -235,6 +236,8 @@ pub(crate) struct UserCallbacks {
     /// Run by [`create_user`], after the user's row is inserted.
     pub(crate) created: Vec<UserCallback>,
     /// Run by [`delete_user`], before the user's row is deleted.
+    pub(crate) deleting: Vec<UserCallback>,
+    /// Run by [`delete_user`], after the user's row is deleted.
     pub(crate) deleted: Vec<UserCallback>,
 }
 
@@ -243,6 +246,7 @@ pub(crate) struct UserCallbacks {
 /// with only a [`Database`]. The builder sets them (see [`install_callbacks`]).
 static CALLBACKS: RwLock<UserCallbacks> = RwLock::new(UserCallbacks {
     created: Vec::new(),
+    deleting: Vec::new(),
     deleted: Vec::new(),
 });
 
@@ -250,6 +254,15 @@ static CALLBACKS: RwLock<UserCallbacks> = RwLock::new(UserCallbacks {
 /// the panel is built and when the app runs its command line.
 pub(crate) fn install_callbacks(callbacks: UserCallbacks) {
     *CALLBACKS.write().unwrap_or_else(PoisonError::into_inner) = callbacks;
+}
+
+/// Removes every user lifecycle callback, so [`create_user`] and [`delete_user`] run none
+/// until a builder installs its own again (its [`fairing`](crate::Ignite::fairing) or
+/// [`run_cli`](crate::Ignite::run_cli)), as Laravel's `Model::flushEventListeners` does.
+/// The callbacks are process-wide, so a test suite that builds panels with callbacks calls it
+/// before it creates users of its own.
+pub fn flush_callbacks() {
+    install_callbacks(UserCallbacks::default());
 }
 
 /// A copy of the callbacks that run now. No lock is held while they run.
@@ -299,10 +312,12 @@ pub async fn create_user(
 /// user, and then no callback runs. Their sessions, roles and profile picture go with them,
 /// through the foreign keys.
 ///
-/// The app's [`on_user_deleted`](crate::Ignite::on_user_deleted) callbacks run first, in the
-/// same transaction and in the order they were registered, while the user's row still
-/// exists, so a callback can read the user and remove or reassign the app's rows that refer
-/// to it. When one returns an error, nothing is deleted and the error is returned.
+/// In one transaction, the app's [`on_user_deleting`](crate::Ignite::on_user_deleting)
+/// callbacks run first, while the user's row still exists, so they can read the user and
+/// remove or reassign the app's rows that refer to it; then the row is deleted; then the
+/// [`on_user_deleted`](crate::Ignite::on_user_deleted) callbacks run. Each kind runs in the
+/// order it was registered. When any callback returns an error, nothing is deleted and the
+/// error is returned.
 ///
 /// It does not check roles. `ignite user delete` refuses the last enabled super-admin.
 pub async fn delete_user(db: &Database, id: i64) -> Result<u64, Error> {
@@ -322,10 +337,15 @@ pub(crate) async fn delete_in(tx: &mut Transaction, id: i64) -> Result<u64, Erro
     if found.is_empty() {
         return Ok(0);
     }
-    for callback in &callbacks().deleted {
+    let callbacks = callbacks();
+    for callback in &callbacks.deleting {
         callback(id, &mut *tx).await?;
     }
-    User::query().where_eq("id", id).delete(&mut *tx).await
+    let deleted = User::query().where_eq("id", id).delete(&mut *tx).await?;
+    for callback in &callbacks.deleted {
+        callback(id, &mut *tx).await?;
+    }
+    Ok(deleted)
 }
 
 /// Turns a hashing failure into a database error, so the callers have one error type.

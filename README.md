@@ -258,7 +258,7 @@ Ignite::new()
             Ok(())
         })
     })
-    .on_user_deleted(|user_id, tx| {
+    .on_user_deleting(|user_id, tx| {
         Box::pin(async move {
             raw::execute(&mut *tx, "DELETE FROM profiles WHERE user_id = ?", &[user_id.into()])
                 .await?;
@@ -268,9 +268,9 @@ Ignite::new()
 ```
 
 - A callback is given the user's id and the open transaction that writes the user, so the app's rows are written or removed atomically with the user's row. It returns `Result<(), orbit_orm::Error>`.
-- `on_user_created` callbacks run after the user's row is inserted. `on_user_deleted` callbacks run before the row is deleted, so they can still read the user; rows whose foreign key cascades go with the user anyway.
+- `on_user_created` callbacks run after the user's row is inserted. A delete runs, in one transaction, the `on_user_deleting` callbacks while the row still exists (they can read the user and remove or reassign rows whose foreign key would refuse the delete, as WordPress reassigns posts), then the delete, then the `on_user_deleted` callbacks, when the row and the rows whose foreign key cascades are gone. They follow Laravel's `deleting` and `deleted` events and WordPress's `delete_user` and `deleted_user` actions.
 - Several callbacks run in the order they were registered. When one returns an error, the later ones do not run, the whole change is rolled back (a failed create leaves no user row, a failed delete keeps the user), and the error goes to the caller: the panel answers with its error page and logs the error, and the command exits with status 1 and prints it.
-- The callbacks are process-wide, as Laravel's model events are. They take effect when `fairing()` or `run_cli()` is called on the builder, and replace the ones an earlier builder set. The stock `ignite` binary, and `ignite_panel::cli::main`, run none.
+- The callbacks are process-wide, as Laravel's model events are. They take effect when `fairing()` or `run_cli()` is called on the builder, and replace the ones an earlier builder set, so the most recently configured `Ignite`'s callbacks are the ones that run. `users::flush_callbacks()` removes them, as `Model::flushEventListeners` does; a test suite calls it before creating its own users. The stock `ignite` binary, and `ignite_panel::cli::main`, run none.
 
 ## Mail and password reset
 

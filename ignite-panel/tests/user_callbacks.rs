@@ -1,5 +1,5 @@
 //! Tests for the user lifecycle callbacks, `Ignite::on_user_created` and
-//! `Ignite::on_user_deleted`: they run for a user created or deleted from the panel's form,
+//! `Ignite::on_user_deleting` / `on_user_deleted`: they run for a user created or deleted from the panel's form,
 //! from `users::create_user` and `users::delete_user`, and from the app's own `ignite` command
 //! (`Ignite::call_cli`); a callback that fails rolls the change back. They run against the
 //! test database.
@@ -32,8 +32,13 @@ const LOG_TABLE: &str = "CREATE TABLE IF NOT EXISTS user_callback_log (\
 
 /// A user with this in their email is refused by the second created callback.
 const REFUSE_CREATE: &str = "refuse-create";
-/// A user with this in their email is refused by the deleted callback.
-const REFUSE_DELETE: &str = "refuse-delete";
+/// A user with this in their email is refused by the deleting callback.
+const REFUSE_DELETING: &str = "refuse-deleting";
+
+/// The table that marks the users the deleted callback refuses. The deleted callback cannot
+/// read the user's email, because the row is gone by then.
+const REFUSE_TABLE: &str =
+    "CREATE TABLE IF NOT EXISTS user_callback_refuse_deleted (user_id BIGINT PRIMARY KEY)";
 
 /// The environment variable that makes `cli_child` run the app's command with its arguments,
 /// separated by the unit separator.
@@ -186,11 +191,36 @@ fn first_created(id: i64, tx: &mut Transaction) -> CallbackFuture<'_> {
     Box::pin(async move { log(tx, id, "created:first").await })
 }
 
+/// Runs before the delete: the user's row is still there, so its email can be read.
+fn deleting(id: i64, tx: &mut Transaction) -> CallbackFuture<'_> {
+    Box::pin(async move {
+        let email = email_of(tx, id).await?;
+        log(tx, id, "deleting").await?;
+        if email.contains(REFUSE_DELETING) {
+            return Err(refused("start deleting this user"));
+        }
+        Ok(())
+    })
+}
+
+/// Runs after the delete: it logs whether the row is gone inside the transaction.
 fn deleted(id: i64, tx: &mut Transaction) -> CallbackFuture<'_> {
     Box::pin(async move {
-        log(tx, id, "deleted").await?;
-        if email_of(tx, id).await?.contains(REFUSE_DELETE) {
-            return Err(refused("delete this user"));
+        let gone = users::find_by_id(&mut *tx, id).await?.is_none();
+        let event = if gone {
+            "deleted:row-gone"
+        } else {
+            "deleted:row-present"
+        };
+        log(tx, id, event).await?;
+        let marked: Vec<(i64,)> = raw::fetch_all(
+            &mut *tx,
+            "SELECT user_id FROM user_callback_refuse_deleted WHERE user_id = ?",
+            &[id.into()],
+        )
+        .await?;
+        if !marked.is_empty() {
+            return Err(refused("finish deleting this user"));
         }
         Ok(())
     })
@@ -211,6 +241,7 @@ fn app() -> Ignite {
             })
         })
         .on_user_deleted(deleted)
+        .on_user_deleting(deleting)
 }
 
 /// Resets the database and empties the log. The guard keeps the other tests out.
@@ -218,7 +249,9 @@ fn reset_with_log() -> (std::sync::MutexGuard<'static, ()>, TestDb) {
     let guard = reset();
     let conn = test_db();
     conn.exec(LOG_TABLE);
+    conn.exec(REFUSE_TABLE);
     conn.exec("DELETE FROM user_callback_log");
+    conn.exec("DELETE FROM user_callback_refuse_deleted");
     (guard, conn)
 }
 
@@ -464,14 +497,19 @@ fn create_user_and_delete_user_run_the_callbacks_of_the_configured_app() {
     assert!(find(&conn, "linus@example.test").is_none());
     assert_eq!(
         events(&conn, user.id),
-        ["created:first", "created:second", "deleted"]
+        [
+            "created:first",
+            "created:second",
+            "deleting",
+            "deleted:row-gone"
+        ]
     );
 
     let missing = conn
         .run(users::delete_user(&conn.db, user.id))
         .expect("delete a missing user");
     assert_eq!(missing, 0, "a user that does not exist is not deleted");
-    assert_eq!(events(&conn, user.id).len(), 3, "and no callback runs");
+    assert_eq!(events(&conn, user.id).len(), 4, "and no callback runs");
 }
 
 #[test]
@@ -489,15 +527,20 @@ fn deleting_from_the_panel_runs_the_deleted_callback() {
     assert!(find(&conn, "grace@example.test").is_none());
     assert_eq!(
         events(&conn, grace.id),
-        ["created:first", "created:second", "deleted"]
+        [
+            "created:first",
+            "created:second",
+            "deleting",
+            "deleted:row-gone"
+        ]
     );
 }
 
 #[test]
-fn a_failing_deleted_callback_rolls_the_delete_back() {
+fn a_failing_deleting_callback_rolls_the_delete_back() {
     let (_guard, conn) = reset_with_log();
     let client = signed_in_app();
-    let email = format!("{REFUSE_DELETE}@example.test");
+    let email = format!("{REFUSE_DELETING}@example.test");
     assert_eq!(create_from_panel(&client, &email), Status::SeeOther);
     let user = find(&conn, &email).expect("the user was created");
 
@@ -509,14 +552,79 @@ fn a_failing_deleted_callback_rolls_the_delete_back() {
     assert_eq!(
         events(&conn, user.id),
         ["created:first", "created:second"],
-        "the deleted callback's own row is rolled back too"
+        "the deleting callback's own row is rolled back, and the deleted callback never ran"
     );
 
     let output = app_cli(&["user", "delete", &email], "");
     assert_eq!(output.status.code(), Some(1));
     let stderr = text(&output.stderr);
-    assert!(stderr.contains("the app refused"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("the app refused to start deleting"),
+        "stderr: {stderr}"
+    );
     assert!(find(&conn, &email).is_some(), "the user is kept");
+}
+
+#[test]
+fn a_failing_deleted_callback_rolls_the_delete_back() {
+    let (_guard, conn) = reset_with_log();
+    let client = signed_in_app();
+    assert_eq!(
+        create_from_panel(&client, "grace@example.test"),
+        Status::SeeOther
+    );
+    let user = find(&conn, "grace@example.test").expect("the user was created");
+    conn.exec_with(
+        "INSERT INTO user_callback_refuse_deleted (user_id) VALUES (?)",
+        &[user.id.into()],
+    );
+
+    assert_eq!(
+        delete_from_panel(&client, user.id),
+        Status::InternalServerError
+    );
+    assert!(
+        find(&conn, "grace@example.test").is_some(),
+        "the delete that already ran is rolled back, so the user is kept"
+    );
+    assert_eq!(
+        events(&conn, user.id),
+        ["created:first", "created:second"],
+        "the rows of both delete callbacks are rolled back too"
+    );
+
+    let output = app_cli(&["user", "delete", "grace@example.test"], "");
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = text(&output.stderr);
+    assert!(
+        stderr.contains("the app refused to finish deleting"),
+        "stderr: {stderr}"
+    );
+    assert!(
+        find(&conn, "grace@example.test").is_some(),
+        "the user is kept"
+    );
+}
+
+#[test]
+fn reset_removes_the_callbacks_an_earlier_panel_installed() {
+    let (guard, conn) = reset_with_log();
+    // This panel's callbacks become the process's callbacks.
+    drop(signed_in_app());
+    drop(guard);
+
+    // The shared setup creates the test user with no callbacks: nothing is logged for it.
+    let _guard = reset();
+    assert_eq!(log_rows(&conn), 0);
+    let user = conn
+        .run(users::create_user(
+            &conn.db,
+            "Plain",
+            "plain@example.test",
+            "a-long-password",
+        ))
+        .expect("create the user");
+    assert!(events(&conn, user.id).is_empty());
 }
 
 #[test]
@@ -543,7 +651,12 @@ fn ignite_user_delete_through_the_app_runs_the_deleted_callback() {
     assert!(find(&conn, "ada@example.test").is_none());
     assert_eq!(
         events(&conn, user.id),
-        ["created:first", "created:second", "deleted"]
+        [
+            "created:first",
+            "created:second",
+            "deleting",
+            "deleted:row-gone"
+        ]
     );
 
     let unknown = app_cli(&["user", "delete", "nobody@example.test"], "");

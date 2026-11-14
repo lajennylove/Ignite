@@ -39,12 +39,16 @@ All notable changes to Ignite are listed here. The format follows
   screens or the flows. A release build renders the compiled `ignite` views and refuses
   another theme (`ThemeError::NotCompiled`).
 
-- User lifecycle callbacks: `Ignite::on_user_created` and `Ignite::on_user_deleted`, async
-  callbacks given the user's id and the open transaction (`users::UserCallbackFuture`), so
-  an app's own rows are written or removed atomically with the user's. They run, in the
-  order they were registered, for every user Ignite creates or deletes: from the panel, from
-  the command line, and from `users::create_user` and `users::delete_user`. A callback that
-  returns an error rolls the whole change back and returns the error.
+- User lifecycle callbacks: `Ignite::on_user_created`, `Ignite::on_user_deleting` and
+  `Ignite::on_user_deleted`, async callbacks given the user's id and the open transaction
+  (`users::UserCallbackFuture`), so an app's own rows are written or removed atomically with
+  the user's. Created runs after the insert; deleting runs before the delete and deleted
+  after it, as Laravel's `deleting`/`deleted` events and WordPress's
+  `delete_user`/`deleted_user` actions do. They run, in the order they were registered, for
+  every user Ignite creates or deletes: from the panel, from the command line, and from
+  `users::create_user` and `users::delete_user`. A callback that returns an error rolls the
+  whole change back and returns the error. The callbacks are process-wide: the most recently
+  configured `Ignite` sets them, and `users::flush_callbacks` removes them.
 - `Ignite::run_cli` and `Ignite::call_cli`: an app runs the `ignite` command line through its
   builder, from its own binary, so the commands run its user callbacks, as Laravel's
   `artisan` is the app's own console. The stock `ignite` binary runs none.

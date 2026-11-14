@@ -308,7 +308,9 @@ impl Ignite {
     ///
     /// The callbacks are process-wide, as Laravel's model events are: they take effect when
     /// [`fairing`](Self::fairing) or [`run_cli`](Self::run_cli) is called, and replace the
-    /// ones an earlier builder set. The stock `ignite` binary has no app, so it runs none.
+    /// ones an earlier builder set, so the most recently configured `Ignite`'s callbacks are
+    /// the ones that run. [`users::flush_callbacks`] removes them. The stock `ignite` binary
+    /// has no app, so it runs none.
     pub fn on_user_created<F>(mut self, callback: F) -> Self
     where
         F: for<'t> Fn(i64, &'t mut Transaction) -> UserCallbackFuture<'t> + Send + Sync + 'static,
@@ -317,16 +319,37 @@ impl Ignite {
         self
     }
 
-    /// Registers a callback that runs each time Ignite deletes a user: from the panel (an app
-    /// resource that calls [`users::delete_user`]), from `ignite user delete` run through
-    /// [`run_cli`](Self::run_cli), or from a direct call to [`users::delete_user`]. It is
-    /// given the user's id and the open transaction that deletes the user, and it runs before
-    /// the user's row is removed, so it can still read the user and clean up or reassign the
-    /// app's rows that refer to it. Rows whose foreign key cascades go with the user anyway.
+    /// Registers a callback that runs each time Ignite deletes a user, before the user's row
+    /// is deleted, as Laravel's `deleting` event and WordPress's `delete_user` action run: from
+    /// the panel (an app resource that calls [`users::delete_user`]), from `ignite user delete`
+    /// run through [`run_cli`](Self::run_cli), or from a direct call to [`users::delete_user`].
+    /// It is given the user's id and the open transaction that deletes the user. The row still
+    /// exists, so the callback can read the user and remove or reassign the app's rows that
+    /// refer to it, such as rows whose foreign key would refuse the delete.
     ///
     /// Several callbacks run in the order they were registered. When one returns an error,
     /// nothing is deleted and the error is returned to the caller, as for
-    /// [`on_user_created`](Self::on_user_created), which explains when the callbacks take effect.
+    /// [`on_user_created`](Self::on_user_created). The callbacks are process-wide: the most
+    /// recently configured `Ignite` (its [`fairing`](Self::fairing) or
+    /// [`run_cli`](Self::run_cli)) sets the ones that run.
+    pub fn on_user_deleting<F>(mut self, callback: F) -> Self
+    where
+        F: for<'t> Fn(i64, &'t mut Transaction) -> UserCallbackFuture<'t> + Send + Sync + 'static,
+    {
+        self.user_callbacks.deleting.push(Arc::new(callback));
+        self
+    }
+
+    /// Registers a callback that runs each time Ignite deletes a user, after the user's row
+    /// is deleted and in the same transaction, as Laravel's `deleted` event and WordPress's
+    /// `deleted_user` action run. The paths are the ones of
+    /// [`on_user_deleting`](Self::on_user_deleting). It is given the id of the deleted user and
+    /// the open transaction; the row is gone, and rows whose foreign key cascades are gone too.
+    ///
+    /// Several callbacks run in the order they were registered, after every deleting callback.
+    /// When one returns an error, the whole delete is rolled back (the user is kept) and the
+    /// error is returned to the caller. The callbacks are process-wide: the most recently
+    /// configured `Ignite` sets the ones that run.
     pub fn on_user_deleted<F>(mut self, callback: F) -> Self
     where
         F: for<'t> Fn(i64, &'t mut Transaction) -> UserCallbackFuture<'t> + Send + Sync + 'static,
@@ -347,6 +370,9 @@ impl Ignite {
     /// }
     /// ```
     ///
+    /// The callbacks are process-wide: this call makes this builder's callbacks the ones that
+    /// run in the process, replacing any set before.
+    ///
     /// [`Ignite::new`] loads `.env` and needs `DATABASE_URL`. The commands are the ones of
     /// [`crate::cli`]; the resources and other settings of the builder are not used.
     pub fn run_cli(self) -> ! {
@@ -354,7 +380,8 @@ impl Ignite {
         std::process::exit(self.call_cli(args))
     }
 
-    /// Runs one `ignite` command with this app's user callbacks and returns its exit status
+    /// Runs one `ignite` command with this app's user callbacks, which become the process's
+    /// callbacks as with [`run_cli`](Self::run_cli), and returns its exit status
     /// instead of exiting, as Laravel's `Artisan::call` does. `args` are the command's
     /// arguments without the program name, such as `["user", "delete", "ada@example.com"]`.
     /// See [`run_cli`](Self::run_cli).

@@ -476,8 +476,8 @@ fn disable_user(email: &str) -> i32 {
     )
 }
 
-/// `ignite user delete <email>`. Returns the exit code. The app's deleted callbacks run in the
-/// transaction; one that fails keeps the user, and its error is printed.
+/// `ignite user delete <email>`. Returns the exit code. The app's deleting and deleted
+/// callbacks run in the transaction; one that fails keeps the user, and its error is printed.
 fn delete_user(email: &str) -> i32 {
     let (runtime, db) = match connect_with_roles() {
         Ok(connection) => connection,

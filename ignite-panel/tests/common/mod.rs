@@ -306,6 +306,9 @@ pub fn rewind_to(applied: &[&str]) {
 /// Locks the shared tables, resets them, seeds three rows and one user.
 pub fn reset() -> MutexGuard<'static, ()> {
     let guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    // The user callbacks are process-wide: an earlier test's panel must not run its callbacks
+    // for the users created here, or in the test that follows until it builds its own panel.
+    users::flush_callbacks();
     std::env::set_var("DATABASE_URL", database_url());
     let t = test_db();
     t.exec("DROP TABLE IF EXISTS widgets");
