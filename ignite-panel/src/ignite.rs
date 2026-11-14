@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use ignite_core::{Database, Field, IgniteResource};
-use orbit_orm::PoolOptions;
+use orbit_orm::{PoolOptions, Transaction};
 use rocket::catchers;
 use rocket::fairing::{self, AdHoc, Fairing, Info, Kind};
 use rocket::{Build, Request, Response, Rocket};
@@ -15,6 +15,7 @@ use crate::mail::{Mailer, NotConfigured};
 use crate::proxy::TrustedProxies;
 use crate::routes;
 use crate::session;
+use crate::users::{self, UserCallbackFuture, UserCallbacks};
 
 /// The environment variable that names the panel's view directory at run time: a
 /// directory of the `ignite` views, such as `ignite-panel/views/ignite`. It is read
@@ -138,6 +139,7 @@ pub struct Ignite {
     trusted_proxies: TrustedProxies,
     mailer: Arc<dyn Mailer>,
     app_url: Option<String>,
+    user_callbacks: UserCallbacks,
 }
 
 impl Ignite {
@@ -202,6 +204,7 @@ impl Ignite {
             trusted_proxies,
             mailer: Arc::new(NotConfigured),
             app_url,
+            user_callbacks: UserCallbacks::default(),
         }
     }
 
@@ -282,6 +285,87 @@ impl Ignite {
         self
     }
 
+    /// Registers a callback that runs each time Ignite creates a user: from the panel (an app
+    /// resource that calls [`users::create_user`]), from `ignite user create` run through
+    /// [`run_cli`](Self::run_cli), or from a direct call to [`users::create_user`]. It is
+    /// given the new user's id and the open transaction that inserted the user, so the app's
+    /// own rows, such as a profile, are written atomically with the user's row:
+    ///
+    /// ```ignore
+    /// Ignite::new().on_user_created(|user_id, tx| {
+    ///     Box::pin(async move {
+    ///         raw::execute(&mut *tx, "INSERT INTO profiles (user_id) VALUES (?)", &[user_id.into()])
+    ///             .await?;
+    ///         Ok(())
+    ///     })
+    /// })
+    /// ```
+    ///
+    /// Several callbacks can be registered; they run in the order they were registered. When
+    /// one returns an error, the later ones do not run, the whole creation is rolled back (no
+    /// user row is left), and the error is returned to the caller: the panel answers with its
+    /// error page and logs the error, and the command exits with status 1 and prints it.
+    ///
+    /// The callbacks are process-wide, as Laravel's model events are: they take effect when
+    /// [`fairing`](Self::fairing) or [`run_cli`](Self::run_cli) is called, and replace the
+    /// ones an earlier builder set. The stock `ignite` binary has no app, so it runs none.
+    pub fn on_user_created<F>(mut self, callback: F) -> Self
+    where
+        F: for<'t> Fn(i64, &'t mut Transaction) -> UserCallbackFuture<'t> + Send + Sync + 'static,
+    {
+        self.user_callbacks.created.push(Arc::new(callback));
+        self
+    }
+
+    /// Registers a callback that runs each time Ignite deletes a user: from the panel (an app
+    /// resource that calls [`users::delete_user`]), from `ignite user delete` run through
+    /// [`run_cli`](Self::run_cli), or from a direct call to [`users::delete_user`]. It is
+    /// given the user's id and the open transaction that deletes the user, and it runs before
+    /// the user's row is removed, so it can still read the user and clean up or reassign the
+    /// app's rows that refer to it. Rows whose foreign key cascades go with the user anyway.
+    ///
+    /// Several callbacks run in the order they were registered. When one returns an error,
+    /// nothing is deleted and the error is returned to the caller, as for
+    /// [`on_user_created`](Self::on_user_created), which explains when the callbacks take effect.
+    pub fn on_user_deleted<F>(mut self, callback: F) -> Self
+    where
+        F: for<'t> Fn(i64, &'t mut Transaction) -> UserCallbackFuture<'t> + Send + Sync + 'static,
+    {
+        self.user_callbacks.deleted.push(Arc::new(callback));
+        self
+    }
+
+    /// Runs the `ignite` command line in the process arguments with this app's user
+    /// callbacks, and exits with the command's status, as Laravel's `artisan` is the app's own
+    /// console. Call it from the app's own binary, so `ignite user create` and `ignite user
+    /// delete` run the callbacks the panel runs:
+    ///
+    /// ```ignore
+    /// // src/bin/ignite.rs
+    /// fn main() {
+    ///     Ignite::new().on_user_created(create_profile).run_cli();
+    /// }
+    /// ```
+    ///
+    /// [`Ignite::new`] loads `.env` and needs `DATABASE_URL`. The commands are the ones of
+    /// [`crate::cli`]; the resources and other settings of the builder are not used.
+    pub fn run_cli(self) -> ! {
+        let args = std::env::args().skip(1);
+        std::process::exit(self.call_cli(args))
+    }
+
+    /// Runs one `ignite` command with this app's user callbacks and returns its exit status
+    /// instead of exiting, as Laravel's `Artisan::call` does. `args` are the command's
+    /// arguments without the program name, such as `["user", "delete", "ada@example.com"]`.
+    /// See [`run_cli`](Self::run_cli).
+    pub fn call_cli<I>(self, args: I) -> i32
+    where
+        I: IntoIterator<Item = String>,
+    {
+        users::install_callbacks(self.user_callbacks);
+        crate::cli::run(&args.into_iter().collect::<Vec<_>>())
+    }
+
     /// Changes the URL prefix of the panel. The default is `/admin`.
     pub fn mount(mut self, path: &str) -> Self {
         self.mount = path.trim_end_matches('/').to_string();
@@ -305,7 +389,10 @@ impl Ignite {
             trusted_proxies,
             mailer,
             app_url,
+            user_callbacks,
         } = self;
+        // Users created or deleted from now on run the app's callbacks.
+        users::install_callbacks(user_callbacks);
         // The panel registers its own assets, so an app adds nothing for its styling.
         crate::assets::register(&mount);
         register_views(views.as_deref());

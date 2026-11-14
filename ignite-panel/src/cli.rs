@@ -17,6 +17,8 @@
 //!   disabled.
 //! - `ignite user password <email>` sets a new password for an existing user, and ends
 //!   their sessions, as a password reset does.
+//! - `ignite user delete <email>` deletes a user. The last enabled super-admin cannot be
+//!   deleted.
 //!
 //! The user command checks `DATABASE_URL`, connects and checks for an existing user
 //! before it reads the password. Interactively the password is read from the terminal
@@ -47,6 +49,7 @@ const USAGE: &str = "usage:
   ignite user disable <email>
   ignite user enable <email>
   ignite user password <email> [--password-stdin]
+  ignite user delete <email>
 
 `migrate` runs the panel's pending migrations. Run it before the first start.
 `migrate:status` lists each migration as Applied or Pending. `migrate:rollback`
@@ -60,15 +63,23 @@ the app must have started once so the permission exists. `user role add` and
 `user role remove` change a user's roles, and the last super-admin cannot lose the role.
 `user roles` lists a user's roles. `user disable` stops a user from signing in and ends
 their sessions; `user enable` lets them sign in again. `user password` reads a new password
-the same way `user create` does, and ends the user's sessions.";
+the same way `user create` does, and ends the user's sessions. `user delete` deletes a
+user, with their sessions and roles; the last enabled super-admin cannot be deleted.";
 
 /// The shortest password the CLI accepts.
 const MIN_PASSWORD_CHARS: usize = 8;
 
-/// Runs the command in the process arguments and exits.
+/// Runs the command in the process arguments and exits, with no user callbacks. An app with
+/// callbacks runs [`Ignite::run_cli`](crate::Ignite::run_cli) instead.
 pub fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let exit_code = match args.as_slice() {
+    exit(run(&args));
+}
+
+/// Runs the command in `args`, the arguments without the program name, and returns the exit
+/// code. The user callbacks that run are the ones installed when it is called.
+pub(crate) fn run(args: &[String]) -> i32 {
+    match args {
         [migrate] if migrate == "migrate" => migrate_database(),
         [status] if status == "migrate:status" => migration_status(),
         [rollback] if rollback == "migrate:rollback" => rollback_migration(),
@@ -91,12 +102,12 @@ pub fn main() {
         [user, password, rest @ ..] if user == "user" && password == "password" => {
             reset_password(rest)
         }
+        [user, delete, email] if user == "user" && delete == "delete" => delete_user(email),
         _ => {
             eprintln!("{USAGE}");
             2
         }
-    };
-    exit(exit_code);
+    }
 }
 
 /// Connects with `DATABASE_URL` and runs the pending migrations. Returns the exit code.
@@ -462,6 +473,20 @@ fn disable_user(email: &str) -> i32 {
                     format!("{email} is already disabled.")
                 }
             }),
+    )
+}
+
+/// `ignite user delete <email>`. Returns the exit code. The app's deleted callbacks run in the
+/// transaction; one that fails keeps the user, and its error is printed.
+fn delete_user(email: &str) -> i32 {
+    let (runtime, db) = match connect_with_roles() {
+        Ok(connection) => connection,
+        Err(code) => return code,
+    };
+    report(
+        runtime
+            .block_on(authz::delete_user(&db, email))
+            .map(|()| format!("Deleted {email}.")),
     )
 }
 

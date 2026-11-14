@@ -39,10 +39,25 @@ All notable changes to Ignite are listed here. The format follows
   screens or the flows. A release build renders the compiled `ignite` views and refuses
   another theme (`ThemeError::NotCompiled`).
 
+- User lifecycle callbacks: `Ignite::on_user_created` and `Ignite::on_user_deleted`, async
+  callbacks given the user's id and the open transaction (`users::UserCallbackFuture`), so
+  an app's own rows are written or removed atomically with the user's. They run, in the
+  order they were registered, for every user Ignite creates or deletes: from the panel, from
+  the command line, and from `users::create_user` and `users::delete_user`. A callback that
+  returns an error rolls the whole change back and returns the error.
+- `Ignite::run_cli` and `Ignite::call_cli`: an app runs the `ignite` command line through its
+  builder, from its own binary, so the commands run its user callbacks, as Laravel's
+  `artisan` is the app's own console. The stock `ignite` binary runs none.
+- `users::delete_user` and `ignite user delete <email>`. The command refuses to delete the last
+  enabled super-admin (`AuthzError::CannotDeleteLastSuperAdmin`); `authz::delete_user` is its
+  library form.
+
 ### Changed
 
 - **Breaking:** `FieldKind` and `FieldKindDef` have new variants, so an exhaustive `match`
   on them needs new arms.
+- **Breaking:** `AuthzError` has a new variant, `CannotDeleteLastSuperAdmin`.
+- `users::create_user` inserts the user in a transaction, with the app's created callbacks.
 - The panel's layout and its navigation, top bar and flash partials moved to
   `views/ignite/themes/ignite`. `ignite::layouts.app` and `ignite::partials.nav`, `.topbar`
   and `.flash` still exist and resolve to the active theme's views, so an app view that

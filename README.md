@@ -97,6 +97,15 @@ fn main() {
 }
 ```
 
+An app that registers user callbacks (see [User lifecycle callbacks](#user-lifecycle-callbacks)) runs the command through its builder instead, so `ignite user create` and `ignite user delete` run them too. `Ignite::new` loads `.env` itself:
+
+```rust
+// src/bin/ignite.rs
+fn main() {
+    Ignite::new().on_user_created(create_profile).run_cli();
+}
+```
+
 Create the first admin with the command. It asks for a password twice without echoing it, or reads it from standard input with `--password-stdin`:
 
 ```sh
@@ -225,12 +234,43 @@ Manage a user's account with the `ignite` command:
 ignite user disable editor@example.com
 ignite user enable editor@example.com
 ignite user password editor@example.com
+ignite user delete editor@example.com
 ```
 
 - A disabled user cannot sign in. They get the same "The email or password is incorrect." message as a wrong password, which does not reveal that the account exists, and the attempt counts against the sign-in throttle. Disabling ends the user's sessions at once, so a signed-in browser is sent to the login page on its next request. Enabling restores sign-in, and the old sessions stay ended.
 - The last enabled super-admin cannot be disabled, and a disabled super-admin does not count as one who keeps the panel open, so the role cannot be removed from the last enabled super-admin either.
 - `ignite user password` reads the new password the way `ignite user create` does: asked for twice in a terminal, or from standard input with `--password-stdin`. It ends the user's sessions, as the panel's change-password form does for other devices.
+- `ignite user delete` deletes a user. The last enabled super-admin cannot be deleted. An app's resource deletes a user with `users::delete_user(&db, id)`.
 - Deleting a user deletes their session rows too, through the foreign key on `sessions.user_id`. The sign-in throttle rows are keyed by email and address rather than by user, and they expire after one minute, so they need no cleanup.
+
+### User lifecycle callbacks
+
+An app that keeps its own rows for each user, such as a profile, registers callbacks on the builder. They run each time Ignite creates or deletes a user: from the panel (an app resource that calls `users::create_user` or `users::delete_user`), from `ignite user create` and `ignite user delete` run through `Ignite::run_cli`, and from a direct call to those functions. The password reset does not create users.
+
+```rust
+use orbit_orm::raw;
+
+Ignite::new()
+    .on_user_created(|user_id, tx| {
+        Box::pin(async move {
+            raw::execute(&mut *tx, "INSERT INTO profiles (user_id) VALUES (?)", &[user_id.into()])
+                .await?;
+            Ok(())
+        })
+    })
+    .on_user_deleted(|user_id, tx| {
+        Box::pin(async move {
+            raw::execute(&mut *tx, "DELETE FROM profiles WHERE user_id = ?", &[user_id.into()])
+                .await?;
+            Ok(())
+        })
+    })
+```
+
+- A callback is given the user's id and the open transaction that writes the user, so the app's rows are written or removed atomically with the user's row. It returns `Result<(), orbit_orm::Error>`.
+- `on_user_created` callbacks run after the user's row is inserted. `on_user_deleted` callbacks run before the row is deleted, so they can still read the user; rows whose foreign key cascades go with the user anyway.
+- Several callbacks run in the order they were registered. When one returns an error, the later ones do not run, the whole change is rolled back (a failed create leaves no user row, a failed delete keeps the user), and the error goes to the caller: the panel answers with its error page and logs the error, and the command exits with status 1 and prints it.
+- The callbacks are process-wide, as Laravel's model events are. They take effect when `fairing()` or `run_cli()` is called on the builder, and replace the ones an earlier builder set. The stock `ignite` binary, and `ignite_panel::cli::main`, run none.
 
 ## Mail and password reset
 

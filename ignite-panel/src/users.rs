@@ -1,8 +1,18 @@
 //! The `users` table the panel signs in with: its schema, argon2 password
 //! hashes, profile pictures, and the lookups the login and the CLI need.
+//!
+//! [`create_user`] and [`delete_user`] are the only ways Ignite creates and deletes a user,
+//! from the panel, the CLI or an app's resource. Each runs the app's lifecycle callbacks,
+//! registered with [`Ignite::on_user_created`](crate::Ignite::on_user_created) and
+//! [`Ignite::on_user_deleted`](crate::Ignite::on_user_deleted), in the transaction that
+//! writes the user, so the app's own rows are written or removed with it.
+
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::{Arc, PoisonError, RwLock};
 
 use chrono::{NaiveDateTime, Utc};
-use orbit_orm::{Database, Error, Executor, Model, Operator, OrbitModel, Transaction, Value};
+use orbit_orm::{raw, Database, Error, Executor, Model, Operator, OrbitModel, Transaction, Value};
 
 use crate::sessions;
 
@@ -201,7 +211,61 @@ pub async fn avatar(db: &Database, id: i64) -> Result<Option<(String, Vec<u8>)>,
 
 pub use ignite_core::{hash_password, verify_password};
 
+/// The future a user lifecycle callback returns. It is boxed, so callbacks of different
+/// types are kept in one list, and it borrows the transaction it writes in:
+///
+/// ```ignore
+/// Ignite::new().on_user_created(|user_id, tx| {
+///     Box::pin(async move {
+///         raw::execute(&mut *tx, "INSERT INTO profiles (user_id) VALUES (?)", &[user_id.into()])
+///             .await?;
+///         Ok(())
+///     })
+/// })
+/// ```
+pub type UserCallbackFuture<'t> = Pin<Box<dyn Future<Output = Result<(), Error>> + Send + 't>>;
+
+/// A lifecycle callback as the builder keeps it: given the user's id and the open transaction.
+pub(crate) type UserCallback =
+    Arc<dyn for<'t> Fn(i64, &'t mut Transaction) -> UserCallbackFuture<'t> + Send + Sync>;
+
+/// The lifecycle callbacks of an app, in the order they were registered.
+#[derive(Clone, Default)]
+pub(crate) struct UserCallbacks {
+    /// Run by [`create_user`], after the user's row is inserted.
+    pub(crate) created: Vec<UserCallback>,
+    /// Run by [`delete_user`], before the user's row is deleted.
+    pub(crate) deleted: Vec<UserCallback>,
+}
+
+/// The callbacks that [`create_user`] and [`delete_user`] run. They are process-wide, as
+/// Laravel's model events are, because an app's resource and the CLI reach the users table
+/// with only a [`Database`]. The builder sets them (see [`install_callbacks`]).
+static CALLBACKS: RwLock<UserCallbacks> = RwLock::new(UserCallbacks {
+    created: Vec::new(),
+    deleted: Vec::new(),
+});
+
+/// Makes `callbacks` the ones that run, replacing any set before. Called by the builder when
+/// the panel is built and when the app runs its command line.
+pub(crate) fn install_callbacks(callbacks: UserCallbacks) {
+    *CALLBACKS.write().unwrap_or_else(PoisonError::into_inner) = callbacks;
+}
+
+/// A copy of the callbacks that run now. No lock is held while they run.
+fn callbacks() -> UserCallbacks {
+    CALLBACKS
+        .read()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone()
+}
+
 /// Inserts a user with a hashed password and returns the new row.
+///
+/// The app's [`on_user_created`](crate::Ignite::on_user_created) callbacks run after the
+/// insert, in the same transaction and in the order they were registered. When one returns
+/// an error, nothing is kept: the user and every row the callbacks wrote are rolled back, and
+/// the error is returned.
 pub async fn create_user(
     db: &Database,
     name: &str,
@@ -209,19 +273,59 @@ pub async fn create_user(
     password: &str,
 ) -> Result<User, Error> {
     let password_hash = ignite_core::hash_password(password).map_err(hash_error)?;
-    let id = User::query()
-        .insert(
-            db,
-            &[
-                ("name", name.into()),
-                ("email", email.into()),
-                ("password_hash", password_hash.as_str().into()),
-            ],
-        )
-        .await?;
-    find_by_id(db, id as i64)
-        .await?
-        .ok_or(Error::NotFound { table: "users" })
+    let created = callbacks().created;
+    db.transaction(async |tx| {
+        let id = User::query()
+            .insert(
+                &mut *tx,
+                &[
+                    ("name", name.into()),
+                    ("email", email.into()),
+                    ("password_hash", password_hash.as_str().into()),
+                ],
+            )
+            .await? as i64;
+        for callback in &created {
+            callback(id, &mut *tx).await?;
+        }
+        find_by_id(&mut *tx, id)
+            .await?
+            .ok_or(Error::NotFound { table: "users" })
+    })
+    .await
+}
+
+/// Deletes the user with `id` and returns the number of rows deleted: 0 when there is no such
+/// user, and then no callback runs. Their sessions, roles and profile picture go with them,
+/// through the foreign keys.
+///
+/// The app's [`on_user_deleted`](crate::Ignite::on_user_deleted) callbacks run first, in the
+/// same transaction and in the order they were registered, while the user's row still
+/// exists, so a callback can read the user and remove or reassign the app's rows that refer
+/// to it. When one returns an error, nothing is deleted and the error is returned.
+///
+/// It does not check roles. `ignite user delete` refuses the last enabled super-admin.
+pub async fn delete_user(db: &Database, id: i64) -> Result<u64, Error> {
+    db.transaction(async |tx| delete_in(tx, id).await).await
+}
+
+/// [`delete_user`] inside a transaction the caller already has, so a command can check and
+/// delete in one transaction.
+pub(crate) async fn delete_in(tx: &mut Transaction, id: i64) -> Result<u64, Error> {
+    // Locking the row means two deletes of one user cannot both run the callbacks.
+    let found: Vec<(i64,)> = raw::fetch_all(
+        &mut *tx,
+        "SELECT id FROM users WHERE id = ? FOR UPDATE",
+        &[id.into()],
+    )
+    .await?;
+    if found.is_empty() {
+        return Ok(0);
+    }
+    for callback in &callbacks().deleted {
+        callback(id, &mut *tx).await?;
+    }
+    User::query().where_eq("id", id).delete(&mut *tx).await
 }
 
 /// Turns a hashing failure into a database error, so the callers have one error type.
