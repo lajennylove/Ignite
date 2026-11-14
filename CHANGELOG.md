@@ -31,11 +31,23 @@ All notable changes to Ignite are listed here. The format follows
 - The panel renders each new kind through a partial under
   `views/ignite/partials/fields/`, and reads form keys `name[]` and `name[key]` as a JSON
   list or object, as Laravel reads them.
+- Admin themes (`ignite_panel::theme`): the `AdminTheme` trait (layout, navigation, top bar,
+  flash, colour tokens with `ColorToken`, icons with `Icon`, and the theme's own views),
+  `register_admin_theme`, `set_admin_theme` and `active_admin_theme`. The built-in theme,
+  `ignite`, is registered and active from the start and renders the same HTML as before;
+  its views are in `views/ignite/themes/ignite`. Switching theme changes the look, not the
+  screens or the flows. A release build renders the compiled `ignite` views and refuses
+  another theme (`ThemeError::NotCompiled`).
 
 ### Changed
 
 - **Breaking:** `FieldKind` and `FieldKindDef` have new variants, so an exhaustive `match`
   on them needs new arms.
+- The panel's layout and its navigation, top bar and flash partials moved to
+  `views/ignite/themes/ignite`. `ignite::layouts.app` and `ignite::partials.nav`, `.topbar`
+  and `.flash` still exist and resolve to the active theme's views, so an app view that
+  extends the layout is unchanged. In a views directory (`views_dir`, `IGNITE_VIEWS_DIR`),
+  edit the files under `themes/ignite` to change the look.
 
 ## [0.3.0] - unreleased
 

@@ -1,5 +1,7 @@
 @extends('ignite::layouts.app')
 
+@section('ignite_head')@if (theme_style)<style>{!! $theme_style !!}</style>@endif@endsection
+
 @section('ignite_html')data-theme="{{ $theme }}"@endsection
 
 @section('ignite_aside')

@@ -41,6 +41,7 @@ use serde_json::Value;
 use crate::authz::Action;
 use crate::ignite::Registry;
 use crate::session::AdminUser;
+use crate::theme::Icon;
 
 /// The values every page shares: the sidebar, the top bar and the flash message.
 #[derive(Debug, Clone, Serialize)]
@@ -59,13 +60,17 @@ pub(crate) struct Layout {
     pub(crate) nav: Vec<NavGroup>,
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
+    /// The CSS of the active admin theme's colour tokens, or empty when it has none. The
+    /// layout prints it raw: the tokens are checked when the theme is registered.
+    pub(crate) theme_style: String,
 }
 
 /// One entry of the sidebar: a list, and a link to add a record when the resource has forms.
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct NavGroup {
     pub(crate) title: String,
-    pub(crate) icon: &'static str,
+    /// The active admin theme's icon for the entry.
+    pub(crate) icon: String,
     pub(crate) url: String,
     pub(crate) has_add: bool,
     pub(crate) add_url: String,
@@ -92,12 +97,14 @@ impl Layout {
         flash: Option<String>,
         csrf_token: String,
     ) -> Self {
+        // The menu's icons and the colour tokens come from the active admin theme.
+        let admin_theme = crate::theme::active();
         // A resource is listed only when the user may view its records, and its "Add new"
         // link only when the user may create one, as Filament's navigation does.
         let nav = match user {
             Some(user) => std::iter::once(NavGroup {
                 title: "Dashboard".to_string(),
-                icon: "ti-layout-dashboard",
+                icon: admin_theme.theme.icon(Icon::Dashboard),
                 url: registry.mount.clone(),
                 has_add: false,
                 add_url: String::new(),
@@ -110,7 +117,7 @@ impl Layout {
                     .filter(|r| user.may(r.slug(), Action::ViewAny))
                     .map(|r| NavGroup {
                         title: r.title().to_string(),
-                        icon: "ti-table",
+                        icon: admin_theme.theme.icon(Icon::Resource),
                         url: format!("{}/{}", registry.mount, r.slug()),
                         has_add: user.may(r.slug(), Action::Create),
                         add_url: format!("{}/{}/new", registry.mount, r.slug()),
@@ -142,6 +149,7 @@ impl Layout {
             csrf_token,
             has_flash: flash.is_some(),
             flash: flash.unwrap_or_default(),
+            theme_style: admin_theme.style.clone(),
         }
     }
 }
@@ -164,6 +172,7 @@ pub(crate) struct DashboardPage {
     pub(crate) nav: Vec<NavGroup>,
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
+    pub(crate) theme_style: String,
     pub(crate) title: &'static str,
     pub(crate) cards: Vec<CardView>,
     pub(crate) tables: Vec<LatestTable>,
@@ -243,6 +252,7 @@ pub(crate) struct LoginPage {
     pub(crate) nav: Vec<NavGroup>,
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
+    pub(crate) theme_style: String,
     pub(crate) title: &'static str,
     pub(crate) action: String,
     pub(crate) forgot_url: String,
@@ -270,6 +280,7 @@ pub(crate) struct ForgotPage {
     pub(crate) nav: Vec<NavGroup>,
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
+    pub(crate) theme_style: String,
     pub(crate) title: &'static str,
     pub(crate) action: String,
     pub(crate) login_url: String,
@@ -296,6 +307,7 @@ pub(crate) struct ResetPage {
     pub(crate) nav: Vec<NavGroup>,
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
+    pub(crate) theme_style: String,
     pub(crate) title: &'static str,
     pub(crate) action: String,
     pub(crate) token: String,
@@ -322,6 +334,7 @@ pub(crate) struct ProfilePage {
     pub(crate) nav: Vec<NavGroup>,
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
+    pub(crate) theme_style: String,
     pub(crate) title: &'static str,
     pub(crate) profile_action: String,
     pub(crate) profile_fields: Vec<FieldView>,
@@ -349,6 +362,7 @@ pub(crate) struct IndexPage {
     pub(crate) nav: Vec<NavGroup>,
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
+    pub(crate) theme_style: String,
     pub(crate) title: String,
     pub(crate) singular: String,
     pub(crate) index_url: String,
@@ -410,6 +424,7 @@ pub(crate) struct FormPage {
     pub(crate) nav: Vec<NavGroup>,
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
+    pub(crate) theme_style: String,
     pub(crate) title: String,
     pub(crate) singular: String,
     pub(crate) heading: String,

@@ -111,6 +111,22 @@ pub(crate) const VIEWS: &[(&str, &str)] = &[
     ),
     ("profile", include_str!("../views/ignite/profile.propel")),
     ("reset", include_str!("../views/ignite/reset.propel")),
+    (
+        "themes.ignite.layouts.app",
+        include_str!("../views/ignite/themes/ignite/layouts/app.propel"),
+    ),
+    (
+        "themes.ignite.partials.flash",
+        include_str!("../views/ignite/themes/ignite/partials/flash.propel"),
+    ),
+    (
+        "themes.ignite.partials.nav",
+        include_str!("../views/ignite/themes/ignite/partials/nav.propel"),
+    ),
+    (
+        "themes.ignite.partials.topbar",
+        include_str!("../views/ignite/themes/ignite/partials/topbar.propel"),
+    ),
 ];
 
 impl Loader for EmbeddedViews {

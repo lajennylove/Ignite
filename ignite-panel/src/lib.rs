@@ -21,6 +21,7 @@ mod proxy;
 mod routes;
 mod session;
 mod sessions;
+pub mod theme;
 mod throttle;
 pub mod users;
 mod views;
@@ -36,6 +37,7 @@ pub use ignite::Ignite;
 pub use ignite_core;
 pub use mail::{EmailitMailer, MailError, Mailer, Message, NotConfigured, RecordingMailer};
 pub use session::AdminUser;
+pub use theme::{active_admin_theme, register_admin_theme, set_admin_theme, AdminTheme};
 
 /// Loads the `.env` file in the working directory into the process environment, without
 /// overriding variables already set. A missing file is fine. A file that exists but cannot

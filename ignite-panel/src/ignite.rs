@@ -250,7 +250,9 @@ impl Ignite {
 
     /// Reads the panel's views from `path` instead of the views embedded in the
     /// binary. Use it to edit views without rebuilding. The directory must hold
-    /// `layouts/app.propel`, and an override here wins over `IGNITE_VIEWS_DIR`.
+    /// `layouts/app.propel`, and an override here wins over `IGNITE_VIEWS_DIR`. The views are
+    /// served through the active admin theme (see [`crate::theme`]), so the `ignite` theme's
+    /// look is in the directory's `themes/ignite`.
     ///
     /// # Panics
     ///
@@ -384,15 +386,24 @@ impl Fairing for PanelFairing {
 }
 
 /// Registers the panel's views for the dev renderer: a directory when one is named, or
-/// the embedded views. A release build renders compiled views, so it registers nothing.
+/// the embedded views, served through the active admin theme (see [`crate::theme`]). A
+/// release build renders compiled views, so it registers nothing.
 #[cfg(debug_assertions)]
 fn register_views(dir: Option<&Path>) {
+    use crate::theme::ThemedViews;
+
     match dir {
         Some(dir) => {
             check_views(dir);
-            propel_rocket::register_namespace("ignite", dir);
+            propel_rocket::register_namespace_loader(
+                "ignite",
+                ThemedViews::new(propel_runtime::FileLoader::new(dir)),
+            );
         }
-        None => propel_rocket::register_namespace_loader("ignite", crate::embedded::EmbeddedViews),
+        None => propel_rocket::register_namespace_loader(
+            "ignite",
+            ThemedViews::new(crate::embedded::EmbeddedViews),
+        ),
     }
 }
 

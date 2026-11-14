@@ -1,3 +1,1 @@
-@if (has_flash)
-  <p class="mb-5 rounded-md border border-primary/30 bg-lightprimary px-4 py-3 text-heading" role="status">{{ $flash }}</p>
-@endif
+{{-- The panel resolves this view through the active admin theme (src/theme.rs). Compiled views get the ignite theme's. --}}@include('ignite::themes.ignite.partials.flash')
