@@ -24,6 +24,6 @@ pub use resource::{table_name_is, IgniteResource};
 pub use runtime_resource::{
     register_runtime, reserve_slugs, runtime_resource, runtime_resources, unregister_runtime,
     ColumnDef, FieldDef, FieldKindDef, RegisteredResource, Row, RuntimeData, RuntimeError,
-    RuntimeFuture, RuntimeResource,
+    RuntimeFuture, RuntimeResource, MAX_FIELD_NAME,
 };
 pub use widget::{LatestRecords, StatWidget};

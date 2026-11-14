@@ -327,6 +327,14 @@ pub enum RuntimeError {
     InvalidSlug(String),
     /// Another resource, static or runtime, or one of the panel's own pages, has the slug.
     SlugTaken(String),
+    /// A field name is not a lowercase identifier: lowercase ASCII letters, digits and `_`,
+    /// starting with a letter, at most 64 bytes ([`MAX_FIELD_NAME`]).
+    InvalidFieldName {
+        /// The slug of the resource.
+        slug: String,
+        /// The name that was refused.
+        field: String,
+    },
     /// Two fields of the resource have the same name.
     DuplicateField {
         /// The slug of the resource.
@@ -348,6 +356,11 @@ impl fmt::Display for RuntimeError {
             RuntimeError::SlugTaken(slug) => write!(
                 f,
                 "the slug `{slug}` is already used by another Ignite resource"
+            ),
+            RuntimeError::InvalidFieldName { slug, field } => write!(
+                f,
+                "the field `{field}` of the resource `{slug}` is not valid: use lowercase \
+                 letters, digits and `_`, starting with a letter, at most {MAX_FIELD_NAME} bytes"
             ),
             RuntimeError::DuplicateField { slug, field } => {
                 write!(f, "the resource `{slug}` has two fields named `{field}`")
@@ -458,6 +471,20 @@ fn write<T>(f: impl FnOnce(&mut Registry) -> T) -> T {
     f(guard.get_or_insert_with(Registry::default))
 }
 
+/// The longest field name a runtime resource accepts, in bytes. Each distinct field name is
+/// kept for the life of the process, as the key of its form errors, so its size is bounded.
+pub const MAX_FIELD_NAME: usize = 64;
+
+/// Whether `name` is a field name a runtime resource accepts: lowercase ASCII letters, digits
+/// and `_`, starting with a letter, at most [`MAX_FIELD_NAME`] bytes, as a column name is.
+fn valid_field_name(name: &str) -> bool {
+    name.len() <= MAX_FIELD_NAME
+        && name.bytes().next().is_some_and(|b| b.is_ascii_lowercase())
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+}
+
 /// Whether `slug` is one URL segment the panel's `/<slug>` routes match: lowercase ASCII
 /// letters, digits, `-` and `_`, as Filament's kebab-case slugs are.
 fn valid_slug(slug: &str) -> bool {
@@ -478,6 +505,12 @@ fn valid_slug(slug: &str) -> bool {
 pub fn register_runtime(resource: RuntimeResource) -> Result<(), RuntimeError> {
     if !valid_slug(&resource.slug) {
         return Err(RuntimeError::InvalidSlug(resource.slug));
+    }
+    if let Some(field) = resource.fields.iter().find(|f| !valid_field_name(&f.name)) {
+        return Err(RuntimeError::InvalidFieldName {
+            slug: resource.slug.clone(),
+            field: field.name.clone(),
+        });
     }
     let mut names = HashSet::new();
     if let Some(field) = resource.fields.iter().find(|f| !names.insert(&f.name)) {

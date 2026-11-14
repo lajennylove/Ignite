@@ -57,8 +57,20 @@ pub fn load_env() {
 /// with [`ignite_core::register_runtime`], in the same request, as a static resource gets its
 /// rows when the app starts. Running it again changes nothing. If the app does not call it,
 /// the panel creates the rows on the next signed-in request.
-pub async fn register_runtime_permissions(db: &Database, slug: &str) -> Result<(), OrbitError> {
-    authz::register(db, &authz::slug_abilities(slug)).await
+///
+/// Refuses, and creates nothing, when no runtime resource is registered at `slug`, so a
+/// mistaken call cannot add permissions for a resource that does not exist.
+pub async fn register_runtime_permissions(
+    db: &Database,
+    slug: &str,
+) -> Result<(), authz::AuthzError> {
+    if ignite_core::runtime_resource(slug).is_none() {
+        return Err(authz::AuthzError::NotFound(format!(
+            "The runtime resource {slug}"
+        )));
+    }
+    authz::register(db, &authz::slug_abilities(slug)).await?;
+    Ok(())
 }
 
 /// The panel's migrations, embedded in the crate at build time. Each name is a folder in

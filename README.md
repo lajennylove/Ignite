@@ -145,7 +145,7 @@ category_id: Option<i32>,
 
 ### Runtime resources
 
-A resource can also be defined by data while the app runs, such as a custom post type that a site owner creates in the admin. Build a `RuntimeResource` from its slug, titles, `FieldDef`s and `ColumnDef`s (owned twins of `Field` and `Column`; `FieldDef::from(field)` converts a static one), give it a `RuntimeData` that reads and writes its rows as JSON maps, and add it with `register_runtime`. Definitions stay owned: editing and registering a resource again keeps no copy of the old one (only each distinct field name is kept, as the key of its form errors).
+A resource can also be defined by data while the app runs, such as a custom post type that a site owner creates in the admin. Build a `RuntimeResource` from its slug, titles, `FieldDef`s and `ColumnDef`s (owned twins of `Field` and `Column`; `FieldDef::from(field)` converts a static one), give it a `RuntimeData` that reads and writes its rows as JSON maps, and add it with `register_runtime`. Definitions stay owned: editing and registering a resource again keeps no copy of the old one (only each distinct field name is kept, as the key of its form errors). A field name must be lowercase letters, digits and `_`, start with a letter, and be at most 64 bytes.
 
 ```rust
 use ignite_core::{register_runtime, unregister_runtime, ColumnDef, FieldDef, FieldKindDef, RuntimeResource};
@@ -158,7 +158,7 @@ register_runtime(
 unregister_runtime("books")?;
 ```
 
-The panel serves it at `/admin/<slug>` with the same list, forms, checks and delete action as a static resource, and shows it in the navigation, from the next request on. Ignite assumes no table layout: `RuntimeData` decides where the rows live. A row needs a numeric `id`. A slug that a static resource, another runtime resource or a panel page (such as `login`) uses is refused with a `RuntimeError`. Call `ignite_panel::register_runtime_permissions(&db, "books").await?` right after `register_runtime`, so its five permissions exist at once and a role can be granted them; without the call, the panel creates them on the next signed-in request. They stay when the resource is removed. A unique-index violation shows as "<label> is already taken." only when the index is named `{slug}_{field}_unique`, as for a static resource; a `RuntimeData` that stores values elsewhere should check uniqueness itself. A runtime resource has no dashboard cards or table yet.
+The panel serves it at `/admin/<slug>` with the same list, forms, checks and delete action as a static resource, and shows it in the navigation, from the next request on. Ignite assumes no table layout: `RuntimeData` decides where the rows live. A row needs a numeric `id`. A slug that a static resource, another runtime resource or a panel page (such as `login`) uses is refused with a `RuntimeError`. Call `ignite_panel::register_runtime_permissions(&db, "books").await?` right after `register_runtime` (it refuses a slug that is not registered), so its five permissions exist at once and a role can be granted them; without the call, the panel creates them on the next signed-in request. They stay when the resource is removed. A unique-index violation shows as "<label> is already taken." only when the index is named `{slug}_{field}_unique`, as for a static resource; a `RuntimeData` that stores values elsewhere should check uniqueness itself. A runtime resource has no dashboard cards or table yet.
 
 ## Roles and permissions
 

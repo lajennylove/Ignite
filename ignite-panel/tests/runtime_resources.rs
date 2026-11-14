@@ -369,3 +369,28 @@ fn the_app_creates_the_permissions_when_it_registers_so_a_grant_works_at_once() 
 
     unregister_runtime("granted-books").expect("unregister");
 }
+
+#[test]
+fn permissions_are_not_created_for_a_slug_that_is_not_registered() {
+    let _guard = reset_books();
+    let _client = client(None);
+    let t = test_db();
+
+    let error = t
+        .run(ignite_panel::register_runtime_permissions(
+            &t.db,
+            "missing-books",
+        ))
+        .unwrap_err();
+    assert!(
+        matches!(&error, authz::AuthzError::NotFound(what) if what.contains("missing-books")),
+        "{error}"
+    );
+    assert_eq!(
+        t.count(
+            "SELECT COUNT(*) FROM permissions WHERE name LIKE ?",
+            &["missing-books.%".into()],
+        ),
+        0
+    );
+}

@@ -301,3 +301,53 @@ fn a_blank_password_on_an_edit_keeps_the_stored_one() {
     assert!(!row.contains_key("secret"), "the stored password is kept");
     assert_eq!(row["public"], json!(false));
 }
+
+#[test]
+fn a_field_name_that_is_not_a_lowercase_identifier_is_refused() {
+    for name in [
+        "Title",
+        "two words",
+        "1st",
+        "_hidden",
+        "naïve",
+        "dash-ed",
+        "",
+    ] {
+        let resource = resource("rt-bad-name").field(text(name, "Label", false));
+        assert_eq!(
+            register_runtime(resource).unwrap_err(),
+            RuntimeError::InvalidFieldName {
+                slug: "rt-bad-name".to_string(),
+                field: name.to_string(),
+            },
+            "{name:?}"
+        );
+    }
+    let error = register_runtime(resource("rt-bad-name").field(text("Bad", "Bad", false)))
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        error,
+        "the field `Bad` of the resource `rt-bad-name` is not valid: use lowercase letters, \
+         digits and `_`, starting with a letter, at most 64 bytes"
+    );
+}
+
+#[test]
+fn a_field_name_may_be_64_bytes_but_not_65() {
+    let long = format!("a{}", "b".repeat(63));
+    assert_eq!(long.len(), 64);
+    register_runtime(resource("rt-long-name").field(text(&long, "Long", false)))
+        .expect("64 bytes is accepted");
+    unregister_runtime("rt-long-name").expect("unregister");
+
+    let too_long = format!("{long}c");
+    assert_eq!(
+        register_runtime(resource("rt-too-long").field(text(&too_long, "Long", false)))
+            .unwrap_err(),
+        RuntimeError::InvalidFieldName {
+            slug: "rt-too-long".to_string(),
+            field: too_long,
+        }
+    );
+}
