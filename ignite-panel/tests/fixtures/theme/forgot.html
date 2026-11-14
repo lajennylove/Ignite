@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en" >
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>
+  Forgot password
+ · Ignite</title>
+<link rel="icon" href="/admin/build/resources/images/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="/admin/build/resources/images/favicon-32.png">
+<link rel="apple-touch-icon" href="/admin/build/resources/images/apple-touch-icon.png">
+<link rel="stylesheet" href="/admin/build/assets/app-CS1XT9FU.css">
+<script type="module" src="/admin/build/assets/app-aLvpPEct.js"></script>
+
+</head>
+<body class="min-h-screen bg-page font-sans text-text antialiased">
+
+<div class="flex min-h-screen min-w-0 flex-col ">
+  
+  <header class="flex items-center border-b border-border bg-page px-5 py-3">
+    <div class="flex w-full items-center gap-4">
+  
+    <a class="flex items-center gap-2 font-semibold text-heading no-underline" href="/admin">
+      <img src="/admin/build/resources/images/ignite-mark.png" alt="" class="h-9 w-auto">
+      Ignite
+    </a>
+  
+</div>
+
+  </header>
+
+  <main class="mx-auto w-full max-w-[1536px] flex-1 px-5 py-6">
+    
+  
+
+
+    
+  <div class="mx-auto mt-10 w-full max-w-md">
+    <section class="ig-card p-8">
+      <h1 class="mb-6 text-center text-2xl">Forgot password</h1>
+
+      <form class="grid gap-5" method="post" action="/admin/password/forgot">
+        <input type="hidden" name="_token" value="{csrf}">
+
+        
+
+        <div>
+          <label class="ig-label" for="email">Email</label>
+          <input class="ig-input py-2.5" id="email" name="email" type="email" value="" autocomplete="username">
+        </div>
+
+        <button type="submit" class="ig-btn ig-btn-primary w-full py-3">Email me a reset link</button>
+      </form>
+
+      <p class="mt-5 text-center text-sm">
+        <a href="/admin/login">Back to sign in</a>
+      </p>
+    </section>
+  </div>
+
+  </main>
+</div>
+</body>
+</html>

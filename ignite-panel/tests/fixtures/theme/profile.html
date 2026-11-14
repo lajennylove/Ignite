@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>
+  Profile
+ · Ignite</title>
+<link rel="icon" href="/admin/build/resources/images/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="/admin/build/resources/images/favicon-32.png">
+<link rel="apple-touch-icon" href="/admin/build/resources/images/apple-touch-icon.png">
+<link rel="stylesheet" href="/admin/build/assets/app-CS1XT9FU.css">
+<script type="module" src="/admin/build/assets/app-aLvpPEct.js"></script>
+
+</head>
+<body class="min-h-screen bg-page font-sans text-text antialiased">
+
+  
+<input id="ig-nav" type="checkbox" class="peer sr-only">
+<aside class="fixed inset-y-0 left-0 z-30 flex w-[270px] -translate-x-full flex-col overflow-y-auto border-r border-border bg-surface transition-transform duration-300 peer-checked:translate-x-0 xl:translate-x-0">
+  <a class="flex items-center gap-2.5 px-6 py-6 font-semibold text-heading no-underline" href="/admin">
+    <img src="/admin/build/resources/images/ignite-mark.png" alt="" class="h-9 w-auto">
+    <span class="text-xl">Ignite</span>
+  </a>
+  <nav class="flex flex-col gap-1 px-4 pb-6" aria-label="Main">
+    <p class="ig-caption mt-2">Menu</p>
+    
+      
+        <a class="ig-nav-link" href="/admin"><i class="ti ti-layout-dashboard text-lg"></i>Dashboard</a>
+      
+      
+    
+      
+        <a class="ig-nav-link" href="/admin/widgets"><i class="ti ti-table text-lg"></i>Widgets</a>
+      
+      
+        <a class="ig-nav-link py-1.5 pl-11 text-[13px]" href="/admin/widgets/new">Add new</a>
+      
+    
+  </nav>
+</aside>
+
+
+
+<div class="flex min-h-screen min-w-0 flex-col ig-with-sidebar">
+  
+  <header class="sticky top-0 z-20 flex items-center border-b border-border bg-page px-5 py-3">
+    <div class="flex w-full items-center gap-4">
+  
+    <label for="ig-nav" class="ig-btn ig-btn-ghost h-10 w-10 px-0 xl:hidden" aria-label="Open the menu"><i class="ti ti-menu-2 text-xl"></i></label>
+    <a class="flex items-center gap-2.5 font-semibold text-heading no-underline hover:underline" href="/admin/profile"><span class="flex h-9 w-9 items-center justify-center rounded-full bg-lightprimary text-sm font-semibold text-primary">A</span>Admin</a>
+    <div class="ml-auto flex items-center gap-2">
+      <button type="button" class="ig-btn ig-btn-outline h-10 w-10 px-0" data-theme-toggle data-theme="light" data-theme-url="/admin/theme" data-csrf="{csrf}" aria-label="Switch theme">
+        <i class="ti ti-moon ig-theme-moon text-lg"></i>
+        <i class="ti ti-sun ig-theme-sun text-lg"></i>
+      </button>
+      <form method="post" action="/admin/logout-everywhere">
+        <input type="hidden" name="_token" value="{csrf}">
+        <button type="submit" class="ig-btn ig-btn-outline">Sign out</button>
+      </form>
+    </div>
+  
+</div>
+
+  </header>
+
+  <main class="mx-auto w-full max-w-[1536px] flex-1 px-5 py-6">
+    
+  
+
+
+    
+  <h1 class="mb-6">Profile</h1>
+
+  <div class="grid min-w-0 max-w-6xl grid-cols-[minmax(0,1fr)] gap-6">
+    <div class="grid min-w-0 gap-6 grid-cols-[minmax(0,1fr)] lg:grid-cols-2">
+      <section class="ig-card">
+        <h2 class="mb-5">Your details</h2>
+        <form class="grid gap-5" method="post" action="/admin/profile">
+          <input type="hidden" name="_token" value="{csrf}">
+
+          
+            
+<div>
+  
+    <label class="ig-label" for="name">Name *</label>
+    
+      <input class="ig-input" id="name" name="name" type="text"  value="Admin">
+    
+  
+  
+</div>
+
+          
+            
+<div>
+  
+    <label class="ig-label" for="email">Email *</label>
+    
+      <input class="ig-input" id="email" name="email" type="text"  value="admin@example.test">
+    
+  
+  
+</div>
+
+          
+            
+<div>
+  
+    <label class="ig-label" for="job_title">Job title</label>
+    
+      <input class="ig-input" id="job_title" name="job_title" type="text"  value="">
+    
+  
+  
+</div>
+
+          
+
+          <div>
+            <button type="submit" class="ig-btn ig-btn-primary">Save details</button>
+          </div>
+        </form>
+      </section>
+      <section class="ig-card">
+        <h2 class="mb-5">Password</h2>
+        <form class="grid max-w-md gap-5" method="post" action="/admin/profile/password">
+          <input type="hidden" name="_token" value="{csrf}">
+
+          
+            <div>
+              <label class="ig-label" for="current_password">Current password</label>
+              <input class="ig-input" id="current_password" name="current_password" type="password" autocomplete="new-password">
+              
+            </div>
+          
+            <div>
+              <label class="ig-label" for="new_password">New password</label>
+              <input class="ig-input" id="new_password" name="new_password" type="password" autocomplete="new-password">
+              
+            </div>
+          
+            <div>
+              <label class="ig-label" for="confirm_password">Confirm new password</label>
+              <input class="ig-input" id="confirm_password" name="confirm_password" type="password" autocomplete="new-password">
+              
+            </div>
+          
+
+          <div>
+            <button type="submit" class="ig-btn ig-btn-primary">Change password</button>
+          </div>
+        </form>
+      </section>
+    </div>
+
+    <section class="ig-card flex flex-col gap-6 sm:flex-row sm:items-center">
+      
+        <span class="flex h-20 w-20 shrink-0 items-center justify-center rounded-full bg-lightprimary text-2xl font-semibold text-primary">A</span>
+      
+
+      <div class="grid flex-1 gap-3">
+        <h2 class="m-0">Picture</h2>
+        <p class="m-0 text-sm">PNG, JPEG or WebP, up to 1 MB. Without a picture, your initials show.</p>
+        <form class="flex flex-wrap items-center gap-3" method="post" action="/admin/profile/avatar" enctype="multipart/form-data">
+          <input type="hidden" name="_token" value="{csrf}">
+          <input class="text-sm" type="file" name="avatar" accept="image/png,image/jpeg,image/webp" required>
+          <button type="submit" class="ig-btn ig-btn-outline">Upload</button>
+        </form>
+        
+      </div>
+    </section>
+  </div>
+
+  </main>
+</div>
+</body>
+</html>
