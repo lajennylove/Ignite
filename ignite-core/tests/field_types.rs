@@ -64,26 +64,85 @@ fn an_invalid_email_is_refused() {
     }
 }
 
+/// Values whose scheme runs code, which neither a URL nor a link accepts, whatever their
+/// case or the whitespace and control characters around the scheme.
+const SCRIPT_URLS: &[&str] = &[
+    "javascript:alert(1)",
+    "JavaScript:alert(1)",
+    "  javascript:alert(1)",
+    "\u{1}javascript:alert(1)",
+    "java\tscript:alert(1)",
+    "data:text/html,<script>alert(1)</script>",
+    "DATA:text/html;base64,PHNjcmlwdD4=",
+    "vbscript:msgbox(1)",
+];
+
 #[test]
 fn a_url_must_parse() {
     const SITE: Field = field("site", "Site", FieldKind::Url);
 
-    assert_eq!(
-        check(&SITE, "https://example.com/about?x=1"),
-        Ok("https://example.com/about?x=1".into())
-    );
-    assert_eq!(check(&SITE, "mailto:ada@example.com").map(|_| ()), Ok(()));
     for text in [
+        "https://example.com/about?x=1",
+        "mailto:ada@example.com",
+        "ftp://files.example.com/a.zip",
+        // Protocol-relative, as ACF's URL field accepts.
+        "//cdn.example.com",
+        "//cdn.example.com/lib.js?v=2",
+    ] {
+        assert_eq!(check(&SITE, text), Ok(text.into()), "{text}");
+    }
+    let mut refused = vec![
         "example.com",
         "/about",
+        "#top",
+        "?a=b",
         "http://",
+        "//",
+        "///about",
         "not a url",
-        "javascript:alert(1)",
-    ] {
+    ];
+    refused.extend_from_slice(SCRIPT_URLS);
+    for text in refused {
         assert_eq!(
             check(&SITE, text),
             Err("Site must be a valid URL.".into()),
             "{text}"
+        );
+    }
+}
+
+#[test]
+fn a_link_accepts_what_the_acf_link_picker_stores() {
+    const LINK: Field = field("cta", "Call to action", FieldKind::Link);
+    let link = |url: &str| json!({"url": url}).to_string();
+
+    for url in [
+        "https://example.com/about",
+        "/about",
+        "/about?x=1#team",
+        "/",
+        "#top",
+        "?a=b",
+        "//cdn.example.com/page",
+        "mailto:ada@example.com",
+    ] {
+        let stored = check(&LINK, &link(url)).unwrap_or_else(|e| panic!("{url}: {e}"));
+        assert_eq!(json_of(&stored)["url"], json!(url), "{url}");
+    }
+    let mut refused = vec![
+        "about",
+        "//",
+        "///about",
+        "/\\evil.example.com",
+        "http://",
+        "not a url",
+    ];
+    refused.extend_from_slice(SCRIPT_URLS);
+    for url in refused {
+        assert_eq!(
+            check(&LINK, &link(url)),
+            Err("Call to action must be a link with a valid URL.".into()),
+            "{url}"
         );
     }
 }

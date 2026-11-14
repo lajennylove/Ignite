@@ -209,10 +209,12 @@ impl Field {
         check_email(self.name, self.label, text, errors)
     }
 
-    /// Checks that `text`, trimmed, parses as an absolute URL, such as
-    /// `https://example.com/about`. The `javascript:`, `data:` and `vbscript:` schemes are
-    /// refused, because a link to one runs code. If it does not parse, records "<label> must
-    /// be a valid URL." and returns `None`.
+    /// Checks that `text`, trimmed, is a URL as ACF's URL field accepts one: an absolute URL
+    /// that parses, such as `https://example.com/about`, or a protocol-relative one with a
+    /// host, such as `//cdn.example.com/lib.js`. The `javascript:`, `data:` and `vbscript:`
+    /// schemes are refused in any case and with any whitespace or control characters around
+    /// them, because a link to one runs code. Otherwise records "<label> must be a valid URL."
+    /// and returns `None`.
     pub fn check_url(&self, text: &str, errors: &mut FieldErrors) -> Option<String> {
         check_url(self.name, self.label, text, errors)
     }
@@ -224,8 +226,10 @@ impl Field {
     }
 
     /// Checks that `text` is the JSON of a link, `{"url": ..., "title": ..., "target": ...}`,
-    /// whose URL passes [`check_url`](Self::check_url) and whose target is `""` or
-    /// `"_blank"`. The title and target may be left out. Returns the link as JSON text with
+    /// whose target is `""` or `"_blank"` and whose URL is one ACF's link picker stores: a URL
+    /// that passes [`check_url`](Self::check_url), a root-relative path (`/about`), an anchor
+    /// (`#top`) or a query (`?a=b`). A blank URL, `//` with no host and a script scheme are
+    /// refused. The title and target may be left out. Returns the link as JSON text with
     /// all three keys. Otherwise records "<label> must be a link with a valid URL." and
     /// returns `None`.
     pub fn check_link(&self, text: &str, errors: &mut FieldErrors) -> Option<String> {
@@ -429,12 +433,52 @@ pub(crate) fn check_url(
     None
 }
 
-/// Whether `text` parses as an absolute URL whose scheme cannot run code.
+/// Whether `text` is an absolute URL that parses, or a protocol-relative URL (`//host/...`)
+/// with a host, and its scheme cannot run code.
 pub(crate) fn is_url(text: &str) -> bool {
+    if has_script_scheme(text) {
+        return false;
+    }
+    if let Some(rest) = text.strip_prefix("//") {
+        // `//` must be followed by a host: not by another slash, which a browser skips.
+        if rest.is_empty() || rest.starts_with(['/', '\\']) {
+            return false;
+        }
+        return url::Url::parse(&format!("https:{text}"))
+            .is_ok_and(|url| url.host_str().is_some_and(|host| !host.is_empty()));
+    }
     match url::Url::parse(text) {
         Ok(url) => !matches!(url.scheme(), "javascript" | "data" | "vbscript"),
         Err(_) => false,
     }
+}
+
+/// Whether `text` is a link target as ACF's link picker stores one: a URL that passes
+/// [`is_url`], a root-relative path (`/about`), an anchor (`#top`) or a query (`?a=b`). A
+/// path may not start with `//` or `/\`, which a browser reads as another host.
+pub(crate) fn is_link_url(text: &str) -> bool {
+    if is_url(text) {
+        return true;
+    }
+    let relative = match text.strip_prefix('/') {
+        Some(rest) => !rest.starts_with(['/', '\\']),
+        None => text.starts_with(['#', '?']),
+    };
+    relative && !text.chars().any(|c| c.is_control() || c.is_whitespace())
+}
+
+/// Whether `text` starts with the `javascript:`, `data:` or `vbscript:` scheme, in any case.
+/// Whitespace and control characters are ignored, as a browser strips them from a URL
+/// before it reads the scheme.
+fn has_script_scheme(text: &str) -> bool {
+    let scheme: String = text
+        .chars()
+        .filter(|c| !c.is_whitespace() && !c.is_control())
+        .take_while(|c| *c != ':')
+        .collect::<String>()
+        .to_ascii_lowercase();
+    let has_colon = text.contains(':');
+    has_colon && matches!(scheme.as_str(), "javascript" | "data" | "vbscript")
 }
 
 /// See [`Field::check_color`].
@@ -494,7 +538,7 @@ pub(crate) fn link_value(value: &serde_json::Value) -> Option<serde_json::Value>
     let url = text("url")?;
     let title = text("title")?;
     let target = text("target")?;
-    if !is_url(&url) || !matches!(target.as_str(), "" | "_blank") {
+    if !is_link_url(&url) || !matches!(target.as_str(), "" | "_blank") {
         return None;
     }
     Some(serde_json::json!({ "url": url, "title": title, "target": target }))

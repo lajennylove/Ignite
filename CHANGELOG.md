@@ -13,7 +13,10 @@ All notable changes to Ignite are listed here. The format follows
   `File`, `Link`, `Wysiwyg`, `PostObject`, `Relationship`, `Taxonomy`, `User`, `Repeater`,
   `Group`, `FlexibleContent` (with `Block` / `BlockDef`), `Gallery` and `Clone`. Each one
   checks its input (`Field::check_value`, and `check_email`, `check_url`, `check_color`,
-  `check_link`): an email must be a valid address, a URL must parse, a color is `#rrggbb`.
+  `check_link`): an email must be a valid address, a URL must parse (absolute, or
+  protocol-relative `//host` as ACF accepts), a link's URL may also be a root-relative path,
+  an anchor or a query as ACF's link picker stores, script schemes are refused, and a color
+  is `#rrggbb`.
   `Link`, `Relationship`, `Gallery`, `Repeater`, `Group`, `FlexibleContent` and `Clone`
   store JSON text that round-trips; the nested values are checked against their
   sub-fields. `PostObject`, `Relationship`, `Taxonomy` and `User` load their choices as

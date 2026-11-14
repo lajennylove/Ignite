@@ -237,13 +237,13 @@ fn each_new_type_renders_through_its_partial() {
         .unwrap();
     for expected in [
         r#"name="contact" type="email""#,
-        r#"name="site" type="url""#,
+        r#"name="site" type="text" inputmode="url""#,
         r##"name="accent" type="text" value="" pattern="#[0-9a-fA-F]{6}""##,
         r#"type="radio" class="h-4 w-4 border-bordergray text-primary focus:ring-primary" name="size" value="l""#,
         r#"name="photo" type="number" min="1" step="1" value="" data-ignite-media="image""#,
         r#"name="gallery[]" type="number""#,
         r#"href="/admin/media""#,
-        r#"name="cta[url]" type="url""#,
+        r#"name="cta[url]" type="text" inputmode="url""#,
         r#"name="cta[target]" value="_blank""#,
         r#"name="body" data-ignite-editor="wysiwyg""#,
         r#"<script src="/vendor/editor/init.js" defer></script>"#,
@@ -338,7 +338,7 @@ fn valid_values_are_stored_and_the_edit_form_shows_them_again() {
         .unwrap();
     for expected in [
         r#"name="size" value="l" checked"#,
-        r#"name="cta[url]" type="url" value="https://example.com/start""#,
+        r#"name="cta[url]" type="text" inputmode="url" value="https://example.com/start""#,
         r#"name="cta[target]" value="_blank" checked"#,
         r#"name="gallery[]" type="number" min="1" step="1" value="3""#,
         r#"src="/uploads/photo-4.jpg""#,
@@ -393,4 +393,30 @@ fn clearing_a_relationship_and_a_link_stores_null() {
     let page = stored_page();
     assert_eq!(page.related, None);
     assert_eq!(page.cta, None);
+}
+
+#[test]
+fn a_link_takes_a_relative_url_and_a_url_a_protocol_relative_one() {
+    let _guard = setup();
+    let client = signed_in();
+
+    let (status, body) = post(
+        &client,
+        &page_form(&[
+            ("site", "//cdn.example.com/start"),
+            ("cta[url]", "/about#team"),
+        ]),
+    );
+    assert_eq!(status, Status::SeeOther, "{body}");
+    let page = stored_page();
+    assert_eq!(page.site.as_deref(), Some("//cdn.example.com/start"));
+    let cta: Value = serde_json::from_str(page.cta.as_deref().expect("stored")).unwrap();
+    assert_eq!(cta["url"], json!("/about#team"));
+
+    let (status, body) = post(&client, &page_form(&[("cta[url]", " JavaScript:alert(1)")]));
+    assert_eq!(status, Status::UnprocessableEntity);
+    assert!(
+        body.contains("Cta must be a link with a valid URL."),
+        "{body}"
+    );
 }
