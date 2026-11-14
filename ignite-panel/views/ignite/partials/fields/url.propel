@@ -1,0 +1,2 @@
+{{-- A URL field (FieldKind::Url), as Filament's TextInput::url(). --}}
+<input class="ig-input" id="{{ $field.name }}" name="{{ $field.name }}" type="url" value="{{ $field.value }}">

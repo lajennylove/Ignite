@@ -1,0 +1,2 @@
+{{-- A color as #rrggbb (FieldKind::Color), as Filament's ColorPicker. A text input, so an optional color can be left blank; data-ignite-color marks it for a picker script. --}}
+<input class="ig-input" id="{{ $field.name }}" name="{{ $field.name }}" type="text" value="{{ $field.value }}" pattern="#[0-9a-fA-F]{6}" placeholder="#rrggbb" data-ignite-color>

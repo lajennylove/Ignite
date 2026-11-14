@@ -6,6 +6,34 @@ All notable changes to Ignite are listed here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Field types for custom fields, in `FieldKind` and its owned twin `FieldKindDef`, for
+  static (derived) and runtime resources: `Email`, `Url`, `Radio`, `Color`, `Image`,
+  `File`, `Link`, `Wysiwyg`, `PostObject`, `Relationship`, `Taxonomy`, `User`, `Repeater`,
+  `Group`, `FlexibleContent` (with `Block` / `BlockDef`), `Gallery` and `Clone`. Each one
+  checks its input (`Field::check_value`, and `check_email`, `check_url`, `check_color`,
+  `check_link`): an email must be a valid address, a URL must parse, a color is `#rrggbb`.
+  `Link`, `Relationship`, `Gallery`, `Repeater`, `Group`, `FlexibleContent` and `Clone`
+  store JSON text that round-trips; the nested values are checked against their
+  sub-fields. `PostObject`, `Relationship`, `Taxonomy` and `User` load their choices as
+  `Lookup` does (`FieldKind::loads_options`).
+- `register_editor(script_url)`: the editor script a `Wysiwyg` field loads. Ignite bundles
+  no editor.
+- `MediaLibrary`, `MediaItem` and `register_media_library`: the app's media library, which
+  `Image`, `File` and `Gallery` fields show and check their ids against.
+- The derive takes the new kinds as `form_type = "email"` and so on, `form_type = "radio"`
+  with `options`, `post_object`, `taxonomy`, `user` and `relationship` with loaded options,
+  and `fields = ...` / `blocks = ...` for a repeater, group, clone or flexible content.
+- The panel renders each new kind through a partial under
+  `views/ignite/partials/fields/`, and reads form keys `name[]` and `name[key]` as a JSON
+  list or object, as Laravel reads them.
+
+### Changed
+
+- **Breaking:** `FieldKind` and `FieldKindDef` have new variants, so an exhaustive `match`
+  on them needs new arms.
+
 ## [0.3.0] - unreleased
 
 0.3.0 is a breaking release. Read the migration notes first.

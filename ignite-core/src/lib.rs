@@ -5,25 +5,30 @@
 //! update and delete its rows. The `ignite-panel` crate turns a set of
 //! resources into Rocket routes.
 
+pub mod editor;
 pub mod field;
 pub mod form;
+pub mod media;
 pub mod password;
 pub mod query;
 pub mod resource;
 pub mod runtime_resource;
+mod value;
 pub mod widget;
 
-pub use field::{Column, Field, FieldKind};
+pub use editor::{editor_script, register_editor};
+pub use field::{Block, Column, Field, FieldKind};
 pub use form::{FieldErrors, FormInput};
 /// Derives `IgniteResource` for an Orbit model. See `ignite_macros` for the attributes.
 pub use ignite_macros::IgniteResource;
+pub use media::{media_library, register_media_library, MediaItem, MediaLibrary};
 pub use orbit_orm::Database;
 pub use password::{hash_password, verify_password};
 pub use query::{escape_like, Direction, ListQuery, Page};
 pub use resource::{table_name_is, IgniteResource};
 pub use runtime_resource::{
     register_runtime, reserve_slugs, runtime_resource, runtime_resources, unregister_runtime,
-    ColumnDef, FieldDef, FieldKindDef, RegisteredResource, Row, RuntimeData, RuntimeError,
-    RuntimeFuture, RuntimeResource, MAX_FIELD_NAME,
+    BlockDef, ColumnDef, FieldDef, FieldKindDef, RegisteredResource, Row, RuntimeData,
+    RuntimeError, RuntimeFuture, RuntimeResource, MAX_FIELD_NAME,
 };
 pub use widget::{LatestRecords, StatWidget};

@@ -1,0 +1,6 @@
+{{-- A user (FieldKind::User): one choice from the options the resource loads each time the form is shown. --}}
+<select class="ig-input" id="{{ $field.name }}" name="{{ $field.name }}">
+  @foreach (option in field.options)
+    <option value="{{ $option.value }}" @if (option.selected)selected@endif>{{ $option.label }}</option>
+  @endforeach
+</select>

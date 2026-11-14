@@ -1,0 +1,2 @@
+{{-- Rich text (FieldKind::Wysiwyg), as Filament's RichEditor. Ignite bundles no editor: the form loads the script the app registers with register_editor, which turns each textarea marked data-ignite-editor into an editor. --}}
+<textarea class="ig-input min-h-32" id="{{ $field.name }}" name="{{ $field.name }}" data-ignite-editor="wysiwyg">{{ $field.value }}</textarea>

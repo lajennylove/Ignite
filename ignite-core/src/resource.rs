@@ -76,7 +76,9 @@ pub trait IgniteResource: Send + Sync + 'static {
     fn columns() -> &'static [Column];
 
     /// The choices of a [`FieldKind::Lookup`](crate::FieldKind::Lookup) field, as
-    /// `(value, label)` pairs in display order (added in v1). The panel calls it when it
+    /// `(value, label)` pairs in display order (added in v1), and of every other field whose
+    /// kind [loads its options](crate::FieldKind::loads_options): a post object,
+    /// relationship, taxonomy or user field. The panel calls it when it
     /// shows the form, to fill the select, and when it checks a submitted value. The
     /// default is no choices. `#[derive(IgniteResource)]` writes it for `options = ...`
     /// and `belongs_to = ...`.

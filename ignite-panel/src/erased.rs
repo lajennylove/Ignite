@@ -6,7 +6,7 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use ignite_core::{
-    ColumnDef, Database, FieldDef, FieldErrors, FieldKind, FieldKindDef, FormInput, IgniteResource,
+    ColumnDef, Database, FieldDef, FieldErrors, FieldKindDef, FormInput, IgniteResource,
     LatestRecords, ListQuery, RegisteredResource, Row, StatWidget,
 };
 use orbit_orm::Error;
@@ -118,7 +118,7 @@ impl<R: IgniteResource> Erased for Adapter<R> {
         db: &Database,
         form: &FormInput,
     ) -> Result<Result<Value, FieldErrors>, Error> {
-        match checked::<R>(db, form, R::validate(form)).await? {
+        match checked::<R>(db, &self.fields, form, R::validate(form)).await? {
             Ok(input) => match R::create(db, input).await {
                 Ok(record) => to_json(record).map(Ok),
                 Err(error) => unique_violation(error, R::SLUG, &static_keys::<R>()).map(Err),
@@ -133,7 +133,7 @@ impl<R: IgniteResource> Erased for Adapter<R> {
         id: i64,
         form: &FormInput,
     ) -> Result<Result<Value, FieldErrors>, Error> {
-        match checked::<R>(db, form, R::validate_update(form)).await? {
+        match checked::<R>(db, &self.fields, form, R::validate_update(form)).await? {
             Ok(input) => match R::update(db, id, input).await {
                 Ok(record) => to_json(record).map(Ok),
                 Err(error) => unique_violation(error, R::SLUG, &static_keys::<R>()).map(Err),
@@ -167,22 +167,19 @@ impl<R: IgniteResource> Erased for Adapter<R> {
     }
 }
 
-/// Adds to a validated form the errors of its lookup fields: a submitted value must be
-/// one of the field's choices, so a row that does not exist is refused. A field that
-/// already has an error keeps it. The database is read only for the lookup fields the
-/// form submits.
+/// Adds to a validated form the errors of its lookup and media fields: a submitted value
+/// must be one of the field's choices, so a row that does not exist is refused, and a media
+/// id must be an item of the registered media library. A field that already has an error
+/// keeps it. The database is read only for the fields the form submits.
 async fn checked<R: IgniteResource>(
     db: &Database,
+    fields: &[FieldDef],
     form: &FormInput,
     validated: Result<R::Input, FieldErrors>,
 ) -> Result<Result<R::Input, FieldErrors>, Error> {
     let errors = validated.as_ref().err().cloned().unwrap_or_default();
-    let lookups: Vec<&'static str> = R::fields()
-        .iter()
-        .filter(|f| f.kind == FieldKind::Lookup)
-        .map(|f| f.name)
-        .collect();
-    let errors = lookup_errors(&lookups, form, errors, |field| R::options(db, field)).await?;
+    let errors = lookup_errors(fields, form, errors, |field| R::options(db, field)).await?;
+    let errors = media_errors(db, fields, form, errors).await?;
     Ok(if errors.is_empty() {
         validated
     } else {
@@ -190,11 +187,12 @@ async fn checked<R: IgniteResource>(
     })
 }
 
-/// `errors`, with "Choose one of the options." for each lookup field in `lookups` (their
-/// error keys) whose submitted value is not one of the choices `options` returns for it.
-/// Static and runtime resources share this check.
+/// `errors`, with "Choose one of the options." for each field of `fields` that loads its
+/// options and whose submitted value is not one of the choices `options` returns for it. For
+/// a relationship, each value of its JSON list must be a choice. Static and runtime
+/// resources share this check.
 async fn lookup_errors<'a, F, Fut>(
-    lookups: &[&'a str],
+    fields: &'a [FieldDef],
     form: &FormInput,
     mut errors: FieldErrors,
     options: F,
@@ -203,15 +201,106 @@ where
     F: Fn(&'a str) -> Fut,
     Fut: Future<Output = Result<Vec<(String, String)>, Error>>,
 {
-    for &name in lookups {
+    for field in fields.iter().filter(|f| f.kind.loads_options()) {
+        let name = field.name.as_str();
         let Some(value) = form.get(name) else {
             continue;
         };
+        let values = if field.kind == FieldKindDef::Relationship {
+            match serde_json::from_str::<Vec<Value>>(value) {
+                Ok(items) => items
+                    .iter()
+                    .map(|item| match item {
+                        Value::String(text) => text.trim().to_string(),
+                        other => other.to_string(),
+                    })
+                    .collect(),
+                // Validation has already refused a value that is not a list.
+                Err(_) => continue,
+            }
+        } else {
+            vec![value.trim().to_string()]
+        };
+        if values.is_empty() {
+            continue;
+        }
         let choices = options(name).await?;
-        if !choices.iter().any(|(choice, _)| choice == value.trim()) {
+        if !values
+            .iter()
+            .all(|value| choices.iter().any(|(choice, _)| choice == value))
+        {
             errors
                 .entry(name.to_string())
                 .or_insert_with(|| "Choose one of the options.".to_string());
+        }
+    }
+    Ok(errors)
+}
+
+/// The media ids a field of `fields` holds in `form`: the id of an image or file field, and
+/// each id of a gallery's JSON list. Text that is not an id is skipped.
+pub(crate) fn field_media_ids(field: &FieldDef, form: &FormInput) -> Vec<i64> {
+    let Some(value) = form.get(&field.name) else {
+        return Vec::new();
+    };
+    match field.kind {
+        FieldKindDef::Image | FieldKindDef::File => {
+            value.trim().parse::<i64>().ok().into_iter().collect()
+        }
+        FieldKindDef::Gallery => serde_json::from_str::<Vec<Value>>(value)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|item| match item {
+                Value::Number(number) => number.as_i64(),
+                Value::String(text) => text.trim().parse().ok(),
+                _ => None,
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// Every media id the media fields of `fields` hold in `form`, without repeats.
+pub(crate) fn media_ids(fields: &[FieldDef], form: &FormInput) -> Vec<i64> {
+    let mut ids: Vec<i64> = fields
+        .iter()
+        .flat_map(|field| field_media_ids(field, form))
+        .collect();
+    ids.sort_unstable();
+    ids.dedup();
+    ids
+}
+
+/// `errors`, with "<label> must be the id of a media item." for each media field whose ids
+/// are not all items of the registered media library. With no library registered, the ids
+/// are only checked as numbers, by validation.
+async fn media_errors(
+    db: &Database,
+    fields: &[FieldDef],
+    form: &FormInput,
+    mut errors: FieldErrors,
+) -> Result<FieldErrors, Error> {
+    let Some(library) = ignite_core::media_library() else {
+        return Ok(errors);
+    };
+    let ids = media_ids(fields, form);
+    if ids.is_empty() {
+        return Ok(errors);
+    }
+    let found: Vec<i64> = library
+        .find(db, &ids)
+        .await?
+        .into_iter()
+        .map(|item| item.id)
+        .collect();
+    for field in fields {
+        if field_media_ids(field, form)
+            .iter()
+            .any(|id| !found.contains(id))
+        {
+            errors
+                .entry(field.name.clone())
+                .or_insert_with(|| format!("{} must be the id of a media item.", field.label));
         }
     }
     Ok(errors)
@@ -235,15 +324,10 @@ impl RuntimeAdapter {
             self.0.validate_update(form)
         };
         let errors = validated.as_ref().err().cloned().unwrap_or_default();
-        let lookups: Vec<&str> = self
-            .0
-            .fields()
-            .iter()
-            .filter(|f| f.kind == FieldKindDef::Lookup)
-            .map(|f| f.name.as_str())
-            .collect();
+        let fields = self.0.fields();
         let data = &self.0.resource().data;
-        let errors = lookup_errors(&lookups, form, errors, |field| data.options(db, field)).await?;
+        let errors = lookup_errors(fields, form, errors, |field| data.options(db, field)).await?;
+        let errors = media_errors(db, fields, form, errors).await?;
         Ok(if errors.is_empty() {
             validated
         } else {

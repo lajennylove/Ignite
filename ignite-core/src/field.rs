@@ -33,6 +33,93 @@ pub enum FieldKind {
     Date,
     /// A date and time, as `YYYY-MM-DDTHH:MM`, with seconds when given.
     DateTime,
+    /// An email address, as Filament's `TextInput::make()->email()`. The value must be a
+    /// valid address, as the browser's `type="email"` input defines one (see
+    /// [`Field::check_email`]).
+    Email,
+    /// A URL, as Filament's `TextInput::make()->url()`. The value must parse as an absolute
+    /// URL (see [`Field::check_url`]).
+    Url,
+    /// One choice from a list of `(value, label)` pairs, shown as radio buttons, as
+    /// Filament's `Radio`. The value is checked as a [`Select`](Self::Select) is.
+    Radio(&'static [(&'static str, &'static str)]),
+    /// A color, as Filament's `ColorPicker`. The value is `#rrggbb`, stored in lowercase
+    /// (see [`Field::check_color`]).
+    Color,
+    /// An image from the media library, as Filament's `FileUpload::make()->image()`. The
+    /// value is the item's id, a positive whole number, stored as text. The panel shows the
+    /// item through the app's [`MediaLibrary`](crate::MediaLibrary), when one is registered.
+    Image,
+    /// A file from the media library, as Filament's `FileUpload`. Stored as
+    /// [`Image`](Self::Image) is.
+    File,
+    /// A link (ACF's link field): the JSON text `{"url": ..., "title": ..., "target": ...}`.
+    /// The URL is required and must parse; `target` is `""` or `"_blank"` (see
+    /// [`Field::check_link`]).
+    Link,
+    /// Rich text, as Filament's `RichEditor`. The panel renders a textarea marked with
+    /// `data-ignite-editor`, and loads the editor script the app registers with
+    /// [`register_editor`](crate::register_editor). Ignite bundles no editor. The value is
+    /// the submitted HTML, unchanged.
+    Wysiwyg,
+    /// One post, chosen from options loaded each time the form is shown, as a
+    /// [`Lookup`](Self::Lookup) is (ACF's post object field).
+    PostObject,
+    /// Several choices from options loaded each time the form is shown (ACF's relationship
+    /// field): the multi-value [`PostObject`](Self::PostObject). The value is a JSON array
+    /// of the chosen option values, as strings, such as `["12","40"]`.
+    Relationship,
+    /// One taxonomy term, chosen from loaded options, as a [`Lookup`](Self::Lookup) is.
+    Taxonomy,
+    /// One user, chosen from loaded options, as a [`Lookup`](Self::Lookup) is.
+    User,
+    /// Rows of the given sub-fields, as Filament's `Repeater`. The value is a JSON array
+    /// with one object per row, keyed by sub-field name, such as
+    /// `[{"title": "One"}, {"title": "Two"}]`. Each row is checked against the sub-fields.
+    Repeater(&'static [Field]),
+    /// The given sub-fields, kept together (ACF's group field). The value is one JSON
+    /// object keyed by sub-field name.
+    Group(&'static [Field]),
+    /// Rows that each take one of the given blocks, as Filament's `Builder`. The value is a
+    /// JSON array of `{"type": <block name>, "data": {<sub-field values>}}` objects, as
+    /// Filament stores a builder.
+    FlexibleContent(&'static [Block]),
+    /// Several images from the media library (ACF's gallery field). The value is a JSON
+    /// array of item ids, such as `[3,8]`.
+    Gallery,
+    /// The fields of another field group, reused (ACF's clone field). Ignite has no field
+    /// groups of its own: the app resolves the group it clones and passes its fields here.
+    /// The value is stored and checked as a [`Group`](Self::Group) of those fields is.
+    Clone(&'static [Field]),
+}
+
+impl FieldKind {
+    /// Whether the field's choices are loaded each time its form is shown, through
+    /// [`IgniteResource::options`](crate::IgniteResource::options) or
+    /// [`RuntimeData::options`](crate::RuntimeData::options): a lookup, post object,
+    /// relationship, taxonomy or user field.
+    pub fn loads_options(&self) -> bool {
+        matches!(
+            self,
+            FieldKind::Lookup
+                | FieldKind::PostObject
+                | FieldKind::Relationship
+                | FieldKind::Taxonomy
+                | FieldKind::User
+        )
+    }
+}
+
+/// One block of a [`FieldKind::FlexibleContent`] field, as Filament's `Builder\Block` (an
+/// ACF flexible content layout): a name, a label, and its sub-fields.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Block {
+    /// The block's name, stored as the `type` of each row that uses it.
+    pub name: &'static str,
+    /// The label shown when choosing the block.
+    pub label: &'static str,
+    /// The block's sub-fields, in display order.
+    pub fields: &'static [Field],
 }
 
 /// One input on a create or edit form.
@@ -112,6 +199,54 @@ impl Field {
     /// "<label> must be a date, as YYYY-MM-DD." in `errors` and returns `None`.
     pub fn check_date(&self, text: &str, errors: &mut FieldErrors) -> Option<NaiveDate> {
         check_date(self.name, self.label, text, errors)
+    }
+
+    /// Checks that `text`, trimmed, is an email address, as the browser's `type="email"`
+    /// input defines one: a local part of letters, digits and ``.!#$%&'*+/=?^_`{|}~-``, an
+    /// `@`, and a domain of dot-separated labels of letters, digits and inner hyphens. If it
+    /// is not, records "<label> must be a valid email address." and returns `None`.
+    pub fn check_email(&self, text: &str, errors: &mut FieldErrors) -> Option<String> {
+        check_email(self.name, self.label, text, errors)
+    }
+
+    /// Checks that `text`, trimmed, parses as an absolute URL, such as
+    /// `https://example.com/about`. The `javascript:`, `data:` and `vbscript:` schemes are
+    /// refused, because a link to one runs code. If it does not parse, records "<label> must
+    /// be a valid URL." and returns `None`.
+    pub fn check_url(&self, text: &str, errors: &mut FieldErrors) -> Option<String> {
+        check_url(self.name, self.label, text, errors)
+    }
+
+    /// Checks that `text`, trimmed, is a color as `#rrggbb`, and returns it in lowercase. If
+    /// it is not, records "<label> must be a color, as #rrggbb." and returns `None`.
+    pub fn check_color(&self, text: &str, errors: &mut FieldErrors) -> Option<String> {
+        check_color(self.name, self.label, text, errors)
+    }
+
+    /// Checks that `text` is the JSON of a link, `{"url": ..., "title": ..., "target": ...}`,
+    /// whose URL passes [`check_url`](Self::check_url) and whose target is `""` or
+    /// `"_blank"`. The title and target may be left out. Returns the link as JSON text with
+    /// all three keys. Otherwise records "<label> must be a link with a valid URL." and
+    /// returns `None`.
+    pub fn check_link(&self, text: &str, errors: &mut FieldErrors) -> Option<String> {
+        check_link(self.name, self.label, text, errors)
+    }
+
+    /// Checks `text` against the field's kind, and returns the text to store, for the kinds
+    /// whose value is text: email, URL, radio, color, image, file, link, wysiwyg, post
+    /// object, relationship, taxonomy, user, repeater, group, flexible content, gallery and
+    /// clone. The structured kinds (relationship, repeater, group, flexible content, gallery,
+    /// clone) take JSON text, check each value against its sub-field, and return the checked
+    /// JSON; reading it back gives the same structure. An empty list or group is blank, so a
+    /// required field records "<label> is required.". A required field must first pass
+    /// [`check_required`](Self::check_required).
+    ///
+    /// The other kinds have checks of their own (such as
+    /// [`check_whole_number`](Self::check_whole_number)); for them `text` is returned
+    /// unchanged.
+    pub fn check_value(&self, text: &str, errors: &mut FieldErrors) -> Option<String> {
+        let kind = crate::FieldKindDef::from(self.kind);
+        crate::value::check_value(self.name, self.label, self.required, &kind, text, errors)
     }
 }
 
@@ -238,6 +373,131 @@ pub(crate) fn check_date(
             None
         }
     }
+}
+
+/// See [`Field::check_email`].
+pub(crate) fn check_email(
+    name: &str,
+    label: &str,
+    text: &str,
+    errors: &mut FieldErrors,
+) -> Option<String> {
+    let text = text.trim();
+    if is_email(text) {
+        return Some(text.to_string());
+    }
+    errors.insert(
+        name.to_string(),
+        format!("{label} must be a valid email address."),
+    );
+    None
+}
+
+/// Whether `text` is a valid email address, as the HTML standard defines one for
+/// `<input type="email">`.
+pub(crate) fn is_email(text: &str) -> bool {
+    let Some((local, domain)) = text.split_once('@') else {
+        return false;
+    };
+    let local_ok = !local.is_empty()
+        && local
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b".!#$%&'*+/=?^_`{|}~-".contains(&b));
+    let domain_ok = !domain.is_empty()
+        && domain.split('.').all(|part| {
+            !part.is_empty()
+                && part.len() <= 63
+                && !part.starts_with('-')
+                && !part.ends_with('-')
+                && part.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        });
+    local_ok && domain_ok
+}
+
+/// See [`Field::check_url`].
+pub(crate) fn check_url(
+    name: &str,
+    label: &str,
+    text: &str,
+    errors: &mut FieldErrors,
+) -> Option<String> {
+    let text = text.trim();
+    if is_url(text) {
+        return Some(text.to_string());
+    }
+    errors.insert(name.to_string(), format!("{label} must be a valid URL."));
+    None
+}
+
+/// Whether `text` parses as an absolute URL whose scheme cannot run code.
+pub(crate) fn is_url(text: &str) -> bool {
+    match url::Url::parse(text) {
+        Ok(url) => !matches!(url.scheme(), "javascript" | "data" | "vbscript"),
+        Err(_) => false,
+    }
+}
+
+/// See [`Field::check_color`].
+pub(crate) fn check_color(
+    name: &str,
+    label: &str,
+    text: &str,
+    errors: &mut FieldErrors,
+) -> Option<String> {
+    let text = text.trim();
+    if is_color(text) {
+        return Some(text.to_ascii_lowercase());
+    }
+    errors.insert(
+        name.to_string(),
+        format!("{label} must be a color, as #rrggbb."),
+    );
+    None
+}
+
+/// Whether `text` is a color as `#rrggbb`, in either case.
+pub(crate) fn is_color(text: &str) -> bool {
+    text.len() == 7 && text.starts_with('#') && text[1..].bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// See [`Field::check_link`].
+pub(crate) fn check_link(
+    name: &str,
+    label: &str,
+    text: &str,
+    errors: &mut FieldErrors,
+) -> Option<String> {
+    let link = serde_json::from_str::<serde_json::Value>(text)
+        .ok()
+        .and_then(|value| link_value(&value));
+    match link {
+        Some(link) => Some(link.to_string()),
+        None => {
+            errors.insert(
+                name.to_string(),
+                format!("{label} must be a link with a valid URL."),
+            );
+            None
+        }
+    }
+}
+
+/// The link in `value`, with its three keys, if it is a link object whose URL is valid and
+/// whose target is `""` or `"_blank"`.
+pub(crate) fn link_value(value: &serde_json::Value) -> Option<serde_json::Value> {
+    let object = value.as_object()?;
+    let text = |key: &str| match object.get(key) {
+        None | Some(serde_json::Value::Null) => Some(String::new()),
+        Some(serde_json::Value::String(text)) => Some(text.trim().to_string()),
+        Some(_) => None,
+    };
+    let url = text("url")?;
+    let title = text("title")?;
+    let target = text("target")?;
+    if !is_url(&url) || !matches!(target.as_str(), "" | "_blank") {
+        return None;
+    }
+    Some(serde_json::json!({ "url": url, "title": title, "target": target }))
 }
 
 /// One column of the list view.

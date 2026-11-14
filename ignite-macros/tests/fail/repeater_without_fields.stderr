@@ -1,0 +1,5 @@
+error: a repeater, group or clone takes fields = <a &'static [ignite_core::Field] constant>
+ --> tests/fail/repeater_without_fields.rs:9:11
+  |
+9 |     rows: String,
+  |           ^^^^^^

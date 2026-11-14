@@ -8,8 +8,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 
 use ignite_core::{
-    ColumnDef, Database, Direction, FieldDef, FieldErrors, FieldKindDef, FormInput, LatestRecords,
-    ListQuery,
+    ColumnDef, Database, Direction, FieldDef, FieldErrors, FormInput, LatestRecords, ListQuery,
 };
 use orbit_orm::Error as OrbitError;
 use propel_rocket::PropelView;
@@ -38,9 +37,9 @@ use crate::sessions;
 use crate::throttle;
 use crate::users;
 use crate::views::{
-    cell_text, compiled, field_views, field_views_with, record_form, render_page, CardView,
-    CellView, ColumnHead, DashboardPage, FormPage, HeaderView, IndexPage, LatestRow, LatestTable,
-    Layout, LoginPage, ProfilePage, RowView,
+    cell_text, compiled, editor_for, field_views, field_views_with, record_form, render_page,
+    CardView, CellView, ColumnHead, DashboardPage, FormChoices, FormPage, HeaderView, IndexPage,
+    LatestRow, LatestTable, Layout, LoginPage, ProfilePage, RowView,
 };
 
 /// The largest form body the panel reads.
@@ -891,7 +890,8 @@ async fn new_form(
     authorize(registry, &session, slug, Action::Create)?;
     let resource = registry.find(slug).ok_or(Status::NotFound)?;
     let index_url = format!("{}/{}", registry.mount, resource.slug());
-    let lookups = form_lookups(db, &resource).await?;
+    let choices = form_choices(db, &resource, &FormInput::default()).await?;
+    let editor = editor_for(resource.fields());
     let layout = Layout::new(
         registry,
         Some(&session),
@@ -924,8 +924,10 @@ async fn new_form(
             resource.fields(),
             &FormInput::default(),
             &FieldErrors::new(),
-            &lookups,
+            &choices,
         ),
+        has_editor: editor.is_some(),
+        editor_script: editor.unwrap_or_default(),
     };
     Ok(render_page("ignite::form", &page, compiled::form::render))
 }
@@ -956,14 +958,14 @@ async fn create(
             Ok(Reply::Redirect(Box::new(Redirect::to(index_url))))
         }
         Err(errors) => {
-            let lookups = form_lookups(db, &resource).await?;
+            let choices = form_choices(db, &resource, &form).await?;
             Ok(form_page(
                 registry,
                 &session,
                 &resource,
                 &form,
                 &errors,
-                &lookups,
+                &choices,
                 format!("New {}", resource.singular()),
                 index_url,
                 "Create",
@@ -988,9 +990,10 @@ async fn edit_form(
     let index_url = format!("{}/{}", registry.mount, resource.slug());
 
     let record = resource.find(db.inner(), id).await.map_err(db_status)?;
-    let lookups = form_lookups(db, &resource).await?;
     let record = record.ok_or(Status::NotFound)?;
     let form = record_form(resource.fields(), &record);
+    let choices = form_choices(db, &resource, &form).await?;
+    let editor = editor_for(resource.fields());
 
     let layout = Layout::new(
         registry,
@@ -1020,7 +1023,9 @@ async fn edit_form(
         action: format!("{index_url}/{id}"),
         submit_label: "Save",
         back_url: index_url,
-        fields: field_views_with(resource.fields(), &form, &FieldErrors::new(), &lookups),
+        fields: field_views_with(resource.fields(), &form, &FieldErrors::new(), &choices),
+        has_editor: editor.is_some(),
+        editor_script: editor.unwrap_or_default(),
     };
     Ok(render_page("ignite::form", &page, compiled::form::render))
 }
@@ -1053,14 +1058,14 @@ async fn update(
             Ok(Reply::Redirect(Box::new(Redirect::to(index_url))))
         }
         Err(errors) => {
-            let lookups = form_lookups(db, &resource).await?;
+            let choices = form_choices(db, &resource, &form).await?;
             Ok(form_page(
                 registry,
                 &session,
                 &resource,
                 &form,
                 &errors,
-                &lookups,
+                &choices,
                 format!("Edit {} #{id}", resource.singular()),
                 format!("{index_url}/{id}"),
                 "Save",
@@ -1104,13 +1109,14 @@ fn form_page(
     resource: &Arc<dyn Erased>,
     form: &FormInput,
     errors: &FieldErrors,
-    lookups: &HashMap<String, Vec<(String, String)>>,
+    choices: &FormChoices,
     heading: String,
     action: String,
     submit_label: &'static str,
     csrf_token: String,
 ) -> Reply {
     let layout = Layout::new(registry, Some(user), resource.slug(), None, csrf_token);
+    let editor = editor_for(resource.fields());
     let page = FormPage {
         home_url: layout.home_url,
         signed_in: layout.signed_in,
@@ -1132,7 +1138,9 @@ fn form_page(
         action,
         submit_label,
         back_url: format!("{}/{}", registry.mount, resource.slug()),
-        fields: field_views_with(resource.fields(), form, errors, lookups),
+        fields: field_views_with(resource.fields(), form, errors, choices),
+        has_editor: editor.is_some(),
+        editor_script: editor.unwrap_or_default(),
     };
     Reply::Page(
         Status::UnprocessableEntity,
@@ -1221,10 +1229,59 @@ pub(crate) async fn read_form(data: Data<'_>) -> Result<FormInput, Status> {
     if !body.is_complete() {
         return Err(Status::PayloadTooLarge);
     }
-    let values: HashMap<String, String> = form_urlencoded::parse(body.as_bytes())
-        .into_owned()
-        .collect();
-    Ok(FormInput::new(values))
+    Ok(FormInput::new(form_values(form_urlencoded::parse(
+        body.as_bytes(),
+    ))))
+}
+
+/// The values of a form body, by field name. As PHP and Laravel read a form, the keys
+/// `name[]` collect into a list and the keys `name[key]` into an object, each stored as JSON
+/// text under `name`: `tags[]=1&tags[]=2` gives `tags` = `["1","2"]`, and
+/// `link[url]=...&link[title]=...` gives `link` = `{"title":...,"url":...}`. Blank items are
+/// dropped, and a list or object with no value left is the blank text `""`, so it reads as
+/// a field sent blank. A plain key that comes twice keeps its last value.
+pub(crate) fn form_values<'a>(
+    pairs: impl Iterator<Item = (std::borrow::Cow<'a, str>, std::borrow::Cow<'a, str>)>,
+) -> HashMap<String, String> {
+    let mut values = HashMap::new();
+    let mut lists: HashMap<String, Vec<Value>> = HashMap::new();
+    let mut objects: HashMap<String, serde_json::Map<String, Value>> = HashMap::new();
+    for (key, value) in pairs {
+        if let Some(base) = key.strip_suffix("[]") {
+            let items = lists.entry(base.to_string()).or_default();
+            if !value.trim().is_empty() {
+                items.push(Value::from(value.into_owned()));
+            }
+        } else if let Some((base, inner)) = key
+            .strip_suffix(']')
+            .and_then(|key| key.split_once('['))
+            .filter(|(base, inner)| !base.is_empty() && !inner.contains(['[', ']']))
+        {
+            let object = objects.entry(base.to_string()).or_default();
+            if !value.trim().is_empty() {
+                object.insert(inner.to_string(), Value::from(value.into_owned()));
+            }
+        } else {
+            values.insert(key.into_owned(), value.into_owned());
+        }
+    }
+    for (name, items) in lists {
+        let text = if items.is_empty() {
+            String::new()
+        } else {
+            Value::Array(items).to_string()
+        };
+        values.insert(name, text);
+    }
+    for (name, object) in objects {
+        let text = if object.is_empty() {
+            String::new()
+        } else {
+            Value::Object(object).to_string()
+        };
+        values.insert(name, text);
+    }
+    values
 }
 
 /// The names of a resource's form fields.
@@ -1241,26 +1298,36 @@ async fn lookup_choices(
 ) -> Result<HashMap<String, Vec<(String, String)>>, OrbitError> {
     let mut choices = HashMap::new();
     for field in resource.fields() {
-        if field.kind == FieldKindDef::Lookup && names.contains(&field.name.as_str()) {
+        if field.kind.loads_options() && names.contains(&field.name.as_str()) {
             choices.insert(field.name.clone(), resource.options(db, &field.name).await?);
         }
     }
     Ok(choices)
 }
 
-/// The choices of a form's lookup fields, read from the database for a form that is
-/// shown again with its errors.
-async fn form_lookups(
+/// What a form shows beside its values: the choices of its lookup fields, read from the
+/// database, and the media library's items for the ids its media fields hold in `form`.
+async fn form_choices(
     db: &State<Database>,
     resource: &Arc<dyn Erased>,
-) -> Result<HashMap<String, Vec<(String, String)>>, Status> {
-    lookup_choices(
+    form: &FormInput,
+) -> Result<FormChoices, Status> {
+    let lookups = lookup_choices(
         db.inner(),
         resource.as_ref(),
         &field_names(resource.as_ref()),
     )
     .await
-    .map_err(db_status)
+    .map_err(db_status)?;
+    let mut media = HashMap::new();
+    if let Some(library) = ignite_core::media_library() {
+        let ids = erased::media_ids(resource.fields(), form);
+        if !ids.is_empty() {
+            let items = library.find(db.inner(), &ids).await.map_err(db_status)?;
+            media.extend(items.into_iter().map(|item| (item.id, item)));
+        }
+    }
+    Ok(FormChoices { lookups, media })
 }
 
 /// The text a cell shows for a stored value. A lookup field shows the label of its
@@ -1315,5 +1382,34 @@ fn latest_table(
         title: declared.title,
         headers,
         rows,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn values(body: &str) -> HashMap<String, String> {
+        form_values(form_urlencoded::parse(body.as_bytes()))
+    }
+
+    #[test]
+    fn bracket_keys_collect_into_json_lists_and_objects() {
+        let values = values(
+            "name=Ada&tags[]=&tags[]=1&tags[]=2&link[url]=https%3A%2F%2Fexample.com&link[title]=Go",
+        );
+        assert_eq!(values["name"], "Ada");
+        assert_eq!(values["tags"], r#"["1","2"]"#);
+        assert_eq!(
+            values["link"],
+            r#"{"title":"Go","url":"https://example.com"}"#
+        );
+    }
+
+    #[test]
+    fn a_list_or_object_with_only_blank_values_is_sent_blank() {
+        let values = values("tags[]=&link[url]=&link[title]=");
+        assert_eq!(values["tags"], "");
+        assert_eq!(values["link"], "");
     }
 }

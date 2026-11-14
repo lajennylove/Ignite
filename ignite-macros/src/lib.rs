@@ -26,6 +26,9 @@ use syn::{
 /// - `primary_key`: the key column. Defaults to a field named `id`.
 /// - `label = "..."`: the label. Defaults to the field name, capitalized and spaced.
 /// - `form_type = "text" | "textarea" | "password" | "number" | "checkbox" | "date"`: the input. Defaults from the type.
+/// - `form_type = "email" | "url" | "color" | "link" | "wysiwyg" | "image" | "file" | "gallery"`: the field types for custom fields (see `ignite_core::FieldKind`). The field must be a `String`; an `image` or `file` may also be an integer, the media item's id. A `link` and a `gallery` store JSON text.
+/// - `form_type = "radio"` with `options = [...]`: the choices as radio buttons. `form_type = "post_object" | "taxonomy" | "user"` with `options = load_choices` or `belongs_to`: a lookup of that kind. `form_type = "relationship"` with `options = load_choices`: several choices, stored as a JSON list in a `String`.
+/// - `form_type = "repeater" | "group" | "clone"` with `fields = SUB_FIELDS`, or `form_type = "flexible_content"` with `blocks = BLOCKS`: a structured field whose sub-fields are a `&'static [ignite_core::Field]` (or blocks a `&'static [ignite_core::Block]`) constant. The field must be a `String`, and stores JSON text.
 /// - `options = [("draft", "Draft"), ...]`: a select with a fixed list of choices. The field must be a `String`.
 /// - `options = load_choices`: a select whose choices come from an async function, `async fn(&Database) -> Result<Vec<(String, String)>, orbit_orm::Error>`, called each time the form is shown. The field must be a `String` or an integer.
 /// - `belongs_to = Category, display = name`: a relation. `Category` is the related model (an `OrbitModel`). The field stores the related row's key, the select lists the related table's rows by `display`, and the list shows that name. The field must be an `i32` or `i64`.
@@ -89,6 +92,9 @@ struct Field {
     lookup: Option<Lookup>,
     /// The step of a decimal input, as written.
     step: Option<String>,
+    /// The sub-fields of a repeater, group or clone, or the blocks of a flexible content
+    /// field: the path of a constant.
+    sub_fields: Option<syn::Path>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -103,6 +109,43 @@ enum Kind {
     Lookup,
     Date,
     DateTime,
+    Email,
+    Url,
+    Radio,
+    Color,
+    Image,
+    File,
+    Link,
+    Wysiwyg,
+    PostObject,
+    Relationship,
+    Taxonomy,
+    User,
+    Repeater,
+    Group,
+    FlexibleContent,
+    Gallery,
+    Clone,
+}
+
+impl Kind {
+    /// Whether `ignite_core::Field::check_value` checks the field's text: the kinds added
+    /// for custom fields, except the lookups stored as an integer.
+    fn checks_value(self) -> bool {
+        !matches!(
+            self,
+            Kind::Text
+                | Kind::Textarea
+                | Kind::Password
+                | Kind::Number
+                | Kind::Decimal
+                | Kind::Checkbox
+                | Kind::Select
+                | Kind::Lookup
+                | Kind::Date
+                | Kind::DateTime
+        )
+    }
 }
 
 /// The Rust base type the field parses from form text.
@@ -733,6 +776,8 @@ fn field_attrs(field: &syn::Field) -> syn::Result<Field> {
     let mut belongs_to = None;
     let mut display = None;
     let mut step = None;
+    let mut sub_fields = None;
+    let mut blocks = None;
     for attr in field.attrs.iter().filter(|a| a.path().is_ident("ignite")) {
         attr.parse_nested_meta(|meta| {
             if meta.path.is_ident("label") {
@@ -763,18 +808,40 @@ fn field_attrs(field: &syn::Field) -> syn::Result<Field> {
                 display = Some(meta.value()?.parse::<syn::Ident>()?);
             } else if meta.path.is_ident("step") {
                 step = Some(meta.value()?.parse::<LitStr>()?);
+            } else if meta.path.is_ident("fields") {
+                sub_fields = Some(meta.value()?.parse::<syn::Path>()?);
+            } else if meta.path.is_ident("blocks") {
+                blocks = Some(meta.value()?.parse::<syn::Path>()?);
             } else {
                 return Err(meta.error(
-                    "unknown ignite attribute; expected label, form_type, required, primary_key, searchable, sortable, hidden_on_index, options, belongs_to, display or step",
+                    "unknown ignite attribute; expected label, form_type, required, primary_key, searchable, sortable, hidden_on_index, options, belongs_to, display, step, fields or blocks",
                 ));
             }
             Ok(())
         })?;
     }
 
-    // Options and a relation both make a select, so neither takes a form_type of its own.
+    // Options and a relation both make a select, so neither takes a form_type of its own,
+    // except the kinds that are a select by another name: radio buttons for fixed options,
+    // and a post object, taxonomy, user or relationship for loaded ones.
     let lookup_attr = options.is_some() || belongs_to.is_some();
-    if lookup_attr && form_type.is_some() {
+    let choice_kind = match form_type.as_ref().map(|s| s.value()).as_deref() {
+        Some("radio") if matches!(options, Some(OptionsSpec::Static(_))) => Some(Kind::Radio),
+        Some("post_object") if lookup_attr && !matches!(options, Some(OptionsSpec::Static(_))) => {
+            Some(Kind::PostObject)
+        }
+        Some("taxonomy") if lookup_attr && !matches!(options, Some(OptionsSpec::Static(_))) => {
+            Some(Kind::Taxonomy)
+        }
+        Some("user") if lookup_attr && !matches!(options, Some(OptionsSpec::Static(_))) => {
+            Some(Kind::User)
+        }
+        Some("relationship") if matches!(options, Some(OptionsSpec::Dynamic(_))) => {
+            Some(Kind::Relationship)
+        }
+        _ => None,
+    };
+    if lookup_attr && form_type.is_some() && choice_kind.is_none() {
         return Err(syn::Error::new_spanned(
             &ty,
             "a field with options or belongs_to is a select: remove form_type",
@@ -805,7 +872,7 @@ fn field_attrs(field: &syn::Field) -> syn::Result<Field> {
                     ));
                 }
                 choices = pairs;
-                Kind::Select
+                choice_kind.unwrap_or(Kind::Select)
             }
             OptionsSpec::Dynamic(path) => {
                 if !matches!(base, Base::Text | Base::Integer) {
@@ -814,8 +881,14 @@ fn field_attrs(field: &syn::Field) -> syn::Result<Field> {
                         "a field with options from a function must be a String or an integer",
                     ));
                 }
+                if choice_kind == Some(Kind::Relationship) && base != Base::Text {
+                    return Err(syn::Error::new_spanned(
+                        &ty,
+                        "a relationship stores a JSON list, so it must be a String (or Option<String>)",
+                    ));
+                }
                 lookup = Some(Lookup::Dynamic(path));
-                Kind::Lookup
+                choice_kind.unwrap_or(Kind::Lookup)
             }
         }
     } else if let Some(table) = belongs_to {
@@ -831,7 +904,7 @@ fn field_attrs(field: &syn::Field) -> syn::Result<Field> {
                 .clone()
                 .expect("checked: display is set with belongs_to"),
         });
-        Kind::Lookup
+        choice_kind.unwrap_or(Kind::Lookup)
     } else {
         match form_type.as_ref().map(|s| s.value()) {
             None => match base {
@@ -850,13 +923,72 @@ fn field_attrs(field: &syn::Field) -> syn::Result<Field> {
                 "number" => Kind::Number,
                 "checkbox" => Kind::Checkbox,
                 "date" => Kind::Date,
+                "email" => Kind::Email,
+                "url" => Kind::Url,
+                "color" => Kind::Color,
+                "image" => Kind::Image,
+                "file" => Kind::File,
+                "link" => Kind::Link,
+                "wysiwyg" => Kind::Wysiwyg,
+                "gallery" => Kind::Gallery,
+                "repeater" => Kind::Repeater,
+                "group" => Kind::Group,
+                "clone" => Kind::Clone,
+                "flexible_content" => Kind::FlexibleContent,
+                "radio" | "post_object" | "taxonomy" | "user" | "relationship" => {
+                    return Err(syn::Error::new(
+                        form_type.map(|s| s.span()).unwrap_or_else(Span::call_site),
+                        "form_type radio takes options = [...]; post_object, taxonomy and user take options = <function> or belongs_to; relationship takes options = <function>",
+                    ))
+                }
                 _ => return Err(syn::Error::new(
                     form_type.map(|s| s.span()).unwrap_or_else(Span::call_site),
-                    "form_type must be one of text, textarea, password, number, checkbox or date",
+                    "form_type must be one of text, textarea, password, number, checkbox, date, email, url, color, image, file, link, wysiwyg, gallery, radio, post_object, taxonomy, user, relationship, repeater, group, clone or flexible_content",
                 )),
             },
         }
     };
+
+    // A structured field names its sub-fields (or blocks), and only it does.
+    let sub_fields = match kind {
+        Kind::Repeater | Kind::Group | Kind::Clone => match (sub_fields, blocks) {
+            (Some(path), None) => Some(path),
+            _ => {
+                return Err(syn::Error::new_spanned(
+                    &ty,
+                    "a repeater, group or clone takes fields = <a &'static [ignite_core::Field] constant>",
+                ))
+            }
+        },
+        Kind::FlexibleContent => match (blocks, sub_fields) {
+            (Some(path), None) => Some(path),
+            _ => {
+                return Err(syn::Error::new_spanned(
+                    &ty,
+                    "a flexible_content field takes blocks = <a &'static [ignite_core::Block] constant>",
+                ))
+            }
+        },
+        _ if sub_fields.is_some() || blocks.is_some() => {
+            return Err(syn::Error::new_spanned(
+                &ty,
+                "fields and blocks apply to a repeater, group, clone or flexible_content field",
+            ))
+        }
+        _ => None,
+    };
+    // The kinds for custom fields store text, except a media id, which may be an integer.
+    let text_kind =
+        kind.checks_value() && !matches!(kind, Kind::PostObject | Kind::Taxonomy | Kind::User);
+    if text_kind
+        && base != Base::Text
+        && !(matches!(kind, Kind::Image | Kind::File) && base == Base::Integer)
+    {
+        return Err(syn::Error::new_spanned(
+            &ty,
+            "this form_type stores text, so the field must be a String (or Option<String>); an image or file may also be an integer",
+        ));
+    }
 
     if step.is_some() && base != Base::Decimal {
         return Err(syn::Error::new_spanned(
@@ -886,6 +1018,7 @@ fn field_attrs(field: &syn::Field) -> syn::Result<Field> {
         choices,
         lookup,
         step: step.map(|s| s.value()),
+        sub_fields,
     })
 }
 
@@ -990,6 +1123,34 @@ fn kind_tokens(field: &Field) -> TokenStream2 {
         Kind::Lookup => quote! { ::ignite_core::FieldKind::Lookup },
         Kind::Date => quote! { ::ignite_core::FieldKind::Date },
         Kind::DateTime => quote! { ::ignite_core::FieldKind::DateTime },
+        Kind::Email => quote! { ::ignite_core::FieldKind::Email },
+        Kind::Url => quote! { ::ignite_core::FieldKind::Url },
+        Kind::Radio => {
+            let pairs = choice_pairs(&field.choices);
+            quote! { ::ignite_core::FieldKind::Radio(&[#(#pairs),*]) }
+        }
+        Kind::Color => quote! { ::ignite_core::FieldKind::Color },
+        Kind::Image => quote! { ::ignite_core::FieldKind::Image },
+        Kind::File => quote! { ::ignite_core::FieldKind::File },
+        Kind::Link => quote! { ::ignite_core::FieldKind::Link },
+        Kind::Wysiwyg => quote! { ::ignite_core::FieldKind::Wysiwyg },
+        Kind::PostObject => quote! { ::ignite_core::FieldKind::PostObject },
+        Kind::Relationship => quote! { ::ignite_core::FieldKind::Relationship },
+        Kind::Taxonomy => quote! { ::ignite_core::FieldKind::Taxonomy },
+        Kind::User => quote! { ::ignite_core::FieldKind::User },
+        Kind::Gallery => quote! { ::ignite_core::FieldKind::Gallery },
+        Kind::Repeater | Kind::Group | Kind::Clone | Kind::FlexibleContent => {
+            let path = field
+                .sub_fields
+                .as_ref()
+                .expect("checked: a structured field has its sub-fields");
+            match field.kind {
+                Kind::Repeater => quote! { ::ignite_core::FieldKind::Repeater(#path) },
+                Kind::Group => quote! { ::ignite_core::FieldKind::Group(#path) },
+                Kind::Clone => quote! { ::ignite_core::FieldKind::Clone(#path) },
+                _ => quote! { ::ignite_core::FieldKind::FlexibleContent(#path) },
+            }
+        }
     }
 }
 
@@ -1040,8 +1201,16 @@ fn validate_expr(field: &Field) -> TokenStream2 {
                 }
             }
         }
+        // The kinds for custom fields: the text their check returns.
+        Base::Text if field.kind.checks_value() => quote! { field.check_value(text, &mut errors) },
         Base::Text => quote! { ::core::option::Option::Some(text.to_string()) },
         Base::Bool => quote! { ::core::option::Option::Some(form.checkbox(#name)) },
+        // A media id stored as an integer: checked as a media id, then parsed.
+        Base::Integer if matches!(field.kind, Kind::Image | Kind::File) => quote! {
+            field
+                .check_value(text, &mut errors)
+                .and_then(|id| id.parse::<#ty>().ok())
+        },
         Base::Integer => quote! { field.check_whole_number::<#ty>(text, &mut errors) },
         Base::Decimal => quote! { field.check_decimal::<#ty>(text, &mut errors) },
         Base::Date => quote! { field.check_date(text, &mut errors) },

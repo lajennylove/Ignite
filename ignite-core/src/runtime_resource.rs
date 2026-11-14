@@ -26,7 +26,7 @@ use std::sync::{Arc, PoisonError, RwLock};
 use orbit_orm::{Database, Error};
 use serde_json::{Map, Value};
 
-use crate::field::{self as check, Column, Field, FieldKind};
+use crate::field::{self as check, Block, Column, Field, FieldKind};
 use crate::form::{FieldErrors, FormInput};
 use crate::query::{ListQuery, Page};
 
@@ -67,8 +67,9 @@ pub trait RuntimeData: Send + Sync + 'static {
     fn update<'a>(&'a self, db: &'a Database, id: i64, input: Row) -> RuntimeFuture<'a, Row>;
     /// Deletes the row with `id` and returns the number of rows deleted.
     fn delete<'a>(&'a self, db: &'a Database, id: i64) -> RuntimeFuture<'a, u64>;
-    /// The choices of the [`FieldKindDef::Lookup`] field `field`, as `(value, label)` pairs
-    /// in display order. The default is no choices.
+    /// The choices of the field `field`, as `(value, label)` pairs in display order, for a
+    /// field whose kind [loads its options](FieldKindDef::loads_options): a lookup, post
+    /// object, relationship, taxonomy or user field. The default is no choices.
     fn options<'a>(
         &'a self,
         db: &'a Database,
@@ -104,6 +105,101 @@ pub enum FieldKindDef {
     Date,
     /// A date and time. See [`FieldKind::DateTime`].
     DateTime,
+    /// An email address. See [`FieldKind::Email`].
+    Email,
+    /// A URL. See [`FieldKind::Url`].
+    Url,
+    /// One choice from a list of `(value, label)` pairs, as radio buttons. See
+    /// [`FieldKind::Radio`].
+    Radio(Vec<(String, String)>),
+    /// A color, as `#rrggbb`. See [`FieldKind::Color`].
+    Color,
+    /// An image from the media library. See [`FieldKind::Image`].
+    Image,
+    /// A file from the media library. See [`FieldKind::File`].
+    File,
+    /// A link, as JSON text. See [`FieldKind::Link`].
+    Link,
+    /// Rich text, edited with the app's editor. See [`FieldKind::Wysiwyg`].
+    Wysiwyg,
+    /// One post, from options [`RuntimeData::options`] loads. See [`FieldKind::PostObject`].
+    PostObject,
+    /// Several choices, from options [`RuntimeData::options`] loads. See
+    /// [`FieldKind::Relationship`].
+    Relationship,
+    /// One taxonomy term, from loaded options. See [`FieldKind::Taxonomy`].
+    Taxonomy,
+    /// One user, from loaded options. See [`FieldKind::User`].
+    User,
+    /// Rows of the given sub-fields, as JSON text. See [`FieldKind::Repeater`].
+    Repeater(Vec<FieldDef>),
+    /// The given sub-fields, as one JSON object. See [`FieldKind::Group`].
+    Group(Vec<FieldDef>),
+    /// Rows that each take one of the given blocks, as JSON text. See
+    /// [`FieldKind::FlexibleContent`].
+    FlexibleContent(Vec<BlockDef>),
+    /// Several images from the media library, as a JSON array of ids. See
+    /// [`FieldKind::Gallery`].
+    Gallery,
+    /// The fields of another field group, reused. See [`FieldKind::Clone`].
+    Clone(Vec<FieldDef>),
+}
+
+impl FieldKindDef {
+    /// Whether the field's choices come from [`RuntimeData::options`] each time its form is
+    /// shown. See [`FieldKind::loads_options`].
+    pub fn loads_options(&self) -> bool {
+        matches!(
+            self,
+            FieldKindDef::Lookup
+                | FieldKindDef::PostObject
+                | FieldKindDef::Relationship
+                | FieldKindDef::Taxonomy
+                | FieldKindDef::User
+        )
+    }
+
+    /// Whether the field holds media library ids: an image, a file or a gallery.
+    pub fn uses_media(&self) -> bool {
+        matches!(
+            self,
+            FieldKindDef::Image | FieldKindDef::File | FieldKindDef::Gallery
+        )
+    }
+}
+
+/// One block of a [`FieldKindDef::FlexibleContent`] field: the owned twin of [`Block`].
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct BlockDef {
+    /// The block's name, stored as the `type` of each row that uses it.
+    pub name: String,
+    /// The label shown when choosing the block.
+    pub label: String,
+    /// The block's sub-fields, in display order.
+    pub fields: Vec<FieldDef>,
+}
+
+impl From<Block> for BlockDef {
+    fn from(block: Block) -> Self {
+        BlockDef {
+            name: block.name.to_string(),
+            label: block.label.to_string(),
+            fields: owned_fields(block.fields),
+        }
+    }
+}
+
+/// Owned definitions of static sub-fields.
+fn owned_fields(fields: &[Field]) -> Vec<FieldDef> {
+    fields.iter().copied().map(FieldDef::from).collect()
+}
+
+/// Owned `(value, label)` pairs of static choices.
+fn owned_choices(choices: &[(&str, &str)]) -> Vec<(String, String)> {
+    choices
+        .iter()
+        .map(|(value, label)| (value.to_string(), label.to_string()))
+        .collect()
 }
 
 impl From<FieldKind> for FieldKindDef {
@@ -115,15 +211,29 @@ impl From<FieldKind> for FieldKindDef {
             FieldKind::Number => FieldKindDef::Number,
             FieldKind::Decimal(step) => FieldKindDef::Decimal(step.to_string()),
             FieldKind::Checkbox => FieldKindDef::Checkbox,
-            FieldKind::Select(choices) => FieldKindDef::Select(
-                choices
-                    .iter()
-                    .map(|(value, label)| (value.to_string(), label.to_string()))
-                    .collect(),
-            ),
+            FieldKind::Select(choices) => FieldKindDef::Select(owned_choices(choices)),
             FieldKind::Lookup => FieldKindDef::Lookup,
             FieldKind::Date => FieldKindDef::Date,
             FieldKind::DateTime => FieldKindDef::DateTime,
+            FieldKind::Email => FieldKindDef::Email,
+            FieldKind::Url => FieldKindDef::Url,
+            FieldKind::Radio(choices) => FieldKindDef::Radio(owned_choices(choices)),
+            FieldKind::Color => FieldKindDef::Color,
+            FieldKind::Image => FieldKindDef::Image,
+            FieldKind::File => FieldKindDef::File,
+            FieldKind::Link => FieldKindDef::Link,
+            FieldKind::Wysiwyg => FieldKindDef::Wysiwyg,
+            FieldKind::PostObject => FieldKindDef::PostObject,
+            FieldKind::Relationship => FieldKindDef::Relationship,
+            FieldKind::Taxonomy => FieldKindDef::Taxonomy,
+            FieldKind::User => FieldKindDef::User,
+            FieldKind::Repeater(fields) => FieldKindDef::Repeater(owned_fields(fields)),
+            FieldKind::Group(fields) => FieldKindDef::Group(owned_fields(fields)),
+            FieldKind::FlexibleContent(blocks) => {
+                FieldKindDef::FlexibleContent(blocks.iter().copied().map(BlockDef::from).collect())
+            }
+            FieldKind::Gallery => FieldKindDef::Gallery,
+            FieldKind::Clone(fields) => FieldKindDef::Clone(owned_fields(fields)),
         }
     }
 }
@@ -315,6 +425,8 @@ fn validate_fields(
             FieldKindDef::Text | FieldKindDef::Textarea | FieldKindDef::Checkbox => {
                 Some(Value::String(text.to_string()))
             }
+            kind => crate::value::check_value(name, label, field.required, kind, text, &mut errors)
+                .map(Value::String),
         };
         if let Some(value) = value {
             row.insert(name.to_string(), value);
@@ -424,6 +536,10 @@ impl RegisteredResource {
     /// field:
     ///
     /// - text, textarea, select, lookup: a string. A required value is trimmed.
+    /// - email, URL, radio, color, image, file, link, wysiwyg, post object, relationship,
+    ///   taxonomy, user, repeater, group, flexible content, gallery, clone: the text
+    ///   [`Field::check_value`](crate::Field::check_value) returns. The structured kinds
+    ///   hold JSON text.
     /// - number: an integer. Decimal: a number.
     /// - checkbox: `true` or `false`; a checkbox is never blank.
     /// - date: `"YYYY-MM-DD"`. Date-time: `"YYYY-MM-DD HH:MM:SS"`.
@@ -432,8 +548,9 @@ impl RegisteredResource {
     ///
     /// Each error in [`FieldErrors`] is keyed by the field's name, an owned `String`.
     ///
-    /// A lookup value is checked against [`RuntimeData::options`] by the panel, which can
-    /// read the database.
+    /// A lookup, post object, relationship, taxonomy or user value is checked against
+    /// [`RuntimeData::options`] by the panel, which can read the database, and so is a media
+    /// id against the registered [`MediaLibrary`](crate::MediaLibrary).
     pub fn validate(&self, form: &FormInput) -> Result<Row, FieldErrors> {
         validate_fields(&self.resource.fields, form, true)
     }

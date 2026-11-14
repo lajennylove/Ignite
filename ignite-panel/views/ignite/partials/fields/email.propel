@@ -1,0 +1,2 @@
+{{-- An email field (FieldKind::Email), as Filament's TextInput::email(). --}}
+<input class="ig-input" id="{{ $field.name }}" name="{{ $field.name }}" type="email" value="{{ $field.value }}">

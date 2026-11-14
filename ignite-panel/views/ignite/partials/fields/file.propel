@@ -1,0 +1,12 @@
+{{-- A file from the media library (FieldKind::File): the item's id. With a media library registered, the stored item shows below, and the library's page is linked. --}}
+<input class="ig-input" id="{{ $field.name }}" name="{{ $field.name }}" type="number" min="1" step="1" value="{{ $field.value }}" data-ignite-media="file">
+@foreach (item in field.media)
+  @if (item.found)
+    <p class="mt-1.5 mb-0 text-sm"><a href="{{ $item.url }}" target="_blank" rel="noopener">{{ $item.title }}</a></p>
+  @elseif (field.has_media_library)
+    <p class="mt-1.5 mb-0 text-sm text-error-emphasis">No media item has the id {{ $item.id }}.</p>
+  @endif
+@endforeach
+@if (field.has_browse_url)
+  <p class="mt-1.5 mb-0 text-sm"><a href="{{ $field.browse_url }}" target="_blank" rel="noopener">Open the media library</a></p>
+@endif

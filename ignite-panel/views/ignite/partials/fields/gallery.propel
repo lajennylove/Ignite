@@ -1,0 +1,15 @@
+{{-- Several images from the media library (FieldKind::Gallery). Each id is one name[] input: clear one to remove it, fill the blank one to add an id. The panel reads the inputs as a JSON list. --}}
+<div class="grid gap-2" id="{{ $field.name }}" data-ignite-media="gallery">
+  @foreach (item in field.media)
+    <div class="flex items-center gap-2">
+      <input class="ig-input" name="{{ $field.name }}[]" type="number" min="1" step="1" value="{{ $item.id }}" aria-label="{{ $field.label }}">
+      @if (item.found)
+        <a class="text-sm" href="{{ $item.url }}" target="_blank" rel="noopener"><img class="object-cover" width="64" height="64" src="{{ $item.url }}" alt="{{ $item.title }}"></a>
+      @endif
+    </div>
+  @endforeach
+  <input class="ig-input" name="{{ $field.name }}[]" type="number" min="1" step="1" value="" placeholder="Add a media id" aria-label="{{ $field.label }}">
+</div>
+@if (field.has_browse_url)
+  <p class="mt-1.5 mb-0 text-sm"><a href="{{ $field.browse_url }}" target="_blank" rel="noopener">Open the media library</a></p>
+@endif

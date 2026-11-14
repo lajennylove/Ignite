@@ -1,0 +1,9 @@
+{{-- A link (FieldKind::Link): its URL, its title and its target. The panel reads name[url], name[title] and name[target] as one JSON object. --}}
+<div class="grid gap-2" id="{{ $field.name }}">
+  <input class="ig-input" name="{{ $field.name }}[url]" type="url" value="{{ $field.link.url }}" placeholder="https://" aria-label="{{ $field.label }} URL">
+  <input class="ig-input" name="{{ $field.name }}[title]" type="text" value="{{ $field.link.title }}" placeholder="Title" aria-label="{{ $field.label }} title">
+  <label class="flex items-center gap-2 text-sm">
+    <input type="checkbox" class="h-4 w-4 rounded border-bordergray text-primary focus:ring-primary" name="{{ $field.name }}[target]" value="_blank" @if (field.link.new_tab)checked@endif>
+    Open in a new tab
+  </label>
+</div>

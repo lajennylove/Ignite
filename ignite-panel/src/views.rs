@@ -34,7 +34,7 @@ where
     PropelView::compiled(|assets| compiled(context, assets))
 }
 
-use ignite_core::{FieldDef, FieldErrors, FieldKindDef, FormInput};
+use ignite_core::{FieldDef, FieldErrors, FieldKindDef, FormInput, MediaItem};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -417,6 +417,9 @@ pub(crate) struct FormPage {
     pub(crate) submit_label: &'static str,
     pub(crate) back_url: String,
     pub(crate) fields: Vec<FieldView>,
+    /// Whether the form loads the app's editor script, for its wysiwyg fields.
+    pub(crate) has_editor: bool,
+    pub(crate) editor_script: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -428,14 +431,93 @@ pub(crate) struct FieldView {
     pub(crate) is_textarea: bool,
     pub(crate) is_checkbox: bool,
     pub(crate) is_select: bool,
+    /// Which partial of `partials/fields` renders a kind added for custom fields. All false
+    /// for the kinds the form renders itself.
+    pub(crate) is: KindFlags,
     /// A decimal input has a step, which the browser checks the value against.
     pub(crate) has_step: bool,
     pub(crate) step: String,
     pub(crate) value: String,
     pub(crate) checked: bool,
+    /// The choices of a select, a radio, a relationship, or a post object, taxonomy or user
+    /// field. A single select starts with a placeholder; radios and a relationship do not.
     pub(crate) options: Vec<OptionView>,
+    /// The parts of a link field's value.
+    pub(crate) link: LinkView,
+    /// The ids an image, file or gallery field holds, with the media library's item for each
+    /// one it has.
+    pub(crate) media: Vec<MediaView>,
+    /// Whether the app registered a media library.
+    pub(crate) has_media_library: bool,
+    /// Whether the media library has a page to browse it, and its URL.
+    pub(crate) has_browse_url: bool,
+    pub(crate) browse_url: String,
+    /// The sub-fields of a repeater, group, flexible content or clone field, as JSON, for an
+    /// enhancing script (`data-ignite-schema`).
+    pub(crate) schema: String,
+    /// A line under a structured field that names the JSON keys it takes.
+    pub(crate) hint: String,
     pub(crate) has_error: bool,
     pub(crate) error: String,
+}
+
+/// One flag per kind added for custom fields. Propel reads a path, not a comparison, so the
+/// form tests `field.is.email` and so on.
+#[derive(Debug, Clone, Copy, Default, Serialize)]
+pub(crate) struct KindFlags {
+    pub(crate) email: bool,
+    pub(crate) url: bool,
+    pub(crate) radio: bool,
+    pub(crate) color: bool,
+    pub(crate) image: bool,
+    pub(crate) file: bool,
+    pub(crate) link: bool,
+    pub(crate) wysiwyg: bool,
+    pub(crate) post_object: bool,
+    pub(crate) relationship: bool,
+    pub(crate) taxonomy: bool,
+    pub(crate) user: bool,
+    pub(crate) repeater: bool,
+    pub(crate) group: bool,
+    pub(crate) flexible_content: bool,
+    pub(crate) gallery: bool,
+    pub(crate) clone: bool,
+}
+
+impl KindFlags {
+    fn of(kind: &FieldKindDef) -> Self {
+        let mut flags = KindFlags::default();
+        match kind {
+            FieldKindDef::Email => flags.email = true,
+            FieldKindDef::Url => flags.url = true,
+            FieldKindDef::Radio(_) => flags.radio = true,
+            FieldKindDef::Color => flags.color = true,
+            FieldKindDef::Image => flags.image = true,
+            FieldKindDef::File => flags.file = true,
+            FieldKindDef::Link => flags.link = true,
+            FieldKindDef::Wysiwyg => flags.wysiwyg = true,
+            FieldKindDef::PostObject => flags.post_object = true,
+            FieldKindDef::Relationship => flags.relationship = true,
+            FieldKindDef::Taxonomy => flags.taxonomy = true,
+            FieldKindDef::User => flags.user = true,
+            FieldKindDef::Repeater(_) => flags.repeater = true,
+            FieldKindDef::Group(_) => flags.group = true,
+            FieldKindDef::FlexibleContent(_) => flags.flexible_content = true,
+            FieldKindDef::Gallery => flags.gallery = true,
+            FieldKindDef::Clone(_) => flags.clone = true,
+            FieldKindDef::Text
+            | FieldKindDef::Textarea
+            | FieldKindDef::Password
+            | FieldKindDef::Number
+            | FieldKindDef::Decimal(_)
+            | FieldKindDef::Checkbox
+            | FieldKindDef::Select(_)
+            | FieldKindDef::Lookup
+            | FieldKindDef::Date
+            | FieldKindDef::DateTime => {}
+        }
+        flags
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -445,15 +527,42 @@ pub(crate) struct OptionView {
     pub(crate) selected: bool,
 }
 
+/// The parts of a link field: its URL, its title, and whether it opens in a new tab.
+#[derive(Debug, Clone, Default, Serialize)]
+pub(crate) struct LinkView {
+    pub(crate) url: String,
+    pub(crate) title: String,
+    pub(crate) new_tab: bool,
+}
+
+/// One id held by a media field, with the library's item when the library has it.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct MediaView {
+    pub(crate) id: String,
+    pub(crate) found: bool,
+    pub(crate) title: String,
+    pub(crate) url: String,
+}
+
+/// What a form shows beside its values: the loaded choices of each lookup field, by field
+/// name, and the media library's items, by id.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct FormChoices {
+    pub(crate) lookups: HashMap<String, Vec<(String, String)>>,
+    pub(crate) media: HashMap<i64, MediaItem>,
+}
+
 impl FieldView {
     /// Builds the input for `field`, with the value from `form` and the
     /// error for it, if there is one. A password is never filled in. A lookup
-    /// field's choices come from `lookup`, which the panel loads from the database.
+    /// field's choices come from `lookup`, which the panel loads from the database, and a
+    /// media field's items from `media`.
     pub(crate) fn new(
         field: &FieldDef,
         form: &FormInput,
         errors: &FieldErrors,
         lookup: &[(String, String)],
+        media: &HashMap<i64, MediaItem>,
     ) -> Self {
         let (input_type, is_textarea, is_checkbox, is_select) = match field.kind {
             FieldKindDef::Text => ("text", false, false, false),
@@ -465,6 +574,8 @@ impl FieldView {
             FieldKindDef::Select(_) | FieldKindDef::Lookup => ("text", false, false, true),
             FieldKindDef::Date => ("date", false, false, false),
             FieldKindDef::DateTime => ("datetime-local", false, false, false),
+            // The kinds added for custom fields render through their own partial.
+            _ => ("text", false, false, false),
         };
         // A number input accepts any value, as before: a resource's whole number is
         // checked on the server, and a profile number may be a decimal.
@@ -477,26 +588,77 @@ impl FieldView {
             FieldKindDef::Password => String::new(),
             _ => form.get(&field.name).unwrap_or("").to_string(),
         };
-        // A select starts with a placeholder, so the browser does not submit the first choice.
         let choices: Vec<(String, String)> = match &field.kind {
-            FieldKindDef::Select(choices) => choices.clone(),
-            FieldKindDef::Lookup => lookup.to_vec(),
+            FieldKindDef::Select(choices) | FieldKindDef::Radio(choices) => choices.clone(),
+            kind if kind.loads_options() => lookup.to_vec(),
             _ => Vec::new(),
         };
-        let options = if is_select {
-            std::iter::once(OptionView {
+        let options = match &field.kind {
+            // Radios and a relationship mark each chosen value; nothing is chosen at first.
+            FieldKindDef::Radio(_) | FieldKindDef::Relationship => {
+                let chosen = list_values(&value);
+                let chosen = if chosen.is_empty() && !value.is_empty() {
+                    vec![value.trim().to_string()]
+                } else {
+                    chosen
+                };
+                choices
+                    .into_iter()
+                    .map(|(v, label)| OptionView {
+                        selected: chosen.contains(&v),
+                        value: v,
+                        label,
+                    })
+                    .collect()
+            }
+            // A select starts with a placeholder, so the browser does not submit the first
+            // choice.
+            FieldKindDef::Select(_)
+            | FieldKindDef::Lookup
+            | FieldKindDef::PostObject
+            | FieldKindDef::Taxonomy
+            | FieldKindDef::User => std::iter::once(OptionView {
                 value: String::new(),
                 label: "Select an option".to_string(),
                 selected: value.is_empty(),
             })
             .chain(choices.into_iter().map(|(v, label)| OptionView {
-                selected: v == value,
+                selected: v == value.trim(),
                 value: v,
                 label,
             }))
-            .collect()
+            .collect(),
+            _ => Vec::new(),
+        };
+        let link = match field.kind {
+            FieldKindDef::Link => link_view(&value),
+            _ => LinkView::default(),
+        };
+        let media = match field.kind {
+            FieldKindDef::Image | FieldKindDef::File if !value.trim().is_empty() => {
+                vec![media_view(value.trim(), media)]
+            }
+            FieldKindDef::Gallery => list_values(&value)
+                .iter()
+                .map(|id| media_view(id, media))
+                .collect(),
+            _ => Vec::new(),
+        };
+        let library = if field.kind.uses_media() {
+            ignite_core::media_library()
         } else {
-            Vec::new()
+            None
+        };
+        let browse_url = library
+            .as_ref()
+            .and_then(|library| library.browse_url())
+            .unwrap_or_default();
+        let (schema, hint) = match &field.kind {
+            FieldKindDef::Repeater(_)
+            | FieldKindDef::Group(_)
+            | FieldKindDef::FlexibleContent(_)
+            | FieldKindDef::Clone(_) => (schema_of(&field.kind).to_string(), hint_of(&field.kind)),
+            _ => (String::new(), String::new()),
         };
         let error = errors.get(field.name.as_str()).cloned();
 
@@ -508,14 +670,179 @@ impl FieldView {
             is_textarea,
             is_checkbox,
             is_select,
+            is: KindFlags::of(&field.kind),
             has_step: !step.is_empty(),
             step,
             value,
             checked: is_checkbox && form.checkbox(&field.name),
             options,
+            link,
+            media,
+            has_media_library: library.is_some(),
+            has_browse_url: !browse_url.is_empty(),
+            browse_url,
+            schema,
+            hint,
             has_error: error.is_some(),
             error: error.unwrap_or_default(),
         }
+    }
+}
+
+/// The items of a JSON list value, as text: `["3", 8]` gives `3` and `8`. Anything else
+/// gives none.
+fn list_values(value: &str) -> Vec<String> {
+    match serde_json::from_str::<Value>(value) {
+        Ok(Value::Array(items)) => items
+            .iter()
+            .filter_map(|item| match item {
+                Value::String(text) => Some(text.clone()),
+                Value::Number(number) => Some(number.to_string()),
+                _ => None,
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// The parts of a link's JSON value. A value that is not a link object shows blank.
+fn link_view(value: &str) -> LinkView {
+    let Ok(Value::Object(link)) = serde_json::from_str::<Value>(value) else {
+        return LinkView::default();
+    };
+    let text = |key: &str| {
+        link.get(key)
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string()
+    };
+    LinkView {
+        url: text("url"),
+        title: text("title"),
+        new_tab: text("target") == "_blank",
+    }
+}
+
+/// The view of the media id `id`, with its item when `media` has it.
+fn media_view(id: &str, media: &HashMap<i64, MediaItem>) -> MediaView {
+    let item = id.parse::<i64>().ok().and_then(|id| media.get(&id));
+    MediaView {
+        id: id.to_string(),
+        found: item.is_some(),
+        title: item.map(|item| item.title.clone()).unwrap_or_default(),
+        url: item.map(|item| item.url.clone()).unwrap_or_default(),
+    }
+}
+
+/// The name of a field kind in a schema, in snake case, as the derive's `form_type` names it.
+fn kind_name(kind: &FieldKindDef) -> &'static str {
+    match kind {
+        FieldKindDef::Text => "text",
+        FieldKindDef::Textarea => "textarea",
+        FieldKindDef::Password => "password",
+        FieldKindDef::Number => "number",
+        FieldKindDef::Decimal(_) => "decimal",
+        FieldKindDef::Checkbox => "checkbox",
+        FieldKindDef::Select(_) => "select",
+        FieldKindDef::Lookup => "lookup",
+        FieldKindDef::Date => "date",
+        FieldKindDef::DateTime => "datetime",
+        FieldKindDef::Email => "email",
+        FieldKindDef::Url => "url",
+        FieldKindDef::Radio(_) => "radio",
+        FieldKindDef::Color => "color",
+        FieldKindDef::Image => "image",
+        FieldKindDef::File => "file",
+        FieldKindDef::Link => "link",
+        FieldKindDef::Wysiwyg => "wysiwyg",
+        FieldKindDef::PostObject => "post_object",
+        FieldKindDef::Relationship => "relationship",
+        FieldKindDef::Taxonomy => "taxonomy",
+        FieldKindDef::User => "user",
+        FieldKindDef::Repeater(_) => "repeater",
+        FieldKindDef::Group(_) => "group",
+        FieldKindDef::FlexibleContent(_) => "flexible_content",
+        FieldKindDef::Gallery => "gallery",
+        FieldKindDef::Clone(_) => "clone",
+    }
+}
+
+/// The schema of a kind, as JSON: its type, its choices, its sub-fields and its blocks.
+fn schema_of(kind: &FieldKindDef) -> Value {
+    let fields = |fields: &[FieldDef]| {
+        fields
+            .iter()
+            .map(|field| {
+                serde_json::json!({
+                    "name": field.name,
+                    "label": field.label,
+                    "required": field.required,
+                    "kind": schema_of(&field.kind),
+                })
+            })
+            .collect::<Vec<_>>()
+    };
+    let mut schema = serde_json::Map::new();
+    schema.insert("type".into(), Value::from(kind_name(kind)));
+    match kind {
+        FieldKindDef::Select(choices) | FieldKindDef::Radio(choices) => {
+            let choices = choices
+                .iter()
+                .map(|(value, label)| serde_json::json!({ "value": value, "label": label }))
+                .collect::<Vec<_>>();
+            schema.insert("choices".into(), Value::Array(choices));
+        }
+        FieldKindDef::Repeater(subs) | FieldKindDef::Group(subs) | FieldKindDef::Clone(subs) => {
+            schema.insert("fields".into(), Value::Array(fields(subs)));
+        }
+        FieldKindDef::FlexibleContent(blocks) => {
+            let blocks = blocks
+                .iter()
+                .map(|block| {
+                    serde_json::json!({
+                        "name": block.name,
+                        "label": block.label,
+                        "fields": fields(&block.fields),
+                    })
+                })
+                .collect::<Vec<_>>();
+            schema.insert("blocks".into(), Value::Array(blocks));
+        }
+        _ => {}
+    }
+    Value::Object(schema)
+}
+
+/// The line under a structured field that tells the JSON it takes.
+fn hint_of(kind: &FieldKindDef) -> String {
+    let names = |fields: &[FieldDef]| {
+        fields
+            .iter()
+            .map(|field| field.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    match kind {
+        FieldKindDef::Repeater(fields) => {
+            format!(
+                "JSON: a list of rows, each an object with the keys {}.",
+                names(fields)
+            )
+        }
+        FieldKindDef::Group(fields) | FieldKindDef::Clone(fields) => {
+            format!("JSON: an object with the keys {}.", names(fields))
+        }
+        FieldKindDef::FlexibleContent(blocks) => {
+            let blocks = blocks
+                .iter()
+                .map(|block| format!("{} ({})", block.name, names(&block.fields)))
+                .collect::<Vec<_>>()
+                .join("; ");
+            format!(
+                "JSON: a list of {{\"type\": ..., \"data\": {{...}}}} blocks. Blocks: {blocks}."
+            )
+        }
+        _ => String::new(),
     }
 }
 
@@ -548,31 +875,44 @@ pub(crate) fn record_form(fields: &[FieldDef], record: &Value) -> FormInput {
     FormInput::new(values)
 }
 
-/// The fields of a form page, in display order. A form with lookup fields uses
+/// The fields of a form page, in display order. A form with lookup or media fields uses
 /// [`field_views_with`] instead.
 pub(crate) fn field_views(
     fields: &[FieldDef],
     form: &FormInput,
     errors: &FieldErrors,
 ) -> Vec<FieldView> {
-    field_views_with(fields, form, errors, &HashMap::new())
+    field_views_with(fields, form, errors, &FormChoices::default())
 }
 
-/// The fields of a form page, in display order. `lookups` holds the choices of each
-/// lookup field, by field name.
+/// The fields of a form page, in display order, with the loaded choices of each lookup
+/// field and the media library's items.
 pub(crate) fn field_views_with(
     fields: &[FieldDef],
     form: &FormInput,
     errors: &FieldErrors,
-    lookups: &HashMap<String, Vec<(String, String)>>,
+    choices: &FormChoices,
 ) -> Vec<FieldView> {
     fields
         .iter()
         .map(|f| {
-            let lookup = lookups.get(&f.name).map(Vec::as_slice).unwrap_or(&[]);
-            FieldView::new(f, form, errors, lookup)
+            let lookup = choices
+                .lookups
+                .get(&f.name)
+                .map(Vec::as_slice)
+                .unwrap_or(&[]);
+            FieldView::new(f, form, errors, lookup, &choices.media)
         })
         .collect()
+}
+
+/// The editor script a form loads: the registered one, when the form has a wysiwyg field.
+pub(crate) fn editor_for(fields: &[FieldDef]) -> Option<String> {
+    if fields.iter().any(|f| f.kind == FieldKindDef::Wysiwyg) {
+        ignite_core::editor_script()
+    } else {
+        None
+    }
 }
 
 /// Formats an ISO date ("2026-03-01"), a date-time ("2026-11-08T19:32:05") or an
@@ -610,6 +950,87 @@ mod tests {
         assert_eq!(
             cell_text(Some(&json!("2026-11-08T19:32:05Z"))),
             "8 Nov 2026, 19:32"
+        );
+    }
+
+    fn def(kind: FieldKindDef) -> FieldDef {
+        FieldDef {
+            name: "photo".into(),
+            label: "Photo".into(),
+            kind,
+            required: false,
+        }
+    }
+
+    fn form(pairs: &[(&str, &str)]) -> FormInput {
+        FormInput::new(
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        )
+    }
+
+    // No media library is registered in this test binary: an image still renders its id.
+    #[test]
+    fn a_media_field_renders_its_ids_without_a_media_library() {
+        let view = FieldView::new(
+            &def(FieldKindDef::Image),
+            &form(&[("photo", "12")]),
+            &FieldErrors::new(),
+            &[],
+            &HashMap::new(),
+        );
+        assert!(view.is.image);
+        assert!(!view.has_media_library);
+        assert_eq!(view.value, "12");
+        assert_eq!(view.media.len(), 1);
+        assert_eq!(view.media[0].id, "12");
+        assert!(!view.media[0].found);
+
+        let gallery = FieldView::new(
+            &def(FieldKindDef::Gallery),
+            &form(&[("photo", "[3,8]")]),
+            &FieldErrors::new(),
+            &[],
+            &HashMap::new(),
+        );
+        let ids: Vec<&str> = gallery.media.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids, ["3", "8"]);
+    }
+
+    #[test]
+    fn a_link_and_a_relationship_show_their_stored_parts() {
+        let link = FieldView::new(
+            &def(FieldKindDef::Link),
+            &form(&[(
+                "photo",
+                r#"{"url":"https://example.com","title":"Go","target":"_blank"}"#,
+            )]),
+            &FieldErrors::new(),
+            &[],
+            &HashMap::new(),
+        );
+        assert_eq!(link.link.url, "https://example.com");
+        assert_eq!(link.link.title, "Go");
+        assert!(link.link.new_tab);
+
+        let choices = [
+            ("1".to_string(), "One".to_string()),
+            ("2".to_string(), "Two".to_string()),
+        ];
+        let related = FieldView::new(
+            &def(FieldKindDef::Relationship),
+            &form(&[("photo", r#"["2"]"#)]),
+            &FieldErrors::new(),
+            &choices,
+            &HashMap::new(),
+        );
+        let selected: Vec<bool> = related.options.iter().map(|o| o.selected).collect();
+        assert_eq!(
+            selected,
+            [false, true],
+            "no placeholder, the stored choice selected"
         );
     }
 

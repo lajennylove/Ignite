@@ -1,0 +1,3 @@
+{{-- Rows of sub-fields (FieldKind::Repeater), edited as JSON. data-ignite-schema holds its sub-fields, for a script that builds a richer editor. --}}
+<textarea class="ig-input min-h-32" id="{{ $field.name }}" name="{{ $field.name }}" data-ignite-structured="repeater" data-ignite-schema="{{ $field.schema }}">{{ $field.value }}</textarea>
+<p class="mt-1.5 mb-0 text-sm">{{ $field.hint }}</p>

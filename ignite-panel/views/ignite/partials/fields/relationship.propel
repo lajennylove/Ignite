@@ -1,0 +1,7 @@
+{{-- Several choices (FieldKind::Relationship), from the options the resource loads. The panel reads the name[] values as a JSON list; the hidden input sends the field blank when nothing is chosen. --}}
+<input type="hidden" name="{{ $field.name }}[]" value="">
+<select class="ig-input min-h-32" id="{{ $field.name }}" name="{{ $field.name }}[]" multiple>
+  @foreach (option in field.options)
+    <option value="{{ $option.value }}" @if (option.selected)selected@endif>{{ $option.label }}</option>
+  @endforeach
+</select>

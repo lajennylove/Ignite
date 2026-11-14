@@ -1039,6 +1039,7 @@ dependencies = [
  "rand_core 0.6.4",
  "serde",
  "serde_json",
+ "url",
 ]
 
 [[package]]

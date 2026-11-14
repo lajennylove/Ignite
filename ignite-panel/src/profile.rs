@@ -143,7 +143,7 @@ pub(crate) fn validate(
             _ => {}
         }
 
-        let text = if field.required {
+        let mut text = if field.required {
             field.check_required(input, &mut errors).unwrap_or("")
         } else {
             input.get(field.name).unwrap_or("").trim()
@@ -168,7 +168,13 @@ pub(crate) fn validate(
                         "Choose one of the options.".to_string(),
                     );
                 }
-                _ => {}
+                // The kinds added for custom fields (email, URL, color, repeater, ...) store
+                // the text their check returns.
+                _ => {
+                    if let Some(value) = field.check_value(&text, &mut errors) {
+                        text = value;
+                    }
+                }
             }
         }
         match field.name {
