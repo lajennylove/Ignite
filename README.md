@@ -24,7 +24,7 @@ dotenvy = "0.15"
 propel_compiler = "0.2.0"
 ```
 
-- **Ignite** is pinned to revision `d3d1975`, the revision of the Ignite main branch that the install page documents. Cargo takes it from git.
+- **Ignite** is pinned to revision `d3d1975`, the revision of the Ignite main branch that the install page documents. Cargo takes it from git. That revision is before 0.3.0; the pin moves to the 0.3.0 revision when that release is published. Upgrading to 0.3.0 has breaking changes: see the migration notes in [CHANGELOG.md](CHANGELOG.md).
 - **Orbit** (`orbit-orm`) 0.1.0 comes from crates.io. The models derive its `OrbitModel`.
 - **Rocket** 0.5.2 and **Propel** 0.2.0 come from crates.io. A git pin of either would build a second copy, and the panel's views would not match the app's.
 - **propel_compiler** 0.2.0 is a build dependency. An app with its own views compiles them in its `build.rs`.
@@ -143,9 +143,31 @@ category_id: Option<i32>,
 
 `load_categories` is an async function `async fn(&Database) -> Result<Vec<(String, String)>, orbit_orm::Error>`, called each time a form is shown. A `belongs_to` field stores the related row's `id`. Its select lists the rows of the related table by their `display` column, and the list shows that name. A submitted value must be one of the choices, so a value with no row is refused. The derive does not write a foreign key: add one in the migration if the database should enforce it.
 
+### Saving a form
+
+Create and update write every field of the form. A blank `Option` field is saved as NULL, on edit as on create, so a user clears an optional value by emptying it and saving (since 0.3.0; before, a blank optional field was skipped on edit and kept its old value). A password is the exception: left blank on edit, it keeps the stored hash. A field that is not an `Option` is required, and a blank one is refused with "<label> is required." on create and on edit. A checkbox is never blank: unticked is `false`.
+
+The errors of a form are a `FieldErrors`, a `HashMap<String, String>` from the field name to its message, as Laravel's `MessageBag` keys messages by field. A resource that implements `IgniteResource` by hand writes literal keys with `.to_string()`:
+
+```rust
+fn validate(form: &FormInput) -> Result<WidgetInput, FieldErrors> {
+    let mut errors = FieldErrors::new();
+    let price = match form.get("price").map(str::parse::<i32>) {
+        Some(Ok(price)) => price,
+        _ => {
+            errors.insert("price".to_string(), "Price must be a whole number.".to_string());
+            0
+        }
+    };
+    // ...
+}
+```
+
+The checks on `Field` (`check_required`, `check_whole_number`, `check_decimal`, `check_date` and the others) record their message under the field's name, so most resources never write a key by hand.
+
 ### Runtime resources
 
-A resource can also be defined by data while the app runs, such as a custom post type that a site owner creates in the admin. Build a `RuntimeResource` from its slug, titles, `FieldDef`s and `ColumnDef`s (owned twins of `Field` and `Column`; `FieldDef::from(field)` converts a static one), give it a `RuntimeData` that reads and writes its rows as JSON maps, and add it with `register_runtime`. Definitions stay owned: editing and registering a resource again keeps no copy of the old one (only each distinct field name is kept, as the key of its form errors). A field name must be lowercase letters, digits and `_`, start with a letter, and be at most 64 bytes.
+A resource can also be defined by data while the app runs, such as a custom post type that a site owner creates in the admin. Build a `RuntimeResource` from its slug, titles, `FieldDef`s and `ColumnDef`s (owned twins of `Field` and `Column`; `FieldDef::from(field)` converts a static one), give it a `RuntimeData` that reads and writes its rows as JSON maps, and add it with `register_runtime`. Definitions stay owned: editing and registering a resource again keeps no copy of the old one, and removing it frees everything, field names included (its form errors are keyed by owned `String`s). A field name must be a lowercase identifier: lowercase letters, digits and `_`, starting with a letter, at most 64 bytes, as a column name is. `register_runtime` refuses any other name with `RuntimeError::InvalidFieldName`, and two fields with one name with `RuntimeError::DuplicateField`.
 
 ```rust
 use ignite_core::{register_runtime, unregister_runtime, ColumnDef, FieldDef, FieldKindDef, RuntimeResource};
@@ -158,7 +180,7 @@ register_runtime(
 unregister_runtime("books")?;
 ```
 
-The panel serves it at `/admin/<slug>` with the same list, forms, checks and delete action as a static resource, and shows it in the navigation, from the next request on. Ignite assumes no table layout: `RuntimeData` decides where the rows live. A row needs a numeric `id`. A slug that a static resource, another runtime resource or a panel page (such as `login`) uses is refused with a `RuntimeError`. Call `ignite_panel::register_runtime_permissions(&db, "books").await?` right after `register_runtime` (it refuses a slug that is not registered), so its five permissions exist at once and a role can be granted them; without the call, the panel creates them on the next signed-in request. They stay when the resource is removed. A unique-index violation shows as "<label> is already taken." only when the index is named `{slug}_{field}_unique`, as for a static resource; a `RuntimeData` that stores values elsewhere should check uniqueness itself. A runtime resource has no dashboard cards or table yet.
+The panel serves it at `/admin/<slug>` with the same list, forms, checks and delete action as a static resource, and shows it in the navigation, from the next request on. Ignite assumes no table layout: `RuntimeData` decides where the rows live. A row needs a numeric `id`. A slug that is not valid is refused with `RuntimeError::InvalidSlug`, and a slug that a static resource, another runtime resource or a panel page (such as `login`) uses with `RuntimeError::SlugTaken`; `unregister_runtime` of a slug that is not registered returns `RuntimeError::NotRegistered`. On edit, a blank optional field comes to `RuntimeData::update` as `null` and a blank password is left out of the row, as for a derived resource. Call `ignite_panel::register_runtime_permissions(&db, "books").await?` right after `register_runtime` (it refuses a slug that is not registered), so its five permissions exist at once and a role can be granted them; without the call, the panel creates them on the next signed-in request. They stay when the resource is removed. A unique-index violation shows as "<label> is already taken." only when the index is named `{slug}_{field}_unique`, as for a static resource; a `RuntimeData` that stores values elsewhere should check uniqueness itself. A runtime resource has no dashboard cards or table yet.
 
 ## Roles and permissions
 

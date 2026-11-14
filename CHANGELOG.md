@@ -6,7 +6,46 @@ All notable changes to Ignite are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - unreleased
+
+0.3.0 is a breaking release. Read the migration notes first.
+
+### MIGRATION from 0.2.x
+
+1. **`FieldErrors` keys are `String`.** `FieldErrors` is now `HashMap<String, String>`
+   (it was `HashMap<&'static str, String>`), as Laravel's `MessageBag` keys messages by
+   field name. A hand-written `IgniteResource` adds `.to_string()` to each literal key:
+   `errors.insert("price".to_string(), "Price must be a whole number.".to_string())`.
+   Reading is unchanged: `errors.get("price")` still takes a `&str`. The `Field::check_*`
+   methods keep their signatures, and `#[derive(IgniteResource)]` needs no change.
+2. **The derive writes NULL when an optional field is cleared on edit.** An `Option` field
+   that a user leaves blank on the edit form is now saved as NULL, as on create. Before,
+   it was skipped and kept its stored value, so an optional field could never be cleared.
+   Existing data changes when a user submits such a field blank: check forms whose
+   optional fields were left blank on purpose to keep a value. A password field is not
+   affected: left blank on edit, it still keeps the stored hash. Fields that are not
+   `Option` are unchanged and still required.
+3. **Runtime resource field names must be lowercase identifiers.** A `FieldDef` name must
+   be lowercase ASCII letters, digits and `_`, start with a letter, and be at most 64 bytes
+   (`MAX_FIELD_NAME`). `register_runtime` refuses any other name with
+   `RuntimeError::InvalidFieldName`. Rename such fields (and their columns and row keys)
+   before registering them.
+
+Everything else under Changed below has been on the main branch since 0.2.0 and is also
+breaking for an app on 0.2.0: the move from Diesel to Orbit (`orbit-orm`), the async
+`IgniteResource`, and the new migrations (run `ignite migrate`). The README's install
+section covers the Orbit setup.
+
 ### Changed
+
+- `FieldErrors` is `HashMap<String, String>`. See the migration notes.
+- `#[derive(IgniteResource)]` writes NULL for a blank optional field on update, as a
+  runtime resource already did, so the two kinds of resource save a cleared field alike.
+  A blank password on update is still skipped.
+- Runtime resources keep their field names owned. The process-wide name interner (and its
+  `Box::leak`) is gone, so registering, editing and removing runtime resources keeps
+  nothing after a resource is removed. The 64-byte, lowercase-identifier field-name rule
+  stays, as validation.
 
 - Migrations run on Orbit (`orbit-orm`) instead of Diesel. `ignite migrate`, `ignite migrate:status`
   and `ignite migrate:rollback` keep their names. The migrations are recorded in Diesel's
@@ -36,7 +75,8 @@ All notable changes to Ignite are listed here. The format follows
   `RuntimeData` the app implements. `register_runtime` and `unregister_runtime` add and remove
   one while the panel serves; the panel serves it at `/admin/<slug>` with the same list, forms
   and delete action as a static resource. A slug that is already used is refused with a
-  `RuntimeError`. `ignite_panel::register_runtime_permissions` creates its five permissions
+  `RuntimeError` (`InvalidSlug`, `SlugTaken`, `InvalidFieldName`, `DuplicateField`,
+  `NotRegistered`). `ignite_panel::register_runtime_permissions` creates its five permissions
   at registration; without it, the panel creates them on the next signed-in request.
 - Roles and permissions, modelled on Filament and Filament Shield. Each resource has the
   abilities `<slug>.viewAny`, `<slug>.view`, `<slug>.create`, `<slug>.update` and

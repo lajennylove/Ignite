@@ -1,6 +1,6 @@
 [package]
 name = "ignite-panel"
-version = "0.2.0"
+version = "0.3.0"
 license = "MIT"
 edition = "2021"
 publish = false
@@ -8,7 +8,7 @@ publish = false
 links = "ignite_panel"
 
 [dependencies]
-ignite-core = { path = "../ignite-core" }
+ignite-core = { version = "0.3.0", path = "../ignite-core" }
 rocket = "0.5.2"
 propel_rocket = "0.2.0"
 propel_runtime = "0.2.0"
