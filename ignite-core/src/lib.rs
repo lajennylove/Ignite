@@ -10,6 +10,7 @@ pub mod form;
 pub mod password;
 pub mod query;
 pub mod resource;
+pub mod runtime_resource;
 pub mod widget;
 
 pub use field::{Column, Field, FieldKind};
@@ -20,4 +21,9 @@ pub use orbit_orm::Database;
 pub use password::{hash_password, verify_password};
 pub use query::{escape_like, Direction, ListQuery, Page};
 pub use resource::{table_name_is, IgniteResource};
+pub use runtime_resource::{
+    register_runtime, reserve_slugs, runtime_resource, runtime_resources, unregister_runtime,
+    ColumnDef, FieldDef, FieldKindDef, RegisteredResource, Row, RuntimeData, RuntimeError,
+    RuntimeFuture, RuntimeResource,
+};
 pub use widget::{LatestRecords, StatWidget};
