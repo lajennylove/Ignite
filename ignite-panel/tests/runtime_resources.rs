@@ -333,3 +333,39 @@ fn a_runtime_resource_gets_its_permissions_and_obeys_them() {
 
     unregister_runtime("ruled-books").expect("unregister");
 }
+
+#[test]
+fn the_app_creates_the_permissions_when_it_registers_so_a_grant_works_at_once() {
+    let _guard = reset_books();
+    // The panel is running, but no request is made after the registration.
+    let _client = client(None);
+    let t = test_db();
+
+    register_runtime(books("granted-books")).expect("register");
+    t.run(ignite_panel::register_runtime_permissions(
+        &t.db,
+        "granted-books",
+    ))
+    .expect("register permissions");
+    t.run(ignite_panel::register_runtime_permissions(
+        &t.db,
+        "granted-books",
+    ))
+    .expect("again changes nothing");
+
+    t.run(async {
+        authz::create_role(&t.db, "editor").await.expect("role");
+        authz::grant_permission(&t.db, "editor", "granted-books.create")
+            .await
+            .expect("the permission exists right after registration");
+    });
+    assert_eq!(
+        t.count(
+            "SELECT COUNT(*) FROM permissions WHERE name LIKE ?",
+            &["granted-books.%".into()],
+        ),
+        5
+    );
+
+    unregister_runtime("granted-books").expect("unregister");
+}

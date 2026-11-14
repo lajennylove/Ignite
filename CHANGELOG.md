@@ -36,7 +36,8 @@ All notable changes to Ignite are listed here. The format follows
   `RuntimeData` the app implements. `register_runtime` and `unregister_runtime` add and remove
   one while the panel serves; the panel serves it at `/admin/<slug>` with the same list, forms
   and delete action as a static resource. A slug that is already used is refused with a
-  `RuntimeError`. Its permissions are registered on the next signed-in request.
+  `RuntimeError`. `ignite_panel::register_runtime_permissions` creates its five permissions
+  at registration; without it, the panel creates them on the next signed-in request.
 - Roles and permissions, modelled on Filament and Filament Shield. Each resource has the
   abilities `<slug>.viewAny`, `<slug>.view`, `<slug>.create`, `<slug>.update` and
   `<slug>.delete`, which the panel registers when the app starts. The routes answer 403

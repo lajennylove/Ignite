@@ -52,6 +52,15 @@ pub fn load_env() {
     }
 }
 
+/// Creates the five permission rows of the runtime resource at `slug` (`<slug>.viewAny`,
+/// `.view`, `.create`, `.update` and `.delete`), so a role can be granted them at once. Call it
+/// with [`ignite_core::register_runtime`], in the same request, as a static resource gets its
+/// rows when the app starts. Running it again changes nothing. If the app does not call it,
+/// the panel creates the rows on the next signed-in request.
+pub async fn register_runtime_permissions(db: &Database, slug: &str) -> Result<(), OrbitError> {
+    authz::register(db, &authz::slug_abilities(slug)).await
+}
+
 /// The panel's migrations, embedded in the crate at build time. Each name is a folder in
 /// `migrations/`. A new migration is added here, in order, as well as in that folder: Orbit
 /// embeds the files by name, and a missing folder is a build error.
