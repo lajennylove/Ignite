@@ -3,7 +3,6 @@ name = "ignite-macros"
 version = "0.3.0"
 license = "MIT"
 edition = "2021"
-publish = false
 
 [lib]
 proc-macro = true
