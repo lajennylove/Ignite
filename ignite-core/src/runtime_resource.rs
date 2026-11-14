@@ -17,17 +17,16 @@
 //! )?;
 //! ```
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fmt;
 use std::future::Future;
-use std::hash::Hash;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
 
 use orbit_orm::{Database, Error};
 use serde_json::{Map, Value};
 
-use crate::field::{Column, Field, FieldKind};
+use crate::field::{self as check, Column, Field, FieldKind};
 use crate::form::{FieldErrors, FormInput};
 use crate::query::{ListQuery, Page};
 
@@ -52,10 +51,17 @@ pub trait RuntimeData: Send + Sync + 'static {
     /// Returns the row with `id`, or `None` if there is no such row.
     fn find<'a>(&'a self, db: &'a Database, id: i64) -> RuntimeFuture<'a, Option<Row>>;
     /// Inserts a row from the validated `input` and returns it. See
-    /// [`RuntimeResource::validate`] for the values `input` holds.
+    /// [`RegisteredResource::validate`] for the values `input` holds.
+    ///
+    /// An [`Error::UniqueViolation`] whose index is named `{slug}_{field}_unique` shows on the
+    /// form as `"<label> is already taken."`, as for a static resource. Any other error is a
+    /// server error. A source whose indexes are named otherwise (or that keeps values in a
+    /// meta table without such an index) should return a violation with an index of that
+    /// name, or check the value before it writes.
     fn create<'a>(&'a self, db: &'a Database, input: Row) -> RuntimeFuture<'a, Row>;
     /// Updates the row with `id` from the validated `input` and returns it. A key that is
-    /// missing from `input`, such as a password left blank, keeps its stored value.
+    /// missing from `input`, such as a password left blank, keeps its stored value. A unique
+    /// violation is reported as for [`create`](Self::create).
     fn update<'a>(&'a self, db: &'a Database, id: i64, input: Row) -> RuntimeFuture<'a, Row>;
     /// Deletes the row with `id` and returns the number of rows deleted.
     fn delete<'a>(&'a self, db: &'a Database, id: i64) -> RuntimeFuture<'a, u64>;
@@ -239,93 +245,72 @@ impl RuntimeResource {
         self.per_page = per_page;
         self
     }
-
-    /// Turns the submitted form into a [`Row`] for a create, or returns one message per
-    /// field. It runs the same checks as a static resource, with the same messages:
-    /// required fields ([`Field::check_required`]), whole numbers, decimals, dates,
-    /// date-times and select choices. The row holds one key per field:
-    ///
-    /// - text, textarea, select, lookup: a string. A required value is trimmed.
-    /// - number: an integer. Decimal: a number.
-    /// - checkbox: `true` or `false`; a checkbox is never blank.
-    /// - date: `"YYYY-MM-DD"`. Date-time: `"YYYY-MM-DD HH:MM:SS"`.
-    /// - password: the hash of the password ([`hash_password`](crate::hash_password)).
-    /// - a blank field that is not required: `null`.
-    ///
-    /// A lookup value is checked against [`RuntimeData::options`] by the panel, which can
-    /// read the database.
-    pub fn validate(&self, form: &FormInput) -> Result<Row, FieldErrors> {
-        validate_fields(intern_fields(&self.fields), form, true)
-    }
-
-    /// Turns the submitted form into a [`Row`] for an update. It is
-    /// [`validate`](Self::validate), except that a blank password is not an error: the row
-    /// leaves its key out, so the stored password is kept.
-    pub fn validate_update(&self, form: &FormInput) -> Result<Row, FieldErrors> {
-        validate_fields(intern_fields(&self.fields), form, false)
-    }
 }
 
-/// The checks of [`RuntimeResource::validate`], on the interned fields, so the error keys are
-/// the `&'static str` that [`FieldErrors`] holds.
-fn validate_fields(fields: &[Field], form: &FormInput, creating: bool) -> Result<Row, FieldErrors> {
+/// The checks of [`RegisteredResource::validate`]. `names` holds the interned name of each
+/// field, in order, as the keys of the errors.
+fn validate_fields(
+    fields: &[FieldDef],
+    names: &[&'static str],
+    form: &FormInput,
+    creating: bool,
+) -> Result<Row, FieldErrors> {
     let mut errors = FieldErrors::new();
     let mut row = Row::new();
-    for field in fields {
+    for (field, &name) in fields.iter().zip(names) {
+        let label = field.label.as_str();
         // A checkbox is never blank: an unticked checkbox is false.
-        if field.kind == FieldKind::Checkbox {
-            row.insert(
-                field.name.to_string(),
-                Value::Bool(form.checkbox(field.name)),
-            );
+        if field.kind == FieldKindDef::Checkbox {
+            row.insert(name.to_string(), Value::Bool(form.checkbox(name)));
             continue;
         }
-        let is_password = field.kind == FieldKind::Password;
+        let is_password = field.kind == FieldKindDef::Password;
         // A password is required only when creating. On an edit a blank one keeps the hash.
         let present = if field.required && (creating || !is_password) {
-            field.check_required(form, &mut errors)
+            check::check_required(name, label, form, &mut errors)
         } else {
-            form.get(field.name)
+            form.get(name)
         };
         let Some(text) = present else {
             if !is_password || creating {
-                row.insert(field.name.to_string(), Value::Null);
+                row.insert(name.to_string(), Value::Null);
             }
             continue;
         };
-        let value = match field.kind {
-            FieldKind::Password => match crate::hash_password(text) {
+        let value = match &field.kind {
+            FieldKindDef::Password => match crate::hash_password(text) {
                 Ok(hash) => Some(Value::String(hash)),
                 Err(_) => {
-                    errors.insert(field.name, "Could not save this password.".to_string());
+                    errors.insert(name, "Could not save this password.".to_string());
                     None
                 }
             },
-            FieldKind::Number => field
-                .check_whole_number::<i64>(text, &mut errors)
-                .map(Value::from),
-            FieldKind::Decimal(_) => field
-                .check_decimal::<f64>(text, &mut errors)
-                .map(Value::from),
-            FieldKind::Select(choices) => {
+            FieldKindDef::Number => {
+                check::check_whole_number::<i64>(name, label, text, &mut errors).map(Value::from)
+            }
+            FieldKindDef::Decimal(_) => {
+                check::check_decimal::<f64>(name, label, text, &mut errors).map(Value::from)
+            }
+            FieldKindDef::Select(choices) => {
                 let text = text.trim();
-                field
-                    .check_choice(text, choices, &mut errors)
+                let choices: Vec<(&str, &str)> = choices
+                    .iter()
+                    .map(|(value, label)| (value.as_str(), label.as_str()))
+                    .collect();
+                check::check_choice(name, text, &choices, &mut errors)
                     .then(|| Value::String(text.to_string()))
             }
-            FieldKind::Lookup => Some(Value::String(text.trim().to_string())),
-            FieldKind::Date => field
-                .check_date(text, &mut errors)
+            FieldKindDef::Lookup => Some(Value::String(text.trim().to_string())),
+            FieldKindDef::Date => check::check_date(name, label, text, &mut errors)
                 .map(|date| Value::String(date.format("%Y-%m-%d").to_string())),
-            FieldKind::DateTime => field
-                .check_datetime(text, &mut errors)
+            FieldKindDef::DateTime => check::check_datetime(name, label, text, &mut errors)
                 .map(|stamp| Value::String(stamp.format("%Y-%m-%d %H:%M:%S").to_string())),
-            FieldKind::Text | FieldKind::Textarea | FieldKind::Checkbox => {
+            FieldKindDef::Text | FieldKindDef::Textarea | FieldKindDef::Checkbox => {
                 Some(Value::String(text.to_string()))
             }
         };
         if let Some(value) = value {
-            row.insert(field.name.to_string(), value);
+            row.insert(name.to_string(), value);
         }
     }
     if errors.is_empty() {
@@ -376,15 +361,11 @@ impl fmt::Display for RuntimeError {
 
 impl std::error::Error for RuntimeError {}
 
-/// A runtime resource as the registry holds it: the definition, and the same values as the
-/// `&'static` types the panel renders static resources with.
+/// A runtime resource as the registry holds it: the definition, ready for the panel.
 pub struct RegisteredResource {
     resource: RuntimeResource,
-    slug: &'static str,
-    title: &'static str,
-    singular: &'static str,
-    fields: &'static [Field],
-    columns: &'static [Column],
+    /// The interned name of each field, in order: the keys of its [`FieldErrors`].
+    names: Vec<&'static str>,
 }
 
 impl RegisteredResource {
@@ -394,28 +375,60 @@ impl RegisteredResource {
     }
 
     /// The slug, as the panel's routes match it.
-    pub fn slug(&self) -> &'static str {
-        self.slug
+    pub fn slug(&self) -> &str {
+        &self.resource.slug
     }
 
     /// The heading and navigation label.
-    pub fn title(&self) -> &'static str {
-        self.title
+    pub fn title(&self) -> &str {
+        &self.resource.title
     }
 
     /// The name of one record.
-    pub fn singular(&self) -> &'static str {
-        self.singular
+    pub fn singular(&self) -> &str {
+        &self.resource.singular
     }
 
-    /// The form fields, as [`Field`]s.
-    pub fn fields(&self) -> &'static [Field] {
-        self.fields
+    /// The form fields, in display order.
+    pub fn fields(&self) -> &[FieldDef] {
+        &self.resource.fields
     }
 
-    /// The list columns, as [`Column`]s.
-    pub fn columns(&self) -> &'static [Column] {
-        self.columns
+    /// The list columns, in display order.
+    pub fn columns(&self) -> &[ColumnDef] {
+        &self.resource.columns
+    }
+
+    /// The key that [`FieldErrors`] uses for the field `name`, or `None` when the resource has
+    /// no such field. Use it to report an error on a field, such as a value already taken.
+    pub fn error_key(&self, name: &str) -> Option<&'static str> {
+        self.names.iter().copied().find(|key| *key == name)
+    }
+
+    /// Turns the submitted form into a [`Row`] for a create, or returns one message per
+    /// field. It runs the same checks as a static resource, with the same messages:
+    /// required fields ([`Field::check_required`](crate::Field::check_required)), whole
+    /// numbers, decimals, dates, date-times and select choices. The row holds one key per
+    /// field:
+    ///
+    /// - text, textarea, select, lookup: a string. A required value is trimmed.
+    /// - number: an integer. Decimal: a number.
+    /// - checkbox: `true` or `false`; a checkbox is never blank.
+    /// - date: `"YYYY-MM-DD"`. Date-time: `"YYYY-MM-DD HH:MM:SS"`.
+    /// - password: the hash of the password ([`hash_password`](crate::hash_password)).
+    /// - a blank field that is not required: `null`.
+    ///
+    /// A lookup value is checked against [`RuntimeData::options`] by the panel, which can
+    /// read the database.
+    pub fn validate(&self, form: &FormInput) -> Result<Row, FieldErrors> {
+        validate_fields(&self.resource.fields, &self.names, form, true)
+    }
+
+    /// Turns the submitted form into a [`Row`] for an update. It is
+    /// [`validate`](Self::validate), except that a blank password is not an error: the row
+    /// leaves its key out, so the stored password is kept.
+    pub fn validate_update(&self, form: &FormInput) -> Result<Row, FieldErrors> {
+        validate_fields(&self.resource.fields, &self.names, form, false)
     }
 }
 
@@ -456,7 +469,9 @@ fn valid_slug(slug: &str) -> bool {
 
 /// Adds a runtime resource to the panel. It shows in the navigation and the dashboard, and
 /// its list, forms and delete action answer at `/<mount>/<slug>`, from the next request on.
-/// The panel registers its permissions (`<slug>.viewAny` and the others) on that request.
+/// Create its permissions (`<slug>.viewAny` and the others) in the same request with
+/// `ignite_panel::register_runtime_permissions`; otherwise the panel creates them on the next
+/// signed-in request.
 ///
 /// Refuses a slug that is not valid, a slug that a static resource, another runtime resource
 /// or one of the panel's own pages (such as `login`) uses, and two fields with one name.
@@ -471,21 +486,21 @@ pub fn register_runtime(resource: RuntimeResource) -> Result<(), RuntimeError> {
             field: field.name.clone(),
         });
     }
-    // Interning takes locks of its own, so it runs before the registry is locked.
-    let registered = RegisteredResource {
-        slug: intern_str(&resource.slug),
-        title: intern_str(&resource.title),
-        singular: intern_str(&resource.singular),
-        fields: intern_fields(&resource.fields),
-        columns: intern_columns(&resource.columns),
-        resource,
-    };
     write(|registry| {
-        let slug = registered.slug;
-        if registry.reserved.contains(slug) || registry.resources.iter().any(|r| r.slug == slug) {
-            return Err(RuntimeError::SlugTaken(slug.to_string()));
+        let slug = resource.slug.as_str();
+        if registry.reserved.contains(slug) || registry.resources.iter().any(|r| r.slug() == slug) {
+            return Err(RuntimeError::SlugTaken(resource.slug.clone()));
         }
-        registry.resources.push(Arc::new(registered));
+        // Only an accepted resource interns its field names. The names lock is taken
+        // inside the registry lock, and never the other way round.
+        let names = resource
+            .fields
+            .iter()
+            .map(|f| intern_name(&f.name))
+            .collect();
+        registry
+            .resources
+            .push(Arc::new(RegisteredResource { resource, names }));
         Ok(())
     })
 }
@@ -496,7 +511,7 @@ pub fn register_runtime(resource: RuntimeResource) -> Result<(), RuntimeError> {
 pub fn unregister_runtime(slug: &str) -> Result<(), RuntimeError> {
     write(|registry| {
         let before = registry.resources.len();
-        registry.resources.retain(|r| r.slug != slug);
+        registry.resources.retain(|r| r.slug() != slug);
         if registry.resources.len() == before {
             Err(RuntimeError::NotRegistered(slug.to_string()))
         } else {
@@ -507,7 +522,13 @@ pub fn unregister_runtime(slug: &str) -> Result<(), RuntimeError> {
 
 /// The runtime resource at `slug`, if one is registered.
 pub fn runtime_resource(slug: &str) -> Option<Arc<RegisteredResource>> {
-    read(|registry| registry.resources.iter().find(|r| r.slug == slug).cloned())
+    read(|registry| {
+        registry
+            .resources
+            .iter()
+            .find(|r| r.slug() == slug)
+            .cloned()
+    })
 }
 
 /// Every runtime resource, in registration order.
@@ -522,7 +543,7 @@ pub fn reserve_slugs(slugs: &[&str]) -> Result<(), RuntimeError> {
     write(|registry| {
         if let Some(slug) = slugs
             .iter()
-            .find(|slug| registry.resources.iter().any(|r| r.slug == **slug))
+            .find(|slug| registry.resources.iter().any(|r| r.slug() == **slug))
         {
             return Err(RuntimeError::SlugTaken(slug.to_string()));
         }
@@ -533,120 +554,113 @@ pub fn reserve_slugs(slugs: &[&str]) -> Result<(), RuntimeError> {
     })
 }
 
-// The panel renders and validates with `&'static` fields, columns and error keys. A runtime
-// definition is turned into those once, by leaking it, and interned: the same text or the
-// same definition is leaked only once in the life of the process, so registering a resource
-// again does not grow memory. Only definitions that change add to it.
+// `FieldErrors` is keyed by `&'static str`, so the field names of a runtime resource are
+// leaked to give them that lifetime, and interned: each distinct name is leaked once in the
+// life of the process. Labels, choices, columns and everything else stay owned, so editing a
+// definition adds nothing unless it adds a field name never seen before. Validation and a
+// refused registration intern nothing.
 
-static STRINGS: Mutex<Option<HashSet<&'static str>>> = Mutex::new(None);
-static CHOICES: Interner<Vec<(String, String)>, Choices> = Mutex::new(None);
-static FIELDS: Interner<Vec<FieldDef>, [Field]> = Mutex::new(None);
-static COLUMNS: Interner<Vec<ColumnDef>, [Column]> = Mutex::new(None);
+static NAMES: Mutex<Option<HashSet<&'static str>>> = Mutex::new(None);
 
-type Interner<K, V> = Mutex<Option<HashMap<K, &'static V>>>;
-/// The choices of a select field, as `FieldKind::Select` holds them.
-type Choices = [(&'static str, &'static str)];
-
-/// `text`, as a `&'static str` leaked at most once per distinct text.
-fn intern_str(text: &str) -> &'static str {
-    let mut guard = STRINGS.lock().unwrap_or_else(PoisonError::into_inner);
+/// `name`, as a `&'static str` leaked at most once per distinct name.
+fn intern_name(name: &str) -> &'static str {
+    let mut guard = NAMES.lock().unwrap_or_else(PoisonError::into_inner);
     let set = guard.get_or_insert_with(HashSet::new);
-    if let Some(found) = set.get(text) {
+    if let Some(found) = set.get(name) {
         return found;
     }
-    let leaked: &'static str = Box::leak(text.to_string().into_boxed_str());
+    let leaked: &'static str = Box::leak(name.to_string().into_boxed_str());
     set.insert(leaked);
     leaked
 }
 
-/// The interned value of `key`, built by `build` the first time. `build` runs without the
-/// lock held, as it interns strings itself.
-fn intern<K: Hash + Eq + Clone, V: ?Sized>(
-    table: &'static Interner<K, V>,
-    key: &K,
-    build: impl FnOnce() -> Box<V>,
-) -> &'static V {
-    let lookup = |table: &'static Interner<K, V>| {
-        table
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .as_ref()
-            .and_then(|map| map.get(key).copied())
-    };
-    if let Some(found) = lookup(table) {
-        return found;
-    }
-    let built = build();
-    let mut guard = table.lock().unwrap_or_else(PoisonError::into_inner);
-    let map = guard.get_or_insert_with(HashMap::new);
-    map.entry(key.clone()).or_insert_with(|| Box::leak(built))
-}
-
-fn intern_choices(choices: &Vec<(String, String)>) -> &'static [(&'static str, &'static str)] {
-    intern(&CHOICES, choices, || {
-        choices
-            .iter()
-            .map(|(value, label)| (intern_str(value), intern_str(label)))
-            .collect()
-    })
-}
-
-/// The fields of a runtime definition as [`Field`]s.
-fn intern_fields(fields: &Vec<FieldDef>) -> &'static [Field] {
-    intern(&FIELDS, fields, || {
-        fields
-            .iter()
-            .map(|def| Field {
-                name: intern_str(&def.name),
-                label: intern_str(&def.label),
-                kind: match &def.kind {
-                    FieldKindDef::Text => FieldKind::Text,
-                    FieldKindDef::Textarea => FieldKind::Textarea,
-                    FieldKindDef::Password => FieldKind::Password,
-                    FieldKindDef::Number => FieldKind::Number,
-                    FieldKindDef::Decimal(step) => FieldKind::Decimal(intern_str(step)),
-                    FieldKindDef::Checkbox => FieldKind::Checkbox,
-                    FieldKindDef::Select(choices) => FieldKind::Select(intern_choices(choices)),
-                    FieldKindDef::Lookup => FieldKind::Lookup,
-                    FieldKindDef::Date => FieldKind::Date,
-                    FieldKindDef::DateTime => FieldKind::DateTime,
-                },
-                required: def.required,
-            })
-            .collect()
-    })
-}
-
-/// The columns of a runtime definition as [`Column`]s.
-fn intern_columns(columns: &Vec<ColumnDef>) -> &'static [Column] {
-    intern(&COLUMNS, columns, || {
-        columns
-            .iter()
-            .map(|def| Column {
-                key: intern_str(&def.key),
-                label: intern_str(&def.label),
-                sortable: def.sortable,
-                searchable: def.searchable,
-            })
-            .collect()
-    })
+/// How many names are interned.
+#[cfg(test)]
+fn interned_names() -> usize {
+    NAMES
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_ref()
+        .map_or(0, HashSet::len)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    struct NoData;
+
+    impl RuntimeData for NoData {
+        fn list<'a>(&'a self, _: &'a Database, _: &'a ListQuery) -> RuntimeFuture<'a, Page<Row>> {
+            unreachable!()
+        }
+        fn find<'a>(&'a self, _: &'a Database, _: i64) -> RuntimeFuture<'a, Option<Row>> {
+            unreachable!()
+        }
+        fn create<'a>(&'a self, _: &'a Database, _: Row) -> RuntimeFuture<'a, Row> {
+            unreachable!()
+        }
+        fn update<'a>(&'a self, _: &'a Database, _: i64, _: Row) -> RuntimeFuture<'a, Row> {
+            unreachable!()
+        }
+        fn delete<'a>(&'a self, _: &'a Database, _: i64) -> RuntimeFuture<'a, u64> {
+            unreachable!()
+        }
+    }
+
+    /// A resource with the fields `growth_title` and `growth_status`, whose label and
+    /// choices change with `n`.
+    fn edited(slug: &str, n: usize) -> RuntimeResource {
+        RuntimeResource::new(slug, format!("Title {n}"), format!("One {n}"), NoData)
+            .field(FieldDef {
+                name: "growth_title".into(),
+                label: format!("Title {n}"),
+                kind: FieldKindDef::Text,
+                required: n.is_multiple_of(2),
+            })
+            .field(FieldDef {
+                name: "growth_status".into(),
+                label: format!("Status {n}"),
+                kind: FieldKindDef::Select(vec![(format!("v{n}"), format!("Value {n}"))]),
+                required: false,
+            })
+            .column(ColumnDef {
+                key: "growth_title".into(),
+                label: format!("Column {n}"),
+                sortable: false,
+                searchable: false,
+            })
+    }
+
+    // The only test of this module that interns, so the count is not changed by another.
     #[test]
-    fn the_same_definition_is_interned_once() {
-        let defs = vec![FieldDef {
-            name: "intern_test".into(),
-            label: "Intern".into(),
-            kind: FieldKindDef::Select(vec![("a".into(), "A".into())]),
+    fn editing_a_definition_a_thousand_times_interns_only_its_names() {
+        register_runtime(edited("growth", 0)).expect("register");
+        let after_first = interned_names();
+        for n in 1..=1000 {
+            unregister_runtime("growth").expect("unregister");
+            register_runtime(edited("growth", n)).expect("register again");
+            let registered = runtime_resource("growth").expect("registered");
+            let mut values = std::collections::HashMap::new();
+            values.insert("growth_title".to_string(), format!("text {n}"));
+            let _ = registered.validate(&FormInput::new(values.clone()));
+            let _ = registered.validate_update(&FormInput::new(values));
+        }
+        assert_eq!(
+            interned_names(),
+            after_first,
+            "labels and choices are not kept"
+        );
+
+        // A refused registration interns nothing, even with a new field name.
+        let refused = edited("growth", 1).field(FieldDef {
+            name: "growth_never_kept".into(),
+            label: "Never".into(),
+            kind: FieldKindDef::Text,
             required: false,
-        }];
-        let first = intern_fields(&defs);
-        let second = intern_fields(&defs.clone());
-        assert!(std::ptr::eq(first, second));
-        assert!(std::ptr::eq(intern_str("intern_test"), first[0].name));
+        });
+        assert!(register_runtime(refused).is_err());
+        assert_eq!(interned_names(), after_first);
+        unregister_runtime("growth").expect("unregister");
     }
 }

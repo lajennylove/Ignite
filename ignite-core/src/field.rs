@@ -57,13 +57,7 @@ impl Field {
         form: &'a FormInput,
         errors: &mut FieldErrors,
     ) -> Option<&'a str> {
-        match form.get(self.name).map(str::trim) {
-            Some(value) if !value.is_empty() => Some(value),
-            _ => {
-                errors.insert(self.name, format!("{} is required.", self.label));
-                None
-            }
-        }
+        check_required(self.name, self.label, form, errors)
     }
 
     /// Parses `text` as a whole number of type `T`. If it does not parse, records
@@ -74,26 +68,14 @@ impl Field {
         text: &str,
         errors: &mut FieldErrors,
     ) -> Option<T> {
-        match text.parse::<T>() {
-            Ok(value) => Some(value),
-            Err(_) => {
-                errors.insert(self.name, format!("{} must be a whole number.", self.label));
-                None
-            }
-        }
+        check_whole_number(self.name, self.label, text, errors)
     }
 
     /// Parses `text` as a number, whole or decimal, such as `42` or `42.5`. Values that are
     /// not finite (`inf`, `NaN`) are refused. If it does not parse, records
     /// "<label> must be a number." in `errors` and returns `None`.
     pub fn check_number(&self, text: &str, errors: &mut FieldErrors) -> Option<f64> {
-        match text.parse::<f64>() {
-            Ok(value) if value.is_finite() => Some(value),
-            _ => {
-                errors.insert(self.name, format!("{} must be a number.", self.label));
-                None
-            }
-        }
+        check_number(self.name, self.label, text, errors)
     }
 
     /// Parses `text` as a decimal number of type `T` (`f32` or `f64`), such as `9.5`. A
@@ -104,13 +86,7 @@ impl Field {
         text: &str,
         errors: &mut FieldErrors,
     ) -> Option<T> {
-        match text.parse::<T>() {
-            Ok(value) if Into::<f64>::into(value).is_finite() => Some(value),
-            _ => {
-                errors.insert(self.name, format!("{} must be a number.", self.label));
-                None
-            }
-        }
+        check_decimal(self.name, self.label, text, errors)
     }
 
     /// Parses `text` as a date and time: `YYYY-MM-DDTHH:MM` as a date-time input sends it,
@@ -118,25 +94,7 @@ impl Field {
     /// parse, records "<label> must be a date and time, as YYYY-MM-DD HH:MM." in `errors`
     /// and returns `None`.
     pub fn check_datetime(&self, text: &str, errors: &mut FieldErrors) -> Option<NaiveDateTime> {
-        const FORMATS: [&str; 4] = [
-            "%Y-%m-%dT%H:%M",
-            "%Y-%m-%dT%H:%M:%S",
-            "%Y-%m-%d %H:%M",
-            "%Y-%m-%d %H:%M:%S",
-        ];
-        let parsed = FORMATS
-            .iter()
-            .find_map(|format| NaiveDateTime::parse_from_str(text, format).ok());
-        if parsed.is_none() {
-            errors.insert(
-                self.name,
-                format!(
-                    "{} must be a date and time, as YYYY-MM-DD HH:MM.",
-                    self.label
-                ),
-            );
-        }
-        parsed
+        check_datetime(self.name, self.label, text, errors)
     }
 
     /// Checks that `text` is the value of one of `choices`. If it is not, records
@@ -147,25 +105,134 @@ impl Field {
         choices: &[(&str, &str)],
         errors: &mut FieldErrors,
     ) -> bool {
-        if choices.iter().any(|(value, _)| *value == text) {
-            return true;
-        }
-        errors.insert(self.name, "Choose one of the options.".to_string());
-        false
+        check_choice(self.name, text, choices, errors)
     }
 
     /// Parses `text` as a `YYYY-MM-DD` date. If it does not parse, records
     /// "<label> must be a date, as YYYY-MM-DD." in `errors` and returns `None`.
     pub fn check_date(&self, text: &str, errors: &mut FieldErrors) -> Option<NaiveDate> {
-        match NaiveDate::parse_from_str(text, "%Y-%m-%d") {
-            Ok(value) => Some(value),
-            Err(_) => {
-                errors.insert(
-                    self.name,
-                    format!("{} must be a date, as YYYY-MM-DD.", self.label),
-                );
-                None
-            }
+        check_date(self.name, self.label, text, errors)
+    }
+}
+
+// The checks themselves, by field name and label, so a static `Field` and a runtime
+// `FieldDef` run the same code. `name` is the key of the error in `errors`.
+
+/// See [`Field::check_required`].
+pub(crate) fn check_required<'a>(
+    name: &'static str,
+    label: &str,
+    form: &'a FormInput,
+    errors: &mut FieldErrors,
+) -> Option<&'a str> {
+    match form.get(name).map(str::trim) {
+        Some(value) if !value.is_empty() => Some(value),
+        _ => {
+            errors.insert(name, format!("{label} is required."));
+            None
+        }
+    }
+}
+
+/// See [`Field::check_whole_number`].
+pub(crate) fn check_whole_number<T: FromStr>(
+    name: &'static str,
+    label: &str,
+    text: &str,
+    errors: &mut FieldErrors,
+) -> Option<T> {
+    match text.parse::<T>() {
+        Ok(value) => Some(value),
+        Err(_) => {
+            errors.insert(name, format!("{label} must be a whole number."));
+            None
+        }
+    }
+}
+
+/// See [`Field::check_number`].
+pub(crate) fn check_number(
+    name: &'static str,
+    label: &str,
+    text: &str,
+    errors: &mut FieldErrors,
+) -> Option<f64> {
+    match text.parse::<f64>() {
+        Ok(value) if value.is_finite() => Some(value),
+        _ => {
+            errors.insert(name, format!("{label} must be a number."));
+            None
+        }
+    }
+}
+
+/// See [`Field::check_decimal`].
+pub(crate) fn check_decimal<T: FromStr + Into<f64> + Copy>(
+    name: &'static str,
+    label: &str,
+    text: &str,
+    errors: &mut FieldErrors,
+) -> Option<T> {
+    match text.parse::<T>() {
+        Ok(value) if Into::<f64>::into(value).is_finite() => Some(value),
+        _ => {
+            errors.insert(name, format!("{label} must be a number."));
+            None
+        }
+    }
+}
+
+/// See [`Field::check_datetime`].
+pub(crate) fn check_datetime(
+    name: &'static str,
+    label: &str,
+    text: &str,
+    errors: &mut FieldErrors,
+) -> Option<NaiveDateTime> {
+    const FORMATS: [&str; 4] = [
+        "%Y-%m-%dT%H:%M",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%d %H:%M:%S",
+    ];
+    let parsed = FORMATS
+        .iter()
+        .find_map(|format| NaiveDateTime::parse_from_str(text, format).ok());
+    if parsed.is_none() {
+        errors.insert(
+            name,
+            format!("{label} must be a date and time, as YYYY-MM-DD HH:MM."),
+        );
+    }
+    parsed
+}
+
+/// See [`Field::check_choice`].
+pub(crate) fn check_choice(
+    name: &'static str,
+    text: &str,
+    choices: &[(&str, &str)],
+    errors: &mut FieldErrors,
+) -> bool {
+    if choices.iter().any(|(value, _)| *value == text) {
+        return true;
+    }
+    errors.insert(name, "Choose one of the options.".to_string());
+    false
+}
+
+/// See [`Field::check_date`].
+pub(crate) fn check_date(
+    name: &'static str,
+    label: &str,
+    text: &str,
+    errors: &mut FieldErrors,
+) -> Option<NaiveDate> {
+    match NaiveDate::parse_from_str(text, "%Y-%m-%d") {
+        Ok(value) => Some(value),
+        Err(_) => {
+            errors.insert(name, format!("{label} must be a date, as YYYY-MM-DD."));
+            None
         }
     }
 }

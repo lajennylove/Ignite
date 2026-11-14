@@ -6,8 +6,8 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use ignite_core::{
-    Column, Database, Field, FieldErrors, FieldKind, FormInput, IgniteResource, LatestRecords,
-    ListQuery, RegisteredResource, Row, StatWidget,
+    ColumnDef, Database, FieldDef, FieldErrors, FieldKind, FieldKindDef, FormInput, IgniteResource,
+    LatestRecords, ListQuery, RegisteredResource, Row, StatWidget,
 };
 use orbit_orm::Error;
 use serde::Serialize;
@@ -16,12 +16,14 @@ use serde_json::Value;
 /// The operations the routes need from a resource, without its type.
 #[rocket::async_trait]
 pub(crate) trait Erased: Send + Sync {
-    fn slug(&self) -> &'static str;
-    fn title(&self) -> &'static str;
-    fn singular(&self) -> &'static str;
+    fn slug(&self) -> &str;
+    fn title(&self) -> &str;
+    fn singular(&self) -> &str;
     fn per_page(&self) -> i64;
-    fn fields(&self) -> &'static [Field];
-    fn columns(&self) -> &'static [Column];
+    /// The form fields, owned, so static and runtime resources render the same way.
+    fn fields(&self) -> &[FieldDef];
+    /// The list columns, owned.
+    fn columns(&self) -> &[ColumnDef];
     /// One page of records as JSON, and the total count.
     async fn list(&self, db: &Database, query: &ListQuery) -> Result<(Vec<Value>, i64), Error>;
     async fn find(&self, db: &Database, id: i64) -> Result<Option<Value>, Error>;
@@ -48,26 +50,40 @@ pub(crate) trait Erased: Send + Sync {
     async fn options(&self, db: &Database, field: &str) -> Result<Vec<(String, String)>, Error>;
 }
 
-/// Wraps an [`IgniteResource`] type as an [`Erased`] value.
-pub(crate) struct Adapter<R>(PhantomData<fn() -> R>);
+/// Wraps an [`IgniteResource`] type as an [`Erased`] value. Its fields and columns are
+/// converted to owned definitions once, when the panel is built.
+pub(crate) struct Adapter<R> {
+    fields: Vec<FieldDef>,
+    columns: Vec<ColumnDef>,
+    resource: PhantomData<fn() -> R>,
+}
 
-impl<R> Adapter<R> {
+impl<R: IgniteResource> Adapter<R> {
     pub(crate) fn new() -> Self {
-        Adapter(PhantomData)
+        Adapter {
+            fields: R::fields().iter().copied().map(FieldDef::from).collect(),
+            columns: R::columns().iter().copied().map(ColumnDef::from).collect(),
+            resource: PhantomData,
+        }
     }
+}
+
+/// The error key and label of each static field, for [`unique_violation`].
+fn static_keys<R: IgniteResource>() -> Vec<(&'static str, &'static str)> {
+    R::fields().iter().map(|f| (f.name, f.label)).collect()
 }
 
 #[rocket::async_trait]
 impl<R: IgniteResource> Erased for Adapter<R> {
-    fn slug(&self) -> &'static str {
+    fn slug(&self) -> &str {
         R::SLUG
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         R::TITLE
     }
 
-    fn singular(&self) -> &'static str {
+    fn singular(&self) -> &str {
         R::SINGULAR
     }
 
@@ -75,12 +91,12 @@ impl<R: IgniteResource> Erased for Adapter<R> {
         R::PER_PAGE
     }
 
-    fn fields(&self) -> &'static [Field] {
-        R::fields()
+    fn fields(&self) -> &[FieldDef] {
+        &self.fields
     }
 
-    fn columns(&self) -> &'static [Column] {
-        R::columns()
+    fn columns(&self) -> &[ColumnDef] {
+        &self.columns
     }
 
     async fn list(&self, db: &Database, query: &ListQuery) -> Result<(Vec<Value>, i64), Error> {
@@ -105,7 +121,7 @@ impl<R: IgniteResource> Erased for Adapter<R> {
         match checked::<R>(db, form, R::validate(form)).await? {
             Ok(input) => match R::create(db, input).await {
                 Ok(record) => to_json(record).map(Ok),
-                Err(error) => unique_violation(error, R::SLUG, R::fields()).map(Err),
+                Err(error) => unique_violation(error, R::SLUG, &static_keys::<R>()).map(Err),
             },
             Err(errors) => Ok(Err(errors)),
         }
@@ -120,7 +136,7 @@ impl<R: IgniteResource> Erased for Adapter<R> {
         match checked::<R>(db, form, R::validate_update(form)).await? {
             Ok(input) => match R::update(db, id, input).await {
                 Ok(record) => to_json(record).map(Ok),
-                Err(error) => unique_violation(error, R::SLUG, R::fields()).map(Err),
+                Err(error) => unique_violation(error, R::SLUG, &static_keys::<R>()).map(Err),
             },
             Err(errors) => Ok(Err(errors)),
         }
@@ -161,7 +177,12 @@ async fn checked<R: IgniteResource>(
     validated: Result<R::Input, FieldErrors>,
 ) -> Result<Result<R::Input, FieldErrors>, Error> {
     let errors = validated.as_ref().err().cloned().unwrap_or_default();
-    let errors = lookup_errors(R::fields(), form, errors, |field| R::options(db, field)).await?;
+    let lookups: Vec<&'static str> = R::fields()
+        .iter()
+        .filter(|f| f.kind == FieldKind::Lookup)
+        .map(|f| f.name)
+        .collect();
+    let errors = lookup_errors(&lookups, form, errors, |field| R::options(db, field)).await?;
     Ok(if errors.is_empty() {
         validated
     } else {
@@ -169,11 +190,11 @@ async fn checked<R: IgniteResource>(
     })
 }
 
-/// `errors`, with "Choose one of the options." for each lookup field of `fields` whose
-/// submitted value is not one of the choices `options` returns for it. Static and runtime
-/// resources share this check.
+/// `errors`, with "Choose one of the options." for each lookup field in `lookups` (their
+/// error keys) whose submitted value is not one of the choices `options` returns for it.
+/// Static and runtime resources share this check.
 async fn lookup_errors<F, Fut>(
-    fields: &'static [Field],
+    lookups: &[&'static str],
     form: &FormInput,
     mut errors: FieldErrors,
     options: F,
@@ -182,14 +203,14 @@ where
     F: Fn(&'static str) -> Fut,
     Fut: Future<Output = Result<Vec<(String, String)>, Error>>,
 {
-    for field in fields.iter().filter(|f| f.kind == FieldKind::Lookup) {
-        let Some(value) = form.get(field.name) else {
+    for &name in lookups {
+        let Some(value) = form.get(name) else {
             continue;
         };
-        let choices = options(field.name).await?;
+        let choices = options(name).await?;
         if !choices.iter().any(|(choice, _)| choice == value.trim()) {
             errors
-                .entry(field.name)
+                .entry(name)
                 .or_insert_with(|| "Choose one of the options.".to_string());
         }
     }
@@ -208,18 +229,21 @@ impl RuntimeAdapter {
         form: &FormInput,
         creating: bool,
     ) -> Result<Result<Row, FieldErrors>, Error> {
-        let resource = self.0.resource();
         let validated = if creating {
-            resource.validate(form)
+            self.0.validate(form)
         } else {
-            resource.validate_update(form)
+            self.0.validate_update(form)
         };
         let errors = validated.as_ref().err().cloned().unwrap_or_default();
-        let data = &resource.data;
-        let errors = lookup_errors(self.0.fields(), form, errors, |field| {
-            data.options(db, field)
-        })
-        .await?;
+        let lookups: Vec<&'static str> = self
+            .0
+            .fields()
+            .iter()
+            .filter(|f| f.kind == FieldKindDef::Lookup)
+            .filter_map(|f| self.0.error_key(&f.name))
+            .collect();
+        let data = &self.0.resource().data;
+        let errors = lookup_errors(&lookups, form, errors, |field| data.options(db, field)).await?;
         Ok(if errors.is_empty() {
             validated
         } else {
@@ -237,7 +261,15 @@ impl RuntimeAdapter {
         match validated {
             Ok(row) => match save(row).await {
                 Ok(record) => Ok(Ok(Value::Object(record))),
-                Err(error) => unique_violation(error, self.0.slug(), self.0.fields()).map(Err),
+                Err(error) => {
+                    let keys: Vec<(&'static str, &str)> = self
+                        .0
+                        .fields()
+                        .iter()
+                        .filter_map(|f| Some((self.0.error_key(&f.name)?, f.label.as_str())))
+                        .collect();
+                    unique_violation(error, self.0.slug(), &keys).map(Err)
+                }
             },
             Err(errors) => Ok(Err(errors)),
         }
@@ -246,15 +278,15 @@ impl RuntimeAdapter {
 
 #[rocket::async_trait]
 impl Erased for RuntimeAdapter {
-    fn slug(&self) -> &'static str {
+    fn slug(&self) -> &str {
         self.0.slug()
     }
 
-    fn title(&self) -> &'static str {
+    fn title(&self) -> &str {
         self.0.title()
     }
 
-    fn singular(&self) -> &'static str {
+    fn singular(&self) -> &str {
         self.0.singular()
     }
 
@@ -262,11 +294,11 @@ impl Erased for RuntimeAdapter {
         self.0.resource().per_page
     }
 
-    fn fields(&self) -> &'static [Field] {
+    fn fields(&self) -> &[FieldDef] {
         self.0.fields()
     }
 
-    fn columns(&self) -> &'static [Column] {
+    fn columns(&self) -> &[ColumnDef] {
         self.0.columns()
     }
 
@@ -342,10 +374,14 @@ pub(crate) fn unique_index_name(table: &str, field: &str) -> String {
 /// The field whose unique index is `index`, under the one rule of
 /// [`unique_index_name`]: the names must match exactly. A name that only contains
 /// a field's name, such as `users_username_unique` for `name`, matches nothing.
-fn field_for_index<'a>(index: &str, table: &str, fields: &'a [Field]) -> Option<&'a Field> {
+fn field_for_index<'a, 'b>(
+    index: &str,
+    table: &str,
+    fields: &'a [(&'static str, &'b str)],
+) -> Option<&'a (&'static str, &'b str)> {
     fields
         .iter()
-        .find(|f| unique_index_name(table, f.name) == index)
+        .find(|(name, _)| unique_index_name(table, name) == index)
 }
 
 /// Turns a unique-index violation into a field error, so the form shows "Email is
@@ -355,16 +391,21 @@ fn field_for_index<'a>(index: &str, table: &str, fields: &'a [Field]) -> Option<
 /// `{table}_{field}_unique` (see [`unique_index_name`]), where `table` is the
 /// resource's SLUG and `field` is a form field's name. Matching is exact, so `name`
 /// does not claim `users_username_unique`. Any other error, or a violation whose
-/// index names no field, is returned unchanged.
-fn unique_violation(error: Error, table: &str, fields: &[Field]) -> Result<FieldErrors, Error> {
+/// index names no field, is returned unchanged. `fields` holds each field's error key and
+/// label. A runtime resource follows the same rule, with its slug as the table.
+fn unique_violation(
+    error: Error,
+    table: &str,
+    fields: &[(&'static str, &str)],
+) -> Result<FieldErrors, Error> {
     let field = match &error {
         Error::UniqueViolation { index: Some(index) } => field_for_index(index, table, fields),
         _ => None,
     };
     match field {
-        Some(field) => {
+        Some((name, label)) => {
             let mut errors = FieldErrors::new();
-            errors.insert(field.name, format!("{} is already taken.", field.label));
+            errors.insert(name, format!("{label} is already taken."));
             Ok(errors)
         }
         None => Err(error),
@@ -384,20 +425,9 @@ fn to_json<T: Serialize>(record: T) -> Result<Value, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ignite_core::FieldKind;
 
-    const NAME: Field = Field {
-        name: "name",
-        label: "Name",
-        kind: FieldKind::Text,
-        required: true,
-    };
-    const EMAIL: Field = Field {
-        name: "email",
-        label: "Email",
-        kind: FieldKind::Text,
-        required: true,
-    };
+    const NAME: (&str, &str) = ("name", "Name");
+    const EMAIL: (&str, &str) = ("email", "Email");
 
     #[test]
     fn name_does_not_match_an_index_on_username() {
@@ -409,7 +439,7 @@ mod tests {
     fn email_matches_the_email_index() {
         let fields = [NAME, EMAIL];
         let field = field_for_index("users_email_unique", "users", &fields).expect("a field");
-        assert_eq!(field.name, "email");
+        assert_eq!(field.0, "email");
     }
 
     #[test]

@@ -8,7 +8,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 
 use ignite_core::{
-    Column, Database, Direction, FieldErrors, FieldKind, FormInput, LatestRecords, ListQuery,
+    ColumnDef, Database, Direction, FieldDef, FieldErrors, FieldKindDef, FormInput, LatestRecords,
+    ListQuery,
 };
 use orbit_orm::Error as OrbitError;
 use propel_rocket::PropelView;
@@ -434,7 +435,14 @@ fn render_profile(
     let flash = take_flash(cookies, &registry.secret);
     let token = csrf_token(cookies, &registry.secret);
     let layout = Layout::new(registry, Some(session), "profile", flash, token);
-    let fields = profile::profile_fields(registry);
+    let fields: Vec<FieldDef> = profile::profile_fields(registry)
+        .into_iter()
+        .map(FieldDef::from)
+        .collect();
+    let password_fields: Vec<FieldDef> = profile::PASSWORD_FIELDS
+        .into_iter()
+        .map(FieldDef::from)
+        .collect();
     let page = ProfilePage {
         home_url: layout.home_url,
         signed_in: layout.signed_in,
@@ -454,11 +462,7 @@ fn render_profile(
         profile_action: format!("{}/profile", registry.mount),
         profile_fields: field_views(&fields, values, errors),
         password_action: format!("{}/profile/password", registry.mount),
-        password_fields: field_views(
-            &profile::PASSWORD_FIELDS,
-            &FormInput::default(),
-            password_errors,
-        ),
+        password_fields: field_views(&password_fields, &FormInput::default(), password_errors),
         avatar_action: format!("{}/profile/avatar", registry.mount),
         remove_avatar_action: format!("{}/profile/avatar/remove", registry.mount),
     };
@@ -786,7 +790,7 @@ async fn index(
         sort: sort.clone().map(|key| (key, direction)),
     };
 
-    let keys: Vec<&str> = columns.iter().map(|c| c.key).collect();
+    let keys: Vec<&str> = columns.iter().map(|c| c.key.as_str()).collect();
     let (records, total) = resource.list(db.inner(), &query).await.map_err(db_status)?;
     let lookups = lookup_choices(db.inner(), resource.as_ref(), &keys)
         .await
@@ -799,7 +803,7 @@ async fn index(
             cells: columns
                 .iter()
                 .map(|c| CellView {
-                    text: choice_text(record.get(c.key), lookups.get(c.key)),
+                    text: choice_text(record.get(&c.key), lookups.get(&c.key)),
                 })
                 .collect(),
             edit_url: format!("{index_url}/{id}/edit"),
@@ -810,16 +814,16 @@ async fn index(
     let heads = columns
         .iter()
         .map(|c| {
-            let active = sort.as_deref() == Some(c.key);
+            let active = sort.as_deref() == Some(c.key.as_str());
             let (indicator, next) = match (active, direction) {
                 (true, Direction::Asc) => ("↑", "desc"),
                 (true, Direction::Desc) => ("↓", "asc"),
                 (false, _) => ("", "asc"),
             };
             ColumnHead {
-                label: c.label,
+                label: c.label.clone(),
                 sortable: c.sortable,
-                sort_url: list_url(&index_url, &search, Some((c.key, next)), 1),
+                sort_url: list_url(&index_url, &search, Some((c.key.as_str(), next)), 1),
                 indicator,
             }
         })
@@ -847,8 +851,8 @@ async fn index(
         nav: layout.nav,
         has_flash: layout.has_flash,
         flash: layout.flash,
-        title: resource.title(),
-        singular: resource.singular(),
+        title: resource.title().to_string(),
+        singular: resource.singular().to_string(),
         new_url: format!("{index_url}/new"),
         can_create: session.may(slug, Action::Create),
         can_update: session.may(slug, Action::Update),
@@ -907,8 +911,8 @@ async fn new_form(
         nav: layout.nav,
         has_flash: layout.has_flash,
         flash: layout.flash,
-        title: resource.title(),
-        singular: resource.singular(),
+        title: resource.title().to_string(),
+        singular: resource.singular().to_string(),
         heading: format!("New {}", resource.singular()),
         action: index_url.clone(),
         submit_label: "Create",
@@ -1007,8 +1011,8 @@ async fn edit_form(
         nav: layout.nav,
         has_flash: layout.has_flash,
         flash: layout.flash,
-        title: resource.title(),
-        singular: resource.singular(),
+        title: resource.title().to_string(),
+        singular: resource.singular().to_string(),
         heading: format!("Edit {} #{id}", resource.singular()),
         action: format!("{index_url}/{id}"),
         submit_label: "Save",
@@ -1097,7 +1101,7 @@ fn form_page(
     resource: &Arc<dyn Erased>,
     form: &FormInput,
     errors: &FieldErrors,
-    lookups: &HashMap<&'static str, Vec<(String, String)>>,
+    lookups: &HashMap<String, Vec<(String, String)>>,
     heading: String,
     action: String,
     submit_label: &'static str,
@@ -1119,8 +1123,8 @@ fn form_page(
         nav: layout.nav,
         has_flash: layout.has_flash,
         flash: layout.flash,
-        title: resource.title(),
-        singular: resource.singular(),
+        title: resource.title().to_string(),
+        singular: resource.singular().to_string(),
         heading,
         action,
         submit_label,
@@ -1221,8 +1225,8 @@ pub(crate) async fn read_form(data: Data<'_>) -> Result<FormInput, Status> {
 }
 
 /// The names of a resource's form fields.
-fn field_names(resource: &dyn Erased) -> Vec<&'static str> {
-    resource.fields().iter().map(|f| f.name).collect()
+fn field_names(resource: &dyn Erased) -> Vec<&str> {
+    resource.fields().iter().map(|f| f.name.as_str()).collect()
 }
 
 /// The choices of the lookup fields among `names`, by field name, as the panel shows
@@ -1231,11 +1235,11 @@ async fn lookup_choices(
     db: &Database,
     resource: &dyn Erased,
     names: &[&str],
-) -> Result<HashMap<&'static str, Vec<(String, String)>>, OrbitError> {
+) -> Result<HashMap<String, Vec<(String, String)>>, OrbitError> {
     let mut choices = HashMap::new();
     for field in resource.fields() {
-        if field.kind == FieldKind::Lookup && names.contains(&field.name) {
-            choices.insert(field.name, resource.options(db, field.name).await?);
+        if field.kind == FieldKindDef::Lookup && names.contains(&field.name.as_str()) {
+            choices.insert(field.name.clone(), resource.options(db, &field.name).await?);
         }
     }
     Ok(choices)
@@ -1246,7 +1250,7 @@ async fn lookup_choices(
 async fn form_lookups(
     db: &State<Database>,
     resource: &Arc<dyn Erased>,
-) -> Result<HashMap<&'static str, Vec<(String, String)>>, Status> {
+) -> Result<HashMap<String, Vec<(String, String)>>, Status> {
     lookup_choices(
         db.inner(),
         resource.as_ref(),
@@ -1278,9 +1282,9 @@ fn choice_text(value: Option<&Value>, choices: Option<&Vec<(String, String)>>) -
 /// A declared key that is not a column shows its key as the heading.
 fn latest_table(
     declared: &LatestRecords,
-    columns: &[Column],
+    columns: &[ColumnDef],
     records: &[Value],
-    lookups: &HashMap<&'static str, Vec<(String, String)>>,
+    lookups: &HashMap<String, Vec<(String, String)>>,
 ) -> LatestTable {
     let headers = declared
         .columns
@@ -1289,8 +1293,7 @@ fn latest_table(
             label: columns
                 .iter()
                 .find(|c| c.key == *key)
-                .map(|c| c.label)
-                .unwrap_or(key),
+                .map_or_else(|| key.to_string(), |c| c.label.clone()),
         })
         .collect();
     let rows = records

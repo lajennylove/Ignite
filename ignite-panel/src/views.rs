@@ -34,7 +34,7 @@ where
     PropelView::compiled(|assets| compiled(context, assets))
 }
 
-use ignite_core::{Field, FieldErrors, FieldKind, FormInput};
+use ignite_core::{FieldDef, FieldErrors, FieldKindDef, FormInput};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -64,7 +64,7 @@ pub(crate) struct Layout {
 /// One entry of the sidebar: a list, and a link to add a record when the resource has forms.
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct NavGroup {
-    pub(crate) title: &'static str,
+    pub(crate) title: String,
     pub(crate) icon: &'static str,
     pub(crate) url: String,
     pub(crate) has_add: bool,
@@ -96,7 +96,7 @@ impl Layout {
         // link only when the user may create one, as Filament's navigation does.
         let nav = match user {
             Some(user) => std::iter::once(NavGroup {
-                title: "Dashboard",
+                title: "Dashboard".to_string(),
                 icon: "ti-layout-dashboard",
                 url: registry.mount.clone(),
                 has_add: false,
@@ -109,7 +109,7 @@ impl Layout {
                     .into_iter()
                     .filter(|r| user.may(r.slug(), Action::ViewAny))
                     .map(|r| NavGroup {
-                        title: r.title(),
+                        title: r.title().to_string(),
                         icon: "ti-table",
                         url: format!("{}/{}", registry.mount, r.slug()),
                         has_add: user.may(r.slug(), Action::Create),
@@ -179,7 +179,7 @@ pub(crate) struct LatestTable {
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct HeaderView {
-    pub(crate) label: &'static str,
+    pub(crate) label: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -349,8 +349,8 @@ pub(crate) struct IndexPage {
     pub(crate) nav: Vec<NavGroup>,
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
-    pub(crate) title: &'static str,
-    pub(crate) singular: &'static str,
+    pub(crate) title: String,
+    pub(crate) singular: String,
     pub(crate) index_url: String,
     pub(crate) new_url: String,
     /// Whether the user may create a record: shows the "New" button.
@@ -374,7 +374,7 @@ pub(crate) struct IndexPage {
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct ColumnHead {
-    pub(crate) label: &'static str,
+    pub(crate) label: String,
     pub(crate) sortable: bool,
     pub(crate) sort_url: String,
     pub(crate) indicator: &'static str,
@@ -410,8 +410,8 @@ pub(crate) struct FormPage {
     pub(crate) nav: Vec<NavGroup>,
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
-    pub(crate) title: &'static str,
-    pub(crate) singular: &'static str,
+    pub(crate) title: String,
+    pub(crate) singular: String,
     pub(crate) heading: String,
     pub(crate) action: String,
     pub(crate) submit_label: &'static str,
@@ -421,8 +421,8 @@ pub(crate) struct FormPage {
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct FieldView {
-    pub(crate) name: &'static str,
-    pub(crate) label: &'static str,
+    pub(crate) name: String,
+    pub(crate) label: String,
     pub(crate) required: bool,
     pub(crate) input_type: &'static str,
     pub(crate) is_textarea: bool,
@@ -430,7 +430,7 @@ pub(crate) struct FieldView {
     pub(crate) is_select: bool,
     /// A decimal input has a step, which the browser checks the value against.
     pub(crate) has_step: bool,
-    pub(crate) step: &'static str,
+    pub(crate) step: String,
     pub(crate) value: String,
     pub(crate) checked: bool,
     pub(crate) options: Vec<OptionView>,
@@ -450,40 +450,37 @@ impl FieldView {
     /// error for it, if there is one. A password is never filled in. A lookup
     /// field's choices come from `lookup`, which the panel loads from the database.
     pub(crate) fn new(
-        field: &Field,
+        field: &FieldDef,
         form: &FormInput,
         errors: &FieldErrors,
         lookup: &[(String, String)],
     ) -> Self {
         let (input_type, is_textarea, is_checkbox, is_select) = match field.kind {
-            FieldKind::Text => ("text", false, false, false),
-            FieldKind::Textarea => ("text", true, false, false),
-            FieldKind::Password => ("password", false, false, false),
-            FieldKind::Number => ("number", false, false, false),
-            FieldKind::Decimal(_) => ("number", false, false, false),
-            FieldKind::Checkbox => ("checkbox", false, true, false),
-            FieldKind::Select(_) | FieldKind::Lookup => ("text", false, false, true),
-            FieldKind::Date => ("date", false, false, false),
-            FieldKind::DateTime => ("datetime-local", false, false, false),
+            FieldKindDef::Text => ("text", false, false, false),
+            FieldKindDef::Textarea => ("text", true, false, false),
+            FieldKindDef::Password => ("password", false, false, false),
+            FieldKindDef::Number => ("number", false, false, false),
+            FieldKindDef::Decimal(_) => ("number", false, false, false),
+            FieldKindDef::Checkbox => ("checkbox", false, true, false),
+            FieldKindDef::Select(_) | FieldKindDef::Lookup => ("text", false, false, true),
+            FieldKindDef::Date => ("date", false, false, false),
+            FieldKindDef::DateTime => ("datetime-local", false, false, false),
         };
         // A number input accepts any value, as before: a resource's whole number is
         // checked on the server, and a profile number may be a decimal.
-        let step = match field.kind {
-            FieldKind::Decimal(step) => step,
-            FieldKind::Number => "any",
-            _ => "",
+        let step = match &field.kind {
+            FieldKindDef::Decimal(step) => step.clone(),
+            FieldKindDef::Number => "any".to_string(),
+            _ => String::new(),
         };
         let value = match field.kind {
-            FieldKind::Password => String::new(),
-            _ => form.get(field.name).unwrap_or("").to_string(),
+            FieldKindDef::Password => String::new(),
+            _ => form.get(&field.name).unwrap_or("").to_string(),
         };
         // A select starts with a placeholder, so the browser does not submit the first choice.
-        let choices: Vec<(String, String)> = match field.kind {
-            FieldKind::Select(choices) => choices
-                .iter()
-                .map(|(v, label)| (v.to_string(), label.to_string()))
-                .collect(),
-            FieldKind::Lookup => lookup.to_vec(),
+        let choices: Vec<(String, String)> = match &field.kind {
+            FieldKindDef::Select(choices) => choices.clone(),
+            FieldKindDef::Lookup => lookup.to_vec(),
             _ => Vec::new(),
         };
         let options = if is_select {
@@ -501,11 +498,11 @@ impl FieldView {
         } else {
             Vec::new()
         };
-        let error = errors.get(field.name).cloned();
+        let error = errors.get(field.name.as_str()).cloned();
 
         FieldView {
-            name: field.name,
-            label: field.label,
+            name: field.name.clone(),
+            label: field.label.clone(),
             required: field.required,
             input_type,
             is_textarea,
@@ -514,7 +511,7 @@ impl FieldView {
             has_step: !step.is_empty(),
             step,
             value,
-            checked: is_checkbox && form.checkbox(field.name),
+            checked: is_checkbox && form.checkbox(&field.name),
             options,
             has_error: error.is_some(),
             error: error.unwrap_or_default(),
@@ -536,17 +533,17 @@ pub(crate) fn cell_text(value: Option<&Value>) -> String {
 
 /// Turns a stored JSON record into the values a form starts with. Passwords
 /// and empty values are left out, so the form shows them blank.
-pub(crate) fn record_form(fields: &[Field], record: &Value) -> FormInput {
+pub(crate) fn record_form(fields: &[FieldDef], record: &Value) -> FormInput {
     let mut values = std::collections::HashMap::new();
     for field in fields {
-        let value = match (field.kind, record.get(field.name)) {
-            (FieldKind::Password, _) | (_, None | Some(Value::Null)) => continue,
-            (FieldKind::Checkbox, Some(Value::Bool(true))) => "on".to_string(),
-            (FieldKind::Checkbox, _) => continue,
+        let value = match (&field.kind, record.get(&field.name)) {
+            (FieldKindDef::Password, _) | (_, None | Some(Value::Null)) => continue,
+            (FieldKindDef::Checkbox, Some(Value::Bool(true))) => "on".to_string(),
+            (FieldKindDef::Checkbox, _) => continue,
             (_, Some(Value::String(s))) => s.clone(),
             (_, Some(other)) => other.to_string(),
         };
-        values.insert(field.name.to_string(), value);
+        values.insert(field.name.clone(), value);
     }
     FormInput::new(values)
 }
@@ -554,7 +551,7 @@ pub(crate) fn record_form(fields: &[Field], record: &Value) -> FormInput {
 /// The fields of a form page, in display order. A form with lookup fields uses
 /// [`field_views_with`] instead.
 pub(crate) fn field_views(
-    fields: &[Field],
+    fields: &[FieldDef],
     form: &FormInput,
     errors: &FieldErrors,
 ) -> Vec<FieldView> {
@@ -564,15 +561,15 @@ pub(crate) fn field_views(
 /// The fields of a form page, in display order. `lookups` holds the choices of each
 /// lookup field, by field name.
 pub(crate) fn field_views_with(
-    fields: &[Field],
+    fields: &[FieldDef],
     form: &FormInput,
     errors: &FieldErrors,
-    lookups: &HashMap<&str, Vec<(String, String)>>,
+    lookups: &HashMap<String, Vec<(String, String)>>,
 ) -> Vec<FieldView> {
     fields
         .iter()
         .map(|f| {
-            let lookup = lookups.get(f.name).map(Vec::as_slice).unwrap_or(&[]);
+            let lookup = lookups.get(&f.name).map(Vec::as_slice).unwrap_or(&[]);
             FieldView::new(f, form, errors, lookup)
         })
         .collect()

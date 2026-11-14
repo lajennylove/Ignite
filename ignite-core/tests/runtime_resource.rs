@@ -129,7 +129,7 @@ fn a_registered_resource_is_listed_until_it_is_unregistered() {
     assert_eq!(found.title(), "Books");
     assert_eq!(found.singular(), "Book");
     assert_eq!(found.fields()[0].name, "title");
-    assert_eq!(found.fields()[0].kind, FieldKind::Text);
+    assert_eq!(found.fields()[0].kind, FieldKindDef::Text);
     assert_eq!(found.columns()[0].key, "title");
     assert!(runtime_resources().iter().any(|r| r.slug() == "rt-listed"));
 
@@ -198,15 +198,20 @@ fn two_fields_with_the_same_name_are_refused() {
     );
 }
 
-/// A resource with one field of each kind that validation reads.
-fn every_kind() -> RuntimeResource {
+/// A resource with one field of each kind that validation reads, registered at `slug`.
+fn every_kind(slug: &str) -> std::sync::Arc<ignite_core::RegisteredResource> {
+    register_runtime(every_kind_definition(slug)).expect("register");
+    runtime_resource(slug).expect("registered")
+}
+
+fn every_kind_definition(slug: &str) -> RuntimeResource {
     let def = |name: &str, label: &str, kind: FieldKindDef, required: bool| FieldDef {
         name: name.to_string(),
         label: label.to_string(),
         kind,
         required,
     };
-    RuntimeResource::new("rt-kinds", "Events", "Event", NoData)
+    RuntimeResource::new(slug, "Events", "Event", NoData)
         .field(def("title", "Title", FieldKindDef::Text, true))
         .field(def("body", "Body", FieldKindDef::Textarea, false))
         .field(def("seats", "Seats", FieldKindDef::Number, true))
@@ -233,7 +238,7 @@ fn every_kind() -> RuntimeResource {
 
 #[test]
 fn a_valid_form_becomes_a_row_of_typed_values() {
-    let row = every_kind()
+    let row = every_kind("rt-kinds-valid")
         .validate(&form(&[
             ("title", "  Launch  "),
             ("seats", "40"),
@@ -260,7 +265,7 @@ fn a_valid_form_becomes_a_row_of_typed_values() {
 
 #[test]
 fn an_invalid_form_returns_the_messages_of_the_static_checks() {
-    let errors = every_kind()
+    let errors = every_kind("rt-kinds-invalid")
         .validate(&form(&[
             ("seats", "many"),
             ("price", "cheap"),
@@ -286,7 +291,7 @@ fn an_invalid_form_returns_the_messages_of_the_static_checks() {
 
 #[test]
 fn a_blank_password_on_an_edit_keeps_the_stored_one() {
-    let row = every_kind()
+    let row = every_kind("rt-kinds-edit")
         .validate_update(&form(&[
             ("title", "Launch"),
             ("seats", "40"),

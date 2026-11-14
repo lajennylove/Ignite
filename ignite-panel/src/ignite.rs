@@ -94,15 +94,15 @@ impl Registry {
     /// signed-in request, before it loads the user's abilities. No lock is held across the
     /// database call. A failure is logged, and the next request tries again.
     pub(crate) async fn sync_runtime_permissions(&self, db: &Database) {
-        let missing: Vec<&'static str> = {
+        let missing: Vec<String> = {
             let done = self
                 .runtime_permissions
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner);
             ignite_core::runtime_resources()
                 .iter()
-                .map(|r| r.slug())
-                .filter(|slug| !done.contains(*slug))
+                .map(|r| r.slug().to_string())
+                .filter(|slug| !done.contains(slug))
                 .collect()
         };
         if missing.is_empty() {
@@ -117,7 +117,7 @@ impl Registry {
                 .runtime_permissions
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
-                .extend(missing.into_iter().map(str::to_string)),
+                .extend(missing),
             Err(error) => {
                 rocket::error!("ignite: could not register runtime permissions: {error}")
             }
