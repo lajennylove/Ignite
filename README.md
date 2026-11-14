@@ -163,6 +163,8 @@ fn validate(form: &FormInput) -> Result<WidgetInput, FieldErrors> {
 }
 ```
 
+An app that builds a derived input (`<Model>Input`) itself, with a struct literal, sets its hidden `__ignite_sent` field to the optional fields to write: `__ignite_sent: Vec::new()` writes none of the `None` ones on update, so their stored values are kept, and `vec!["note"]` writes NULL for `note`. `validate` and `validate_update` fill it from the form.
+
 The checks on `Field` (`check_required`, `check_whole_number`, `check_decimal`, `check_date` and the others) record their message under the field's name, so most resources never write a key by hand.
 
 ### Runtime resources

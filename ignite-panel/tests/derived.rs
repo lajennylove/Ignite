@@ -518,3 +518,60 @@ fn an_optional_field_not_sent_on_edit_keeps_its_value_and_one_sent_blank_is_clea
         "not sent: kept"
     );
 }
+
+/// A derived resource whose only field is optional, so an edit can send nothing to write.
+#[derive(Debug, Clone, OrbitModel, Serialize, IgniteResource)]
+#[orbit(table = "memos")]
+#[ignite(table = memos, title = "Memos")]
+pub struct Memo {
+    id: i32,
+    #[orbit(fillable)]
+    text: Option<String>,
+}
+
+#[test]
+fn an_edit_that_sends_no_writable_field_succeeds_and_changes_nothing() {
+    let _guard = setup();
+    let conn = test_db();
+    conn.exec("DROP TABLE IF EXISTS memos");
+    conn.exec("CREATE TABLE memos (id INT AUTO_INCREMENT PRIMARY KEY, text TEXT NULL)");
+    conn.exec("INSERT INTO memos (text) VALUES ('Keep me')");
+
+    common::ensure_secret();
+    let client =
+        Client::tracked(rocket::build().attach(Ignite::new().resource::<Memo>().fairing()))
+            .unwrap();
+    client.get("/admin/login").dispatch();
+    let status = client
+        .post("/admin/login")
+        .header(ContentType::Form)
+        .body(with_token(
+            &client,
+            &format!("email={EMAIL}&password={PASSWORD}"),
+        ))
+        .dispatch()
+        .status();
+    assert_eq!(status, Status::SeeOther);
+
+    // Only the token: `text` is not sent, so nothing is written.
+    let response = client
+        .post("/admin/memos/1")
+        .header(ContentType::Form)
+        .body(with_token(&client, ""))
+        .dispatch();
+    assert_eq!(response.status(), Status::SeeOther, "a success, not a 404");
+    let memo = conn
+        .run(Memo::query().find(&conn.db, 1))
+        .unwrap()
+        .expect("the memo");
+    assert_eq!(memo.text.as_deref(), Some("Keep me"));
+
+    // A row that does not exist is still a 404.
+    let response = client
+        .post("/admin/memos/99")
+        .header(ContentType::Form)
+        .body(with_token(&client, ""))
+        .dispatch();
+    assert_eq!(response.status(), Status::NotFound);
+    conn.exec("DROP TABLE memos");
+}

@@ -51,9 +51,11 @@ use syn::{
 /// are owned `String`s since 0.3.0.
 ///
 /// The generated input struct (`<Model>Input`) has a hidden `__ignite_sent` field that
-/// records which optional fields the form sent. `validate` and `validate_update` fill it;
-/// code that builds the input by hand sets it to the names of the optional fields to write
-/// (or to every optional field name, to write NULL for each `None`).
+/// records which optional fields the form sent. `validate` and `validate_update` fill it.
+/// Code that builds the input with a struct literal must set it (since 0.3.0):
+/// `__ignite_sent: Vec::new()` keeps the stored value of every optional field that is `None`
+/// on update, and listing a field's name, as in `vec!["note"]`, writes NULL for it. An update
+/// that has nothing to write runs no query, and returns the row (or `NotFound`).
 #[proc_macro_derive(IgniteResource, attributes(ignite))]
 pub fn derive_ignite_resource(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
@@ -455,12 +457,16 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
                 input: #input_name,
             ) -> ::core::result::Result<#name, ::orbit_orm::Error> {
                 let values = #name::__ignite_values(&input, false);
-                let changed = <#name as ::orbit_orm::Model>::query()
-                    .where_eq(#pk_name, id)
-                    .update(db, &values)
-                    .await?;
-                if changed == 0 {
-                    return Err(::orbit_orm::Error::NotFound { table: <#name as ::orbit_orm::Model>::TABLE });
+                // An update that writes nothing (every field it has was not sent) succeeds
+                // without a query, and returns the row when it exists.
+                if !values.is_empty() {
+                    let changed = <#name as ::orbit_orm::Model>::query()
+                        .where_eq(#pk_name, id)
+                        .update(db, &values)
+                        .await?;
+                    if changed == 0 {
+                        return Err(::orbit_orm::Error::NotFound { table: <#name as ::orbit_orm::Model>::TABLE });
+                    }
                 }
                 <#name as ::ignite_core::IgniteResource>::find(db, id)
                     .await?

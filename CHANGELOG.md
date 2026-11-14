@@ -17,7 +17,13 @@ All notable changes to Ignite are listed here. The format follows
    field name. A hand-written `IgniteResource` adds `.to_string()` to each literal key:
    `errors.insert("price".to_string(), "Price must be a whole number.".to_string())`.
    Reading is unchanged: `errors.get("price")` still takes a `&str`. The `Field::check_*`
-   methods keep their signatures, and `#[derive(IgniteResource)]` needs no change.
+   methods keep their signatures. A model with `#[derive(IgniteResource)]` needs no change,
+   except where the app builds the derived input (`<Model>Input`) itself with a struct
+   literal: that literal no longer compiles (E0063, missing `__ignite_sent`), because the
+   input now records which optional fields the form sent. Add one line to it:
+   `__ignite_sent: Vec::new()`. An empty list means no optional field was sent, so an
+   update keeps the stored value of each optional field that is `None`; list a field's name
+   (`vec!["note"]`) to write NULL for it instead. On create, `None` is NULL either way.
 2. **The derive writes NULL when an optional field is cleared on edit.** An `Option` field
    that the edit form sends blank is now saved as NULL, as on create. Before, it was
    skipped and kept its stored value, so an optional field could never be cleared.
