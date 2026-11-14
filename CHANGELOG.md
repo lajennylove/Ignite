@@ -31,6 +31,12 @@ All notable changes to Ignite are listed here. The format follows
 
 ### Added
 
+- Runtime resources: a `RuntimeResource` is defined by data (`FieldDef`, `FieldKindDef`,
+  `ColumnDef`, owned twins of `Field`, `FieldKind` and `Column`) and reads its rows through a
+  `RuntimeData` the app implements. `register_runtime` and `unregister_runtime` add and remove
+  one while the panel serves; the panel serves it at `/admin/<slug>` with the same list, forms
+  and delete action as a static resource. A slug that is already used is refused with a
+  `RuntimeError`. Its permissions are registered on the next signed-in request.
 - Roles and permissions, modelled on Filament and Filament Shield. Each resource has the
   abilities `<slug>.viewAny`, `<slug>.view`, `<slug>.create`, `<slug>.update` and
   `<slug>.delete`, which the panel registers when the app starts. The routes answer 403

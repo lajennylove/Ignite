@@ -143,6 +143,23 @@ category_id: Option<i32>,
 
 `load_categories` is an async function `async fn(&Database) -> Result<Vec<(String, String)>, orbit_orm::Error>`, called each time a form is shown. A `belongs_to` field stores the related row's `id`. Its select lists the rows of the related table by their `display` column, and the list shows that name. A submitted value must be one of the choices, so a value with no row is refused. The derive does not write a foreign key: add one in the migration if the database should enforce it.
 
+### Runtime resources
+
+A resource can also be defined by data while the app runs, such as a custom post type that a site owner creates in the admin. Build a `RuntimeResource` from its slug, titles, `FieldDef`s and `ColumnDef`s (owned twins of `Field` and `Column`; `FieldDef::from(field)` converts a static one), give it a `RuntimeData` that reads and writes its rows as JSON maps, and add it with `register_runtime`:
+
+```rust
+use ignite_core::{register_runtime, unregister_runtime, ColumnDef, FieldDef, FieldKindDef, RuntimeResource};
+
+register_runtime(
+    RuntimeResource::new("books", "Books", "Book", BookData)
+        .field(FieldDef { name: "title".into(), label: "Title".into(), kind: FieldKindDef::Text, required: true })
+        .column(ColumnDef { key: "title".into(), label: "Title".into(), sortable: true, searchable: true }),
+)?;
+unregister_runtime("books")?;
+```
+
+The panel serves it at `/admin/<slug>` with the same list, forms, checks and delete action as a static resource, and shows it in the navigation, from the next request on. Ignite assumes no table layout: `RuntimeData` decides where the rows live. A row needs a numeric `id`. A slug that a static resource, another runtime resource or a panel page (such as `login`) uses is refused with a `RuntimeError`. The five permissions of a runtime resource are registered on the next signed-in request, and stay when it is removed. A runtime resource has no dashboard cards or table yet.
+
 ## Roles and permissions
 
 The panel follows Filament and its standard plugin, Filament Shield (built on Spatie laravel-permission). Each resource has five abilities, named after its slug:
