@@ -9,13 +9,16 @@
 mod common;
 
 use common::*;
+use ignite_core::IgniteResource;
 use ignite_core::{
     register_runtime, unregister_runtime, ColumnDef, Database, FieldDef, FieldKindDef, ListQuery,
     Page, Row, RuntimeData, RuntimeError, RuntimeFuture, RuntimeResource,
 };
-use ignite_panel::authz;
+use ignite_panel::{authz, Ignite};
 use orbit_orm::{Error as OrbitError, Model, OrbitModel, Value};
 use rocket::http::{ContentType, Status};
+use rocket::local::blocking::Client;
+use serde::Serialize;
 use serde_json::json;
 
 /// A row of the `runtime_books` table, which backs the runtime resources of these tests.
@@ -392,5 +395,80 @@ fn permissions_are_not_created_for_a_slug_that_is_not_registered() {
             &["missing-books.%".into()],
         ),
         0
+    );
+}
+
+/// The `runtime_books` table as a derived static resource, to check that a derived resource
+/// and a runtime resource save a cleared optional field the same way.
+#[derive(Debug, Clone, OrbitModel, Serialize, IgniteResource)]
+#[orbit(table = "runtime_books")]
+#[ignite(table = runtime_books, title = "Derived books")]
+pub struct DerivedBook {
+    id: i64,
+    #[orbit(fillable)]
+    title: String,
+    #[orbit(fillable)]
+    pages: Option<i64>,
+}
+
+/// A client signed in to a panel that serves `DerivedBook`.
+fn signed_in_with_derived_books() -> Client {
+    ensure_secret();
+    let client =
+        Client::tracked(rocket::build().attach(Ignite::new().resource::<DerivedBook>().fairing()))
+            .expect("valid rocket");
+    client.get("/admin/login").dispatch();
+    let body = with_token(&client, &format!("email={EMAIL}&password={PASSWORD}"));
+    let status = client
+        .post("/admin/login")
+        .header(ContentType::Form)
+        .body(body)
+        .dispatch()
+        .status();
+    assert_eq!(status, Status::SeeOther, "test sign-in failed");
+    client
+}
+
+fn pages_of_dune() -> Option<i64> {
+    let t = test_db();
+    t.run(BookRow::query().find(&t.db, 1))
+        .expect("read")
+        .expect("Dune")
+        .pages
+}
+
+// A runtime resource writes NULL for a blank optional field on update; since 0.3.0 the derive
+// does too, so the two paths agree.
+#[test]
+fn a_cleared_optional_field_is_null_on_edit_for_runtime_and_derived_resources() {
+    let _guard = reset_books();
+    assert_eq!(pages_of_dune(), Some(412));
+
+    // The runtime path.
+    let client = signed_in(None);
+    register_runtime(books("cleared-books")).expect("register");
+    let response = client
+        .post("/admin/cleared-books/1")
+        .header(ContentType::Form)
+        .body(with_token(&client, "title=Dune&pages="))
+        .dispatch();
+    unregister_runtime("cleared-books").expect("unregister");
+    assert_eq!(response.status(), Status::SeeOther);
+    assert_eq!(pages_of_dune(), None, "the runtime resource writes NULL");
+
+    // The derived path, on the same row.
+    test_db().exec("UPDATE runtime_books SET pages = 412 WHERE id = 1");
+    assert_eq!(pages_of_dune(), Some(412));
+    let client = signed_in_with_derived_books();
+    let response = client
+        .post("/admin/runtime_books/1")
+        .header(ContentType::Form)
+        .body(with_token(&client, "title=Dune&pages="))
+        .dispatch();
+    assert_eq!(response.status(), Status::SeeOther);
+    assert_eq!(
+        pages_of_dune(),
+        None,
+        "the derived resource writes NULL too"
     );
 }

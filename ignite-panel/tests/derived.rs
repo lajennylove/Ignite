@@ -412,3 +412,61 @@ fn the_derived_dashboard_shows_the_declared_table() {
         "only the declared limit of one row shows"
     );
 }
+
+fn stored_gadget(id: i32) -> Gadget {
+    let conn = test_db();
+    conn.run(Gadget::query().find(&conn.db, id))
+        .unwrap()
+        .expect("the gadget")
+}
+
+// Since 0.3.0 an `Option` field left blank on edit is written as NULL, as on create, so a
+// user can clear it. Before, it was skipped and kept its value.
+#[test]
+fn an_optional_field_cleared_on_edit_is_stored_as_null() {
+    let _guard = setup();
+    let client = signed_in();
+    let before = stored_gadget(2);
+    assert_eq!(before.note.as_deref(), Some("Bright"));
+    assert!(before.due.is_some());
+
+    let response = client
+        .post("/admin/gadgets/2")
+        .header(ContentType::Form)
+        .body(with_token(
+            &client,
+            "name=Beacon&price=9&note=&due=&secret=",
+        ))
+        .dispatch();
+
+    assert_eq!(response.status(), Status::SeeOther);
+    let after = stored_gadget(2);
+    assert_eq!(after.note, None, "a cleared textarea is NULL");
+    assert_eq!(after.due, None, "a cleared date is NULL");
+    assert_eq!(after.name, "Beacon");
+    assert_eq!(
+        after.secret, before.secret,
+        "a password left blank on the same edit keeps its hash"
+    );
+    assert!(ignite_core::verify_password(&after.secret, "seed-password"));
+}
+
+#[test]
+fn a_field_that_is_not_optional_is_still_required_on_edit() {
+    let _guard = setup();
+    let client = signed_in();
+
+    let response = client
+        .post("/admin/gadgets/2")
+        .header(ContentType::Form)
+        .body(with_token(&client, "name=&price=&note="))
+        .dispatch();
+
+    assert_eq!(response.status(), Status::UnprocessableEntity);
+    let body = response.into_string().unwrap();
+    assert!(body.contains("Name is required."));
+    assert!(body.contains("Price (cents) is required."));
+    let after = stored_gadget(2);
+    assert_eq!(after.name, "Beacon", "nothing is written");
+    assert_eq!(after.note.as_deref(), Some("Bright"), "nothing is written");
+}

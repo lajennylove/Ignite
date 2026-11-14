@@ -163,7 +163,10 @@ pub(crate) fn validate(
                 FieldKind::Select(choices)
                     if !choices.iter().any(|(choice, _)| *choice == text) =>
                 {
-                    errors.insert(field.name, "Choose one of the options.".to_string());
+                    errors.insert(
+                        field.name.to_string(),
+                        "Choose one of the options.".to_string(),
+                    );
                 }
                 _ => {}
             }
@@ -172,7 +175,10 @@ pub(crate) fn validate(
             "name" => saved.name = text,
             "email" => {
                 if !text.is_empty() && !text.contains('@') {
-                    errors.insert(field.name, "Enter an email address.".to_string());
+                    errors.insert(
+                        field.name.to_string(),
+                        "Enter an email address.".to_string(),
+                    );
                 }
                 saved.email = text;
             }
@@ -200,7 +206,10 @@ fn password_to_store(
         return match hash_password(password) {
             Ok(hash) => Some(hash),
             Err(_) => {
-                errors.insert(field.name, "Could not save this password.".to_string());
+                errors.insert(
+                    field.name.to_string(),
+                    "Could not save this password.".to_string(),
+                );
                 None
             }
         };
@@ -221,19 +230,19 @@ pub(crate) fn password_errors(current_ok: bool, new: &str, confirm: &str) -> Fie
     let mut errors = FieldErrors::new();
     if !current_ok {
         errors.insert(
-            "current_password",
+            "current_password".to_string(),
             "The current password is incorrect.".to_string(),
         );
     }
     if new.chars().count() < MIN_PASSWORD_CHARS {
         errors.insert(
-            "new_password",
+            "new_password".to_string(),
             format!("The new password must be at least {MIN_PASSWORD_CHARS} characters."),
         );
     }
     if new != confirm {
         errors.insert(
-            "confirm_password",
+            "confirm_password".to_string(),
             "The passwords do not match.".to_string(),
         );
     }

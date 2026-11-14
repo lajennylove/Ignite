@@ -21,7 +21,7 @@ use std::collections::HashSet;
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex, PoisonError, RwLock};
+use std::sync::{Arc, PoisonError, RwLock};
 
 use orbit_orm::{Database, Error};
 use serde_json::{Map, Value};
@@ -60,8 +60,10 @@ pub trait RuntimeData: Send + Sync + 'static {
     /// name, or check the value before it writes.
     fn create<'a>(&'a self, db: &'a Database, input: Row) -> RuntimeFuture<'a, Row>;
     /// Updates the row with `id` from the validated `input` and returns it. A key that is
-    /// missing from `input`, such as a password left blank, keeps its stored value. A unique
-    /// violation is reported as for [`create`](Self::create).
+    /// missing from `input`, such as a password left blank, keeps its stored value. A key
+    /// whose value is `null` is an optional field the user cleared: store NULL, so the value
+    /// is cleared, as a static resource does. A unique violation is reported as for
+    /// [`create`](Self::create).
     fn update<'a>(&'a self, db: &'a Database, id: i64, input: Row) -> RuntimeFuture<'a, Row>;
     /// Deletes the row with `id` and returns the number of rows deleted.
     fn delete<'a>(&'a self, db: &'a Database, id: i64) -> RuntimeFuture<'a, u64>;
@@ -247,17 +249,16 @@ impl RuntimeResource {
     }
 }
 
-/// The checks of [`RegisteredResource::validate`]. `names` holds the interned name of each
-/// field, in order, as the keys of the errors.
+/// The checks of [`RegisteredResource::validate`]. Each error is keyed by its field's name.
 fn validate_fields(
     fields: &[FieldDef],
-    names: &[&'static str],
     form: &FormInput,
     creating: bool,
 ) -> Result<Row, FieldErrors> {
     let mut errors = FieldErrors::new();
     let mut row = Row::new();
-    for (field, &name) in fields.iter().zip(names) {
+    for field in fields {
+        let name = field.name.as_str();
         let label = field.label.as_str();
         // A checkbox is never blank: an unticked checkbox is false.
         if field.kind == FieldKindDef::Checkbox {
@@ -281,7 +282,10 @@ fn validate_fields(
             FieldKindDef::Password => match crate::hash_password(text) {
                 Ok(hash) => Some(Value::String(hash)),
                 Err(_) => {
-                    errors.insert(name, "Could not save this password.".to_string());
+                    errors.insert(
+                        name.to_string(),
+                        "Could not save this password.".to_string(),
+                    );
                     None
                 }
             },
@@ -377,8 +381,6 @@ impl std::error::Error for RuntimeError {}
 /// A runtime resource as the registry holds it: the definition, ready for the panel.
 pub struct RegisteredResource {
     resource: RuntimeResource,
-    /// The interned name of each field, in order: the keys of its [`FieldErrors`].
-    names: Vec<&'static str>,
 }
 
 impl RegisteredResource {
@@ -412,12 +414,6 @@ impl RegisteredResource {
         &self.resource.columns
     }
 
-    /// The key that [`FieldErrors`] uses for the field `name`, or `None` when the resource has
-    /// no such field. Use it to report an error on a field, such as a value already taken.
-    pub fn error_key(&self, name: &str) -> Option<&'static str> {
-        self.names.iter().copied().find(|key| *key == name)
-    }
-
     /// Turns the submitted form into a [`Row`] for a create, or returns one message per
     /// field. It runs the same checks as a static resource, with the same messages:
     /// required fields ([`Field::check_required`](crate::Field::check_required)), whole
@@ -431,17 +427,21 @@ impl RegisteredResource {
     /// - password: the hash of the password ([`hash_password`](crate::hash_password)).
     /// - a blank field that is not required: `null`.
     ///
+    /// Each error in [`FieldErrors`] is keyed by the field's name, an owned `String`.
+    ///
     /// A lookup value is checked against [`RuntimeData::options`] by the panel, which can
     /// read the database.
     pub fn validate(&self, form: &FormInput) -> Result<Row, FieldErrors> {
-        validate_fields(&self.resource.fields, &self.names, form, true)
+        validate_fields(&self.resource.fields, form, true)
     }
 
     /// Turns the submitted form into a [`Row`] for an update. It is
     /// [`validate`](Self::validate), except that a blank password is not an error: the row
-    /// leaves its key out, so the stored password is kept.
+    /// leaves its key out, so the stored password is kept. Any other blank field that is not
+    /// required is `null`, so clearing an optional field on the edit form clears the stored
+    /// value, as `#[derive(IgniteResource)]` does since 0.3.0.
     pub fn validate_update(&self, form: &FormInput) -> Result<Row, FieldErrors> {
-        validate_fields(&self.resource.fields, &self.names, form, false)
+        validate_fields(&self.resource.fields, form, false)
     }
 }
 
@@ -471,8 +471,9 @@ fn write<T>(f: impl FnOnce(&mut Registry) -> T) -> T {
     f(guard.get_or_insert_with(Registry::default))
 }
 
-/// The longest field name a runtime resource accepts, in bytes. Each distinct field name is
-/// kept for the life of the process, as the key of its form errors, so its size is bounded.
+/// The longest field name a runtime resource accepts, in bytes, as for a MySQL or MariaDB
+/// column name. The limit is a validation rule: names are owned by their resource and freed
+/// with it.
 pub const MAX_FIELD_NAME: usize = 64;
 
 /// Whether `name` is a field name a runtime resource accepts: lowercase ASCII letters, digits
@@ -524,16 +525,9 @@ pub fn register_runtime(resource: RuntimeResource) -> Result<(), RuntimeError> {
         if registry.reserved.contains(slug) || registry.resources.iter().any(|r| r.slug() == slug) {
             return Err(RuntimeError::SlugTaken(resource.slug.clone()));
         }
-        // Only an accepted resource interns its field names. The names lock is taken
-        // inside the registry lock, and never the other way round.
-        let names = resource
-            .fields
-            .iter()
-            .map(|f| intern_name(&f.name))
-            .collect();
         registry
             .resources
-            .push(Arc::new(RegisteredResource { resource, names }));
+            .push(Arc::new(RegisteredResource { resource }));
         Ok(())
     })
 }
@@ -587,36 +581,6 @@ pub fn reserve_slugs(slugs: &[&str]) -> Result<(), RuntimeError> {
     })
 }
 
-// `FieldErrors` is keyed by `&'static str`, so the field names of a runtime resource are
-// leaked to give them that lifetime, and interned: each distinct name is leaked once in the
-// life of the process. Labels, choices, columns and everything else stay owned, so editing a
-// definition adds nothing unless it adds a field name never seen before. Validation and a
-// refused registration intern nothing.
-
-static NAMES: Mutex<Option<HashSet<&'static str>>> = Mutex::new(None);
-
-/// `name`, as a `&'static str` leaked at most once per distinct name.
-fn intern_name(name: &str) -> &'static str {
-    let mut guard = NAMES.lock().unwrap_or_else(PoisonError::into_inner);
-    let set = guard.get_or_insert_with(HashSet::new);
-    if let Some(found) = set.get(name) {
-        return found;
-    }
-    let leaked: &'static str = Box::leak(name.to_string().into_boxed_str());
-    set.insert(leaked);
-    leaked
-}
-
-/// How many names are interned.
-#[cfg(test)]
-fn interned_names() -> usize {
-    NAMES
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .as_ref()
-        .map_or(0, HashSet::len)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -665,35 +629,33 @@ mod tests {
             })
     }
 
-    // The only test of this module that interns, so the count is not changed by another.
+    // Field names are owned by their resource: editing a definition a thousand times keeps
+    // nothing of the old ones, and an error is keyed by the field's own name.
     #[test]
-    fn editing_a_definition_a_thousand_times_interns_only_its_names() {
+    fn editing_a_definition_a_thousand_times_keeps_owned_names() {
         register_runtime(edited("growth", 0)).expect("register");
-        let after_first = interned_names();
         for n in 1..=1000 {
             unregister_runtime("growth").expect("unregister");
             register_runtime(edited("growth", n)).expect("register again");
             let registered = runtime_resource("growth").expect("registered");
             let mut values = std::collections::HashMap::new();
-            values.insert("growth_title".to_string(), format!("text {n}"));
-            let _ = registered.validate(&FormInput::new(values.clone()));
+            values.insert("growth_status".to_string(), "not a choice".to_string());
+            let errors = registered
+                .validate(&FormInput::new(values.clone()))
+                .unwrap_err();
+            assert!(errors.contains_key("growth_status"));
             let _ = registered.validate_update(&FormInput::new(values));
         }
+        // The last registration is the only one the registry holds.
+        let registered = runtime_resource("growth").expect("registered");
+        assert_eq!(registered.title(), "Title 1000");
         assert_eq!(
-            interned_names(),
-            after_first,
-            "labels and choices are not kept"
+            runtime_resources()
+                .iter()
+                .filter(|r| r.slug() == "growth")
+                .count(),
+            1
         );
-
-        // A refused registration interns nothing, even with a new field name.
-        let refused = edited("growth", 1).field(FieldDef {
-            name: "growth_never_kept".into(),
-            label: "Never".into(),
-            kind: FieldKindDef::Text,
-            required: false,
-        });
-        assert!(register_runtime(refused).is_err());
-        assert_eq!(interned_names(), after_first);
         unregister_runtime("growth").expect("unregister");
     }
 }

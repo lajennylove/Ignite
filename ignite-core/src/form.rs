@@ -36,7 +36,21 @@ impl FormInput {
 
 /// Error messages for a form, keyed by field name. The panel shows each
 /// message next to its field when it re-renders the form.
-pub type FieldErrors = HashMap<&'static str, String>;
+///
+/// The keys are owned `String`s, as the keys of Laravel's `MessageBag` are, so a
+/// runtime resource (whose field names are data) can report errors without leaking
+/// its names. A hand-written resource writes a literal key with `.to_string()`:
+///
+/// ```
+/// use ignite_core::FieldErrors;
+///
+/// let mut errors = FieldErrors::new();
+/// errors.insert("price".to_string(), "Price must be a whole number.".to_string());
+/// assert_eq!(errors.get("price").map(String::as_str), Some("Price must be a whole number."));
+/// ```
+///
+/// Since 0.3.0. Before, the keys were `&'static str`.
+pub type FieldErrors = HashMap<String, String>;
 
 #[cfg(test)]
 mod tests {

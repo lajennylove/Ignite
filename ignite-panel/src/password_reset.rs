@@ -487,13 +487,13 @@ fn password_rules(password: &str, confirm: &str) -> FieldErrors {
     let mut errors = FieldErrors::new();
     if password.chars().count() < MIN_PASSWORD_CHARS {
         errors.insert(
-            "password",
+            "password".to_string(),
             format!("The password must be at least {MIN_PASSWORD_CHARS} characters."),
         );
     }
     if password != confirm {
         errors.insert(
-            "password_confirmation",
+            "password_confirmation".to_string(),
             "The passwords do not match.".to_string(),
         );
     }

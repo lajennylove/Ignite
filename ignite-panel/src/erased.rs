@@ -193,14 +193,14 @@ async fn checked<R: IgniteResource>(
 /// `errors`, with "Choose one of the options." for each lookup field in `lookups` (their
 /// error keys) whose submitted value is not one of the choices `options` returns for it.
 /// Static and runtime resources share this check.
-async fn lookup_errors<F, Fut>(
-    lookups: &[&'static str],
+async fn lookup_errors<'a, F, Fut>(
+    lookups: &[&'a str],
     form: &FormInput,
     mut errors: FieldErrors,
     options: F,
 ) -> Result<FieldErrors, Error>
 where
-    F: Fn(&'static str) -> Fut,
+    F: Fn(&'a str) -> Fut,
     Fut: Future<Output = Result<Vec<(String, String)>, Error>>,
 {
     for &name in lookups {
@@ -210,7 +210,7 @@ where
         let choices = options(name).await?;
         if !choices.iter().any(|(choice, _)| choice == value.trim()) {
             errors
-                .entry(name)
+                .entry(name.to_string())
                 .or_insert_with(|| "Choose one of the options.".to_string());
         }
     }
@@ -235,12 +235,12 @@ impl RuntimeAdapter {
             self.0.validate_update(form)
         };
         let errors = validated.as_ref().err().cloned().unwrap_or_default();
-        let lookups: Vec<&'static str> = self
+        let lookups: Vec<&str> = self
             .0
             .fields()
             .iter()
             .filter(|f| f.kind == FieldKindDef::Lookup)
-            .filter_map(|f| self.0.error_key(&f.name))
+            .map(|f| f.name.as_str())
             .collect();
         let data = &self.0.resource().data;
         let errors = lookup_errors(&lookups, form, errors, |field| data.options(db, field)).await?;
@@ -262,11 +262,11 @@ impl RuntimeAdapter {
             Ok(row) => match save(row).await {
                 Ok(record) => Ok(Ok(Value::Object(record))),
                 Err(error) => {
-                    let keys: Vec<(&'static str, &str)> = self
+                    let keys: Vec<(&str, &str)> = self
                         .0
                         .fields()
                         .iter()
-                        .filter_map(|f| Some((self.0.error_key(&f.name)?, f.label.as_str())))
+                        .map(|f| (f.name.as_str(), f.label.as_str()))
                         .collect();
                     unique_violation(error, self.0.slug(), &keys).map(Err)
                 }
@@ -377,8 +377,8 @@ pub(crate) fn unique_index_name(table: &str, field: &str) -> String {
 fn field_for_index<'a, 'b>(
     index: &str,
     table: &str,
-    fields: &'a [(&'static str, &'b str)],
-) -> Option<&'a (&'static str, &'b str)> {
+    fields: &'a [(&'b str, &'b str)],
+) -> Option<&'a (&'b str, &'b str)> {
     fields
         .iter()
         .find(|(name, _)| unique_index_name(table, name) == index)
@@ -396,7 +396,7 @@ fn field_for_index<'a, 'b>(
 fn unique_violation(
     error: Error,
     table: &str,
-    fields: &[(&'static str, &str)],
+    fields: &[(&str, &str)],
 ) -> Result<FieldErrors, Error> {
     let field = match &error {
         Error::UniqueViolation { index: Some(index) } => field_for_index(index, table, fields),
@@ -405,7 +405,7 @@ fn unique_violation(
     match field {
         Some((name, label)) => {
             let mut errors = FieldErrors::new();
-            errors.insert(name, format!("{label} is already taken."));
+            errors.insert(name.to_string(), format!("{label} is already taken."));
             Ok(errors)
         }
         None => Err(error),

@@ -550,7 +550,10 @@ async fn save_profile(
     };
     if !saved_ok {
         let mut errors = FieldErrors::new();
-        errors.insert("email", "Another user already has this email.".to_string());
+        errors.insert(
+            "email".to_string(),
+            "Another user already has this email.".to_string(),
+        );
         return Ok(Reply::Page(
             Status::UnprocessableEntity,
             render_profile(
@@ -603,7 +606,7 @@ async fn change_password(
         );
         let mut errors = FieldErrors::new();
         errors.insert(
-            "current_password",
+            "current_password".to_string(),
             format!("Too many attempts. Try again in {seconds} seconds."),
         );
         let page = render_profile(

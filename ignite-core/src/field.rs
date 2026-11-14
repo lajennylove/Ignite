@@ -120,7 +120,7 @@ impl Field {
 
 /// See [`Field::check_required`].
 pub(crate) fn check_required<'a>(
-    name: &'static str,
+    name: &str,
     label: &str,
     form: &'a FormInput,
     errors: &mut FieldErrors,
@@ -128,7 +128,7 @@ pub(crate) fn check_required<'a>(
     match form.get(name).map(str::trim) {
         Some(value) if !value.is_empty() => Some(value),
         _ => {
-            errors.insert(name, format!("{label} is required."));
+            errors.insert(name.to_string(), format!("{label} is required."));
             None
         }
     }
@@ -136,7 +136,7 @@ pub(crate) fn check_required<'a>(
 
 /// See [`Field::check_whole_number`].
 pub(crate) fn check_whole_number<T: FromStr>(
-    name: &'static str,
+    name: &str,
     label: &str,
     text: &str,
     errors: &mut FieldErrors,
@@ -144,7 +144,7 @@ pub(crate) fn check_whole_number<T: FromStr>(
     match text.parse::<T>() {
         Ok(value) => Some(value),
         Err(_) => {
-            errors.insert(name, format!("{label} must be a whole number."));
+            errors.insert(name.to_string(), format!("{label} must be a whole number."));
             None
         }
     }
@@ -152,7 +152,7 @@ pub(crate) fn check_whole_number<T: FromStr>(
 
 /// See [`Field::check_number`].
 pub(crate) fn check_number(
-    name: &'static str,
+    name: &str,
     label: &str,
     text: &str,
     errors: &mut FieldErrors,
@@ -160,7 +160,7 @@ pub(crate) fn check_number(
     match text.parse::<f64>() {
         Ok(value) if value.is_finite() => Some(value),
         _ => {
-            errors.insert(name, format!("{label} must be a number."));
+            errors.insert(name.to_string(), format!("{label} must be a number."));
             None
         }
     }
@@ -168,7 +168,7 @@ pub(crate) fn check_number(
 
 /// See [`Field::check_decimal`].
 pub(crate) fn check_decimal<T: FromStr + Into<f64> + Copy>(
-    name: &'static str,
+    name: &str,
     label: &str,
     text: &str,
     errors: &mut FieldErrors,
@@ -176,7 +176,7 @@ pub(crate) fn check_decimal<T: FromStr + Into<f64> + Copy>(
     match text.parse::<T>() {
         Ok(value) if Into::<f64>::into(value).is_finite() => Some(value),
         _ => {
-            errors.insert(name, format!("{label} must be a number."));
+            errors.insert(name.to_string(), format!("{label} must be a number."));
             None
         }
     }
@@ -184,7 +184,7 @@ pub(crate) fn check_decimal<T: FromStr + Into<f64> + Copy>(
 
 /// See [`Field::check_datetime`].
 pub(crate) fn check_datetime(
-    name: &'static str,
+    name: &str,
     label: &str,
     text: &str,
     errors: &mut FieldErrors,
@@ -200,7 +200,7 @@ pub(crate) fn check_datetime(
         .find_map(|format| NaiveDateTime::parse_from_str(text, format).ok());
     if parsed.is_none() {
         errors.insert(
-            name,
+            name.to_string(),
             format!("{label} must be a date and time, as YYYY-MM-DD HH:MM."),
         );
     }
@@ -209,7 +209,7 @@ pub(crate) fn check_datetime(
 
 /// See [`Field::check_choice`].
 pub(crate) fn check_choice(
-    name: &'static str,
+    name: &str,
     text: &str,
     choices: &[(&str, &str)],
     errors: &mut FieldErrors,
@@ -217,13 +217,13 @@ pub(crate) fn check_choice(
     if choices.iter().any(|(value, _)| *value == text) {
         return true;
     }
-    errors.insert(name, "Choose one of the options.".to_string());
+    errors.insert(name.to_string(), "Choose one of the options.".to_string());
     false
 }
 
 /// See [`Field::check_date`].
 pub(crate) fn check_date(
-    name: &'static str,
+    name: &str,
     label: &str,
     text: &str,
     errors: &mut FieldErrors,
@@ -231,7 +231,10 @@ pub(crate) fn check_date(
     match NaiveDate::parse_from_str(text, "%Y-%m-%d") {
         Ok(value) => Some(value),
         Err(_) => {
-            errors.insert(name, format!("{label} must be a date, as YYYY-MM-DD."));
+            errors.insert(
+                name.to_string(),
+                format!("{label} must be a date, as YYYY-MM-DD."),
+            );
             None
         }
     }

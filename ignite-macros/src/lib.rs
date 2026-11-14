@@ -41,6 +41,15 @@ use syn::{
 /// key must be `i32` or `i64`. A `String` field is a text input (or a textarea, a password
 /// or a select, by attribute); an `f32` or `f64` is a decimal input; a `NaiveDateTime` is a
 /// date-and-time input; a `bool` is a checkbox.
+///
+/// Saving: create and update write every field. An `Option` field left blank is written as
+/// NULL, on update too, so a user clears an optional value by emptying it on the edit form
+/// (since 0.3.0; before, a blank optional field was skipped on update and kept its value). A
+/// password field is the exception: left blank on edit, it is not written, so the stored
+/// hash is kept. A field that is not an `Option` is required unless it says
+/// `required = false`, and a checkbox is never blank. Errors are keyed by the field's name
+/// in [`FieldErrors`](https://docs.rs/ignite-core/latest/ignite_core/type.FieldErrors.html),
+/// whose keys are owned `String`s since 0.3.0.
 #[proc_macro_derive(IgniteResource, attributes(ignite))]
 pub fn derive_ignite_resource(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
@@ -305,7 +314,8 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
 
         impl #name {
             /// The columns that an insert (`creating`) or an update write, from the input.
-            /// An update skips an `Option` that is `None`, as the derive always has.
+            /// An `Option` that is `None` is written as NULL, on an update too, so a cleared
+            /// optional field is cleared. A blank password is skipped on an update.
             #[doc(hidden)]
             #[allow(unused_mut)]
             fn __ignite_values(
@@ -460,20 +470,29 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
     })
 }
 
-/// One block of the generated `__ignite_values`: pushes the column of `field` when the input
-/// has a value for it. An `Option` that is `None` is written as NULL on create and skipped on
-/// update.
+/// One block of the generated `__ignite_values`: pushes the column of `field`. An `Option`
+/// that is `None` is written as NULL, on create and on update (since 0.3.0), so clearing an
+/// optional field on the edit form clears the stored value, as Laravel's `update` with a
+/// `null` attribute does. A password is the exception: a blank one is NULL on create and
+/// skipped on update, so the stored hash is kept.
 fn value_step(field: &Field) -> TokenStream2 {
     let ident = &field.ident;
     let column = ident.to_string();
     let convert = value_of(field.base, quote! { x });
     // A password's input is an `Option` too, so a blank edit leaves the column alone.
-    if field.optional || field.is_password {
+    if field.is_password {
         quote! {
             match &input.#ident {
                 ::core::option::Option::Some(x) => values.push((#column, #convert)),
                 ::core::option::Option::None if creating => values.push((#column, ::orbit_orm::Value::Null)),
                 ::core::option::Option::None => {}
+            }
+        }
+    } else if field.optional {
+        quote! {
+            match &input.#ident {
+                ::core::option::Option::Some(x) => values.push((#column, #convert)),
+                ::core::option::Option::None => values.push((#column, ::orbit_orm::Value::Null)),
             }
         }
     } else {
@@ -952,7 +971,7 @@ fn validate_expr(field: &Field) -> TokenStream2 {
                 match ::ignite_core::hash_password(text) {
                     Ok(hash) => ::core::option::Option::Some(hash),
                     Err(_) => {
-                        errors.insert(#name, #message.to_string());
+                        errors.insert(#name.to_string(), #message.to_string());
                         ::core::option::Option::None
                     }
                 }

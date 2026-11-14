@@ -203,7 +203,10 @@ impl IgniteResource for Widgets {
             Some(text) => match text.parse::<i32>() {
                 Ok(price) => Some(price),
                 Err(_) => {
-                    errors.insert("price", "Price must be a whole number.".to_string());
+                    errors.insert(
+                        "price".to_string(),
+                        "Price must be a whole number.".to_string(),
+                    );
                     None
                 }
             },
