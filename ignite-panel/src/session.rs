@@ -324,6 +324,9 @@ impl<'r> FromRequest<'r> for AdminUser {
         let Some(sid) = session_id(request.cookies(), &registry.secret) else {
             return Outcome::Error((Status::Unauthorized, ()));
         };
+        // A runtime resource registered since the last request gets its permission rows
+        // before the abilities are read, as a static one gets them when the app starts.
+        registry.sync_runtime_permissions(db).await;
         let found = classify(lookup_user(db, &sid).await);
         match found {
             Lookup::Unknown => Outcome::Error((Status::Unauthorized, ())),

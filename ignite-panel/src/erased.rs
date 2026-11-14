@@ -1,11 +1,13 @@
 //! Type-erased access to a resource, so the routes can serve many resource
 //! types from one set of handlers.
 
+use std::future::Future;
 use std::marker::PhantomData;
+use std::sync::Arc;
 
 use ignite_core::{
     Column, Database, Field, FieldErrors, FieldKind, FormInput, IgniteResource, LatestRecords,
-    ListQuery, StatWidget,
+    ListQuery, RegisteredResource, Row, StatWidget,
 };
 use orbit_orm::Error;
 use serde::Serialize;
@@ -158,23 +160,176 @@ async fn checked<R: IgniteResource>(
     form: &FormInput,
     validated: Result<R::Input, FieldErrors>,
 ) -> Result<Result<R::Input, FieldErrors>, Error> {
-    let mut errors = validated.as_ref().err().cloned().unwrap_or_default();
-    for field in R::fields().iter().filter(|f| f.kind == FieldKind::Lookup) {
+    let errors = validated.as_ref().err().cloned().unwrap_or_default();
+    let errors = lookup_errors(R::fields(), form, errors, |field| R::options(db, field)).await?;
+    Ok(if errors.is_empty() {
+        validated
+    } else {
+        Err(errors)
+    })
+}
+
+/// `errors`, with "Choose one of the options." for each lookup field of `fields` whose
+/// submitted value is not one of the choices `options` returns for it. Static and runtime
+/// resources share this check.
+async fn lookup_errors<F, Fut>(
+    fields: &'static [Field],
+    form: &FormInput,
+    mut errors: FieldErrors,
+    options: F,
+) -> Result<FieldErrors, Error>
+where
+    F: Fn(&'static str) -> Fut,
+    Fut: Future<Output = Result<Vec<(String, String)>, Error>>,
+{
+    for field in fields.iter().filter(|f| f.kind == FieldKind::Lookup) {
         let Some(value) = form.get(field.name) else {
             continue;
         };
-        let choices = R::options(db, field.name).await?;
+        let choices = options(field.name).await?;
         if !choices.iter().any(|(choice, _)| choice == value.trim()) {
             errors
                 .entry(field.name)
                 .or_insert_with(|| "Choose one of the options.".to_string());
         }
     }
-    Ok(if errors.is_empty() {
-        validated
-    } else {
-        Err(errors)
-    })
+    Ok(errors)
+}
+
+/// Wraps a runtime resource from the registry as an [`Erased`] value, so the routes serve
+/// it as they serve a static one.
+pub(crate) struct RuntimeAdapter(pub(crate) Arc<RegisteredResource>);
+
+impl RuntimeAdapter {
+    /// Validates `form` with the resource's definitions, then checks its lookup fields.
+    async fn checked(
+        &self,
+        db: &Database,
+        form: &FormInput,
+        creating: bool,
+    ) -> Result<Result<Row, FieldErrors>, Error> {
+        let resource = self.0.resource();
+        let validated = if creating {
+            resource.validate(form)
+        } else {
+            resource.validate_update(form)
+        };
+        let errors = validated.as_ref().err().cloned().unwrap_or_default();
+        let data = &resource.data;
+        let errors = lookup_errors(self.0.fields(), form, errors, |field| {
+            data.options(db, field)
+        })
+        .await?;
+        Ok(if errors.is_empty() {
+            validated
+        } else {
+            Err(errors)
+        })
+    }
+
+    /// Saves a validated row through `save`, and turns a unique-index violation into a
+    /// field error, as for a static resource.
+    async fn save<'a>(
+        &self,
+        validated: Result<Row, FieldErrors>,
+        save: impl FnOnce(Row) -> ignite_core::RuntimeFuture<'a, Row>,
+    ) -> Result<Result<Value, FieldErrors>, Error> {
+        match validated {
+            Ok(row) => match save(row).await {
+                Ok(record) => Ok(Ok(Value::Object(record))),
+                Err(error) => unique_violation(error, self.0.slug(), self.0.fields()).map(Err),
+            },
+            Err(errors) => Ok(Err(errors)),
+        }
+    }
+}
+
+#[rocket::async_trait]
+impl Erased for RuntimeAdapter {
+    fn slug(&self) -> &'static str {
+        self.0.slug()
+    }
+
+    fn title(&self) -> &'static str {
+        self.0.title()
+    }
+
+    fn singular(&self) -> &'static str {
+        self.0.singular()
+    }
+
+    fn per_page(&self) -> i64 {
+        self.0.resource().per_page
+    }
+
+    fn fields(&self) -> &'static [Field] {
+        self.0.fields()
+    }
+
+    fn columns(&self) -> &'static [Column] {
+        self.0.columns()
+    }
+
+    async fn list(&self, db: &Database, query: &ListQuery) -> Result<(Vec<Value>, i64), Error> {
+        let page = self.0.resource().data.list(db, query).await?;
+        Ok((
+            page.rows.into_iter().map(Value::Object).collect(),
+            page.total,
+        ))
+    }
+
+    async fn find(&self, db: &Database, id: i64) -> Result<Option<Value>, Error> {
+        Ok(self
+            .0
+            .resource()
+            .data
+            .find(db, id)
+            .await?
+            .map(Value::Object))
+    }
+
+    async fn create(
+        &self,
+        db: &Database,
+        form: &FormInput,
+    ) -> Result<Result<Value, FieldErrors>, Error> {
+        let validated = self.checked(db, form, true).await?;
+        let data = &self.0.resource().data;
+        self.save(validated, |row| data.create(db, row)).await
+    }
+
+    async fn update(
+        &self,
+        db: &Database,
+        id: i64,
+        form: &FormInput,
+    ) -> Result<Result<Value, FieldErrors>, Error> {
+        let validated = self.checked(db, form, false).await?;
+        let data = &self.0.resource().data;
+        self.save(validated, |row| data.update(db, id, row)).await
+    }
+
+    async fn delete(&self, db: &Database, id: i64) -> Result<u64, Error> {
+        self.0.resource().data.delete(db, id).await
+    }
+
+    /// A runtime resource has no dashboard cards.
+    async fn widgets(&self, _db: &Database) -> Result<Vec<StatWidget>, Error> {
+        Ok(Vec::new())
+    }
+
+    /// A runtime resource has no dashboard table.
+    fn latest_records(&self) -> Option<LatestRecords> {
+        None
+    }
+
+    async fn latest(&self, _db: &Database, _limit: i64) -> Result<Vec<Value>, Error> {
+        Ok(Vec::new())
+    }
+
+    async fn options(&self, db: &Database, field: &str) -> Result<Vec<(String, String)>, Error> {
+        self.0.resource().data.options(db, field).await
+    }
 }
 
 /// The name of the unique index on `field` of `table`. The panel's migrations name

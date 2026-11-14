@@ -105,8 +105,8 @@ impl Layout {
             })
             .chain(
                 registry
-                    .resources
-                    .iter()
+                    .all()
+                    .into_iter()
                     .filter(|r| user.may(r.slug(), Action::ViewAny))
                     .map(|r| NavGroup {
                         title: r.title(),

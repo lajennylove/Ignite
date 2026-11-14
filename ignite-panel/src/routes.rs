@@ -122,10 +122,9 @@ async fn dashboard(
     let token = csrf_token(cookies, &registry.secret);
     // The dashboard shows a resource's cards and table only when the user may view its records.
     let resources: Vec<Arc<dyn Erased>> = registry
-        .resources
-        .iter()
+        .all()
+        .into_iter()
         .filter(|r| session.may(r.slug(), Action::ViewAny))
-        .cloned()
         .collect();
     let mut widgets = Vec::new();
     let mut tables = Vec::new();

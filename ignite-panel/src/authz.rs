@@ -69,8 +69,13 @@ pub(crate) fn ability(slug: &str, action: Action) -> String {
 pub(crate) fn resource_abilities(resources: &[Arc<dyn Erased>]) -> Vec<String> {
     resources
         .iter()
-        .flat_map(|resource| ACTIONS.map(|action| ability(resource.slug(), action)))
+        .flat_map(|resource| slug_abilities(resource.slug()))
         .collect()
+}
+
+/// The five abilities of the resource at `slug`, such as `books.viewAny`.
+pub(crate) fn slug_abilities(slug: &str) -> [String; 5] {
+    ACTIONS.map(|action| ability(slug, action))
 }
 
 /// The abilities one user holds, from their roles. Loaded with the session on each request.

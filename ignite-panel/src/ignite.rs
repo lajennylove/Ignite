@@ -1,7 +1,8 @@
 //! The builder that collects resources and attaches the panel to Rocket.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 use ignite_core::{Database, Field, IgniteResource};
 use orbit_orm::PoolOptions;
@@ -9,7 +10,7 @@ use rocket::catchers;
 use rocket::fairing::{self, AdHoc, Fairing, Info, Kind};
 use rocket::{Build, Request, Response, Rocket};
 
-use crate::erased::{Adapter, Erased};
+use crate::erased::{Adapter, Erased, RuntimeAdapter};
 use crate::mail::{Mailer, NotConfigured};
 use crate::proxy::TrustedProxies;
 use crate::routes;
@@ -63,12 +64,64 @@ pub(crate) struct Registry {
     pub(crate) mailer: Arc<dyn Mailer>,
     /// The app's own URL without a trailing slash, for the links in email (see `IGNITE_APP_URL`).
     pub(crate) app_url: Option<String>,
+    /// The slugs of the runtime resources whose permission rows this panel has registered.
+    pub(crate) runtime_permissions: Mutex<HashSet<String>>,
 }
 
 impl Registry {
-    /// Finds the resource mounted at `slug`.
+    /// Finds the resource at `slug`: a static resource first, then a runtime resource from
+    /// [`ignite_core::register_runtime`]. The registry is read on each call, so a runtime
+    /// resource is found from the request after it is registered, and not after it is removed.
     pub(crate) fn find(&self, slug: &str) -> Option<Arc<dyn Erased>> {
-        self.resources.iter().find(|r| r.slug() == slug).cloned()
+        if let Some(found) = self.resources.iter().find(|r| r.slug() == slug) {
+            return Some(found.clone());
+        }
+        ignite_core::runtime_resource(slug)
+            .map(|registered| Arc::new(RuntimeAdapter(registered)) as Arc<dyn Erased>)
+    }
+
+    /// Every resource, for the navigation and the dashboard: the static resources in the
+    /// order they were added, then the runtime resources in the order they were registered.
+    pub(crate) fn all(&self) -> Vec<Arc<dyn Erased>> {
+        let runtime = ignite_core::runtime_resources()
+            .into_iter()
+            .map(|registered| Arc::new(RuntimeAdapter(registered)) as Arc<dyn Erased>);
+        self.resources.iter().cloned().chain(runtime).collect()
+    }
+
+    /// Registers the permission rows of the runtime resources that do not have them yet, as
+    /// the panel registers a static resource's rows when it starts. The panel calls it on each
+    /// signed-in request, before it loads the user's abilities. No lock is held across the
+    /// database call. A failure is logged, and the next request tries again.
+    pub(crate) async fn sync_runtime_permissions(&self, db: &Database) {
+        let missing: Vec<&'static str> = {
+            let done = self
+                .runtime_permissions
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            ignite_core::runtime_resources()
+                .iter()
+                .map(|r| r.slug())
+                .filter(|slug| !done.contains(*slug))
+                .collect()
+        };
+        if missing.is_empty() {
+            return;
+        }
+        let names: Vec<String> = missing
+            .iter()
+            .flat_map(|slug| crate::authz::slug_abilities(slug))
+            .collect();
+        match crate::authz::register(db, &names).await {
+            Ok(()) => self
+                .runtime_permissions
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .extend(missing.into_iter().map(str::to_string)),
+            Err(error) => {
+                rocket::error!("ignite: could not register runtime permissions: {error}")
+            }
+        }
     }
 }
 
@@ -133,6 +186,11 @@ impl Ignite {
             );
         }
 
+        // A runtime resource cannot take the slug of one of the panel's pages.
+        if let Err(error) = ignite_core::reserve_slugs(RESERVED_SLUGS) {
+            panic!("{error}: it is reserved for the panel's own routes");
+        }
+
         Ignite {
             database_url,
             mount: DEFAULT_MOUNT.to_string(),
@@ -151,8 +209,8 @@ impl Ignite {
     ///
     /// # Panics
     ///
-    /// Panics if another resource already uses the same slug, or if the slug is one
-    /// the panel reserves for its own routes, such as `profile` or `login`.
+    /// Panics if another resource, static or runtime, already uses the same slug, or if the
+    /// slug is one the panel reserves for its own routes, such as `profile` or `login`.
     pub fn resource<R: IgniteResource>(mut self) -> Self {
         assert!(
             !RESERVED_SLUGS.contains(&R::SLUG),
@@ -164,6 +222,10 @@ impl Ignite {
             "two Ignite resources use the slug `{}`",
             R::SLUG
         );
+        // A runtime resource registered later cannot take this slug.
+        if let Err(error) = ignite_core::reserve_slugs(&[R::SLUG]) {
+            panic!("{error}: a runtime resource has it, so the static resource cannot");
+        }
         self.resources.push(Arc::new(Adapter::<R>::new()));
         self
     }
@@ -262,6 +324,7 @@ impl Ignite {
                 trusted_proxies,
                 mailer,
                 app_url,
+                runtime_permissions: Mutex::new(HashSet::new()),
             };
             Ok(rocket
                 .manage(db)
