@@ -60,8 +60,8 @@ pub trait RuntimeData: Send + Sync + 'static {
     /// name, or check the value before it writes.
     fn create<'a>(&'a self, db: &'a Database, input: Row) -> RuntimeFuture<'a, Row>;
     /// Updates the row with `id` from the validated `input` and returns it. A key that is
-    /// missing from `input`, such as a password left blank, keeps its stored value. A key
-    /// whose value is `null` is an optional field the user cleared: store NULL, so the value
+    /// missing from `input`, such as a password left blank or a field the form did not send,
+    /// keeps its stored value. A key whose value is `null` is an optional field the user cleared: store NULL, so the value
     /// is cleared, as a static resource does. A unique violation is reported as for
     /// [`create`](Self::create).
     fn update<'a>(&'a self, db: &'a Database, id: i64, input: Row) -> RuntimeFuture<'a, Row>;
@@ -273,7 +273,10 @@ fn validate_fields(
             form.get(name)
         };
         let Some(text) = present else {
-            if !is_password || creating {
+            // On an update, a field the form did not send keeps its stored value, and a blank
+            // password keeps its hash. A field sent blank is cleared to NULL.
+            let keep = !creating && (is_password || !form.has(name));
+            if !keep {
                 row.insert(name.to_string(), Value::Null);
             }
             continue;
@@ -436,10 +439,16 @@ impl RegisteredResource {
     }
 
     /// Turns the submitted form into a [`Row`] for an update. It is
-    /// [`validate`](Self::validate), except that a blank password is not an error: the row
-    /// leaves its key out, so the stored password is kept. Any other blank field that is not
-    /// required is `null`, so clearing an optional field on the edit form clears the stored
-    /// value, as `#[derive(IgniteResource)]` does since 0.3.0.
+    /// [`validate`](Self::validate), except that:
+    ///
+    /// - a blank password is not an error: the row leaves its key out, so the stored
+    ///   password is kept;
+    /// - an optional field the form did not send at all ([`FormInput::has`] is false) is left
+    ///   out of the row, so its stored value is kept;
+    /// - an optional field sent blank is `null`, so clearing it on the edit form clears the
+    ///   stored value, as `#[derive(IgniteResource)]` does since 0.3.0;
+    /// - a checkbox the form did not send is `false`, because an unticked HTML checkbox sends
+    ///   nothing.
     pub fn validate_update(&self, form: &FormInput) -> Result<Row, FieldErrors> {
         validate_fields(&self.resource.fields, form, false)
     }

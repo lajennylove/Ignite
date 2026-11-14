@@ -181,6 +181,17 @@ fn the_derived_resource_creates_updates_and_deletes() {
         .body(with_token(&client, "name=Compass&price=8&note=North"))
         .dispatch();
     assert_eq!(updated.status(), Status::SeeOther);
+    let after = stored_gadget(3);
+    assert_eq!(after.price, 8);
+    assert_eq!(
+        after.due,
+        NaiveDate::from_ymd_opt(2026, 6, 30),
+        "an optional field the form did not send keeps its value"
+    );
+    assert!(
+        !after.active,
+        "a checkbox the form did not send is unticked, so false"
+    );
 
     let deleted = client
         .post("/admin/gadgets/3/delete")
@@ -469,4 +480,41 @@ fn a_field_that_is_not_optional_is_still_required_on_edit() {
     let after = stored_gadget(2);
     assert_eq!(after.name, "Beacon", "nothing is written");
     assert_eq!(after.note.as_deref(), Some("Bright"), "nothing is written");
+}
+
+#[test]
+fn an_optional_field_not_sent_on_edit_keeps_its_value_and_one_sent_blank_is_cleared() {
+    let _guard = setup();
+    let client = signed_in();
+
+    // `note` and `due` are not sent at all: both keep their values.
+    let response = client
+        .post("/admin/gadgets/2")
+        .header(ContentType::Form)
+        .body(with_token(&client, "name=Beacon&price=10"))
+        .dispatch();
+    assert_eq!(response.status(), Status::SeeOther);
+    let after = stored_gadget(2);
+    assert_eq!(after.price, 10);
+    assert_eq!(after.note.as_deref(), Some("Bright"), "not sent: kept");
+    assert_eq!(
+        after.due,
+        NaiveDate::from_ymd_opt(2026, 3, 1),
+        "not sent: kept"
+    );
+
+    // `note` sent blank is cleared; `due` still not sent is kept.
+    let response = client
+        .post("/admin/gadgets/2")
+        .header(ContentType::Form)
+        .body(with_token(&client, "name=Beacon&price=10&note="))
+        .dispatch();
+    assert_eq!(response.status(), Status::SeeOther);
+    let after = stored_gadget(2);
+    assert_eq!(after.note, None, "sent blank: NULL");
+    assert_eq!(
+        after.due,
+        NaiveDate::from_ymd_opt(2026, 3, 1),
+        "not sent: kept"
+    );
 }

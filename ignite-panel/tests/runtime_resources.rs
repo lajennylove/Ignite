@@ -437,8 +437,8 @@ fn pages_of_dune() -> Option<i64> {
         .pages
 }
 
-// A runtime resource writes NULL for a blank optional field on update; since 0.3.0 the derive
-// does too, so the two paths agree.
+// On update, an optional field the form did not send keeps its value, and one sent blank is
+// cleared to NULL. A runtime resource and a derived resource do the same, on the same row.
 #[test]
 fn a_cleared_optional_field_is_null_on_edit_for_runtime_and_derived_resources() {
     let _guard = reset_books();
@@ -447,28 +447,44 @@ fn a_cleared_optional_field_is_null_on_edit_for_runtime_and_derived_resources() 
     // The runtime path.
     let client = signed_in(None);
     register_runtime(books("cleared-books")).expect("register");
-    let response = client
+    let absent = client
+        .post("/admin/cleared-books/1")
+        .header(ContentType::Form)
+        .body(with_token(&client, "title=Dune"))
+        .dispatch()
+        .status();
+    let kept = pages_of_dune();
+    let blank = client
         .post("/admin/cleared-books/1")
         .header(ContentType::Form)
         .body(with_token(&client, "title=Dune&pages="))
-        .dispatch();
+        .dispatch()
+        .status();
     unregister_runtime("cleared-books").expect("unregister");
-    assert_eq!(response.status(), Status::SeeOther);
-    assert_eq!(pages_of_dune(), None, "the runtime resource writes NULL");
+    assert_eq!(absent, Status::SeeOther);
+    assert_eq!(kept, Some(412), "runtime: a field not sent keeps its value");
+    assert_eq!(blank, Status::SeeOther);
+    assert_eq!(pages_of_dune(), None, "runtime: a field sent blank is NULL");
 
     // The derived path, on the same row.
     test_db().exec("UPDATE runtime_books SET pages = 412 WHERE id = 1");
-    assert_eq!(pages_of_dune(), Some(412));
     let client = signed_in_with_derived_books();
+    let response = client
+        .post("/admin/runtime_books/1")
+        .header(ContentType::Form)
+        .body(with_token(&client, "title=Dune"))
+        .dispatch();
+    assert_eq!(response.status(), Status::SeeOther);
+    assert_eq!(
+        pages_of_dune(),
+        Some(412),
+        "derived: a field not sent keeps its value"
+    );
     let response = client
         .post("/admin/runtime_books/1")
         .header(ContentType::Form)
         .body(with_token(&client, "title=Dune&pages="))
         .dispatch();
     assert_eq!(response.status(), Status::SeeOther);
-    assert_eq!(
-        pages_of_dune(),
-        None,
-        "the derived resource writes NULL too"
-    );
+    assert_eq!(pages_of_dune(), None, "derived: a field sent blank is NULL");
 }

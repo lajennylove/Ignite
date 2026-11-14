@@ -290,6 +290,40 @@ fn an_invalid_form_returns_the_messages_of_the_static_checks() {
 }
 
 #[test]
+fn on_an_edit_a_field_not_sent_is_kept_and_one_sent_blank_is_null() {
+    let row = every_kind("rt-kinds-absent")
+        .validate_update(&form(&[
+            ("title", "Launch"),
+            ("seats", "40"),
+            ("status", "draft"),
+            ("body", ""),
+            ("day", "  "),
+        ]))
+        .expect("valid");
+    assert_eq!(row["body"], Value::Null, "sent blank: cleared");
+    assert_eq!(row["day"], Value::Null, "sent as spaces: cleared");
+    assert!(!row.contains_key("price"), "not sent: kept");
+    assert!(!row.contains_key("starts"), "not sent: kept");
+    assert_eq!(
+        row["public"],
+        json!(false),
+        "a checkbox not sent is unticked, so false"
+    );
+
+    // On create, a field not sent is null, as before.
+    let row = every_kind("rt-kinds-absent-create")
+        .validate(&form(&[
+            ("title", "Launch"),
+            ("seats", "40"),
+            ("status", "draft"),
+            ("secret", "hunter2"),
+        ]))
+        .expect("valid");
+    assert_eq!(row["price"], Value::Null);
+    assert_eq!(row["starts"], Value::Null);
+}
+
+#[test]
 fn a_blank_password_on_an_edit_keeps_the_stored_one() {
     let row = every_kind("rt-kinds-edit")
         .validate_update(&form(&[

@@ -1,11 +1,9 @@
 //! Derive macro for Ignite resources: `#[derive(IgniteResource)]`.
 //!
-//! The derive reads an Orbit model and writes the [`IgniteResource`] impl that
+//! The derive reads an Orbit model and writes the `ignite_core::IgniteResource` impl that
 //! the panel needs: the form fields, the list columns, the query methods, and
 //! the input struct that create and update take. The model must also derive
 //! `OrbitModel` and `Serialize`, because the derive does not write them.
-//!
-//! [`IgniteResource`]: https://docs.rs/ignite-core/latest/ignite_core/trait.IgniteResource.html
 
 use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
@@ -32,7 +30,7 @@ use syn::{
 /// - `options = load_choices`: a select whose choices come from an async function, `async fn(&Database) -> Result<Vec<(String, String)>, orbit_orm::Error>`, called each time the form is shown. The field must be a `String` or an integer.
 /// - `belongs_to = Category, display = name`: a relation. `Category` is the related model (an `OrbitModel`). The field stores the related row's key, the select lists the related table's rows by `display`, and the list shows that name. The field must be an `i32` or `i64`.
 /// - `step = "0.01"`: the browser's step for an `f32` or `f64` input. The default is `"any"`.
-/// - `required` or `required = false`: whether a blank value is rejected. Non-`Option` fields are required by default.
+/// - `required` or `required = false`: whether a blank value is rejected. An `Option` field is optional by default and `required` makes it required. A field that is not an `Option` is always required: `required = false` on it is a compile error (make it an `Option` instead). A `bool` is the exception: it is a checkbox and is never blank.
 /// - `searchable`, `sortable`: the list's search and sort columns.
 /// - `hidden_on_index`: leaves the column out of the list.
 ///
@@ -42,14 +40,20 @@ use syn::{
 /// or a select, by attribute); an `f32` or `f64` is a decimal input; a `NaiveDateTime` is a
 /// date-and-time input; a `bool` is a checkbox.
 ///
-/// Saving: create and update write every field. An `Option` field left blank is written as
-/// NULL, on update too, so a user clears an optional value by emptying it on the edit form
-/// (since 0.3.0; before, a blank optional field was skipped on update and kept its value). A
-/// password field is the exception: left blank on edit, it is not written, so the stored
-/// hash is kept. A field that is not an `Option` is required unless it says
-/// `required = false`, and a checkbox is never blank. Errors are keyed by the field's name
-/// in [`FieldErrors`](https://docs.rs/ignite-core/latest/ignite_core/type.FieldErrors.html),
-/// whose keys are owned `String`s since 0.3.0.
+/// Saving: create writes every field; an `Option` field left blank is NULL. Update writes
+/// every field the form sent: an `Option` field sent blank is written as NULL, so a user
+/// clears an optional value by emptying it on the edit form (since 0.3.0; before, a blank
+/// optional field was skipped on update and kept its value), and an `Option` field the form
+/// did not send at all is left out, so its stored value is kept. A password field is the
+/// exception: left blank on edit, it is not written, so the stored hash is kept. A checkbox
+/// is never blank: one the form did not send is `false`. A field that is not an `Option` is
+/// required. Errors are keyed by the field's name in `ignite_core::FieldErrors`, whose keys
+/// are owned `String`s since 0.3.0.
+///
+/// The generated input struct (`<Model>Input`) has a hidden `__ignite_sent` field that
+/// records which optional fields the form sent. `validate` and `validate_update` fill it;
+/// code that builds the input by hand sets it to the names of the optional fields to write
+/// (or to every optional field name, to write NULL for each `None`).
 #[proc_macro_derive(IgniteResource, attributes(ignite))]
 pub fn derive_ignite_resource(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
@@ -210,9 +214,22 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
             quote! { pub #ident: #ty }
         }
     });
+    // The optional fields whose absence from an update keeps the stored value: every
+    // `Option` that is not a password (a password has its own rule) or a checkbox (an
+    // unticked checkbox sends nothing, so absent means false).
+    let sent_names: Vec<String> = form_fields
+        .iter()
+        .filter(|f| tracks_sent(f))
+        .map(|f| f.ident.to_string())
+        .collect();
     let input_struct = quote! {
         #vis struct #input_name {
             #(#input_fields,)*
+            /// The optional fields the form sent, blank or not. An update writes NULL for an
+            /// optional field sent blank, and leaves out one that was not sent, so its stored
+            /// value is kept. Filled by `validate` and `validate_update`.
+            #[doc(hidden)]
+            pub __ignite_sent: ::std::vec::Vec<&'static str>,
         }
     };
 
@@ -314,8 +331,9 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
 
         impl #name {
             /// The columns that an insert (`creating`) or an update write, from the input.
-            /// An `Option` that is `None` is written as NULL, on an update too, so a cleared
-            /// optional field is cleared. A blank password is skipped on an update.
+            /// An `Option` that is `None` is written as NULL on create. On update it is written
+            /// as NULL when the form sent it blank, so a cleared optional field is cleared, and
+            /// skipped when the form did not send it. A blank password is skipped on update.
             #[doc(hidden)]
             #[allow(unused_mut)]
             fn __ignite_values(
@@ -339,9 +357,15 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
                 let _ = creating;
                 let mut errors = ::ignite_core::FieldErrors::new();
                 #(#validate_steps)*
+                let __ignite_optional: &[&'static str] = &[#(#sent_names),*];
+                let __ignite_sent: ::std::vec::Vec<&'static str> = __ignite_optional
+                    .iter()
+                    .copied()
+                    .filter(|name| form.has(name))
+                    .collect();
                 match (#(#validate_idents,)*) {
                     (#(#validate_patterns,)*) if errors.is_empty() => {
-                        ::core::result::Result::Ok(#input_name { #(#validate_idents,)* })
+                        ::core::result::Result::Ok(#input_name { #(#validate_idents,)* __ignite_sent })
                     }
                     _ => ::core::result::Result::Err(errors),
                 }
@@ -471,10 +495,12 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
 }
 
 /// One block of the generated `__ignite_values`: pushes the column of `field`. An `Option`
-/// that is `None` is written as NULL, on create and on update (since 0.3.0), so clearing an
-/// optional field on the edit form clears the stored value, as Laravel's `update` with a
-/// `null` attribute does. A password is the exception: a blank one is NULL on create and
-/// skipped on update, so the stored hash is kept.
+/// that is `None` is written as NULL on create. On update (since 0.3.0) it is written as NULL
+/// when the form sent it blank, so clearing an optional field on the edit form clears the
+/// stored value, and skipped when the form did not send it, so the stored value is kept, as
+/// Laravel's `update` with validated data leaves out a key the request did not have. A
+/// password is the exception: a blank one is NULL on create and skipped on update, so the
+/// stored hash is kept.
 fn value_step(field: &Field) -> TokenStream2 {
     let ident = &field.ident;
     let column = ident.to_string();
@@ -488,7 +514,18 @@ fn value_step(field: &Field) -> TokenStream2 {
                 ::core::option::Option::None => {}
             }
         }
+    } else if tracks_sent(field) {
+        quote! {
+            match &input.#ident {
+                ::core::option::Option::Some(x) => values.push((#column, #convert)),
+                ::core::option::Option::None if creating || input.__ignite_sent.contains(&#column) => {
+                    values.push((#column, ::orbit_orm::Value::Null))
+                }
+                ::core::option::Option::None => {}
+            }
+        }
     } else if field.optional {
+        // An optional checkbox: always Some, as an unticked box is false.
         quote! {
             match &input.#ident {
                 ::core::option::Option::Some(x) => values.push((#column, #convert)),
@@ -503,6 +540,12 @@ fn value_step(field: &Field) -> TokenStream2 {
             }
         }
     }
+}
+
+/// Whether an update keeps the stored value of `field` when the form does not send it: an
+/// `Option` that is neither a password nor a checkbox.
+fn tracks_sent(field: &Field) -> bool {
+    field.optional && !field.is_password && field.base != Base::Bool
 }
 
 /// The `Value` of a reference `x` to a field's base value.

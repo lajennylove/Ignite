@@ -19,17 +19,16 @@ All notable changes to Ignite are listed here. The format follows
    Reading is unchanged: `errors.get("price")` still takes a `&str`. The `Field::check_*`
    methods keep their signatures, and `#[derive(IgniteResource)]` needs no change.
 2. **The derive writes NULL when an optional field is cleared on edit.** An `Option` field
-   that a user leaves blank on the edit form is now saved as NULL, as on create. Before,
-   it was skipped and kept its stored value, so an optional field could never be cleared.
+   that the edit form sends blank is now saved as NULL, as on create. Before, it was
+   skipped and kept its stored value, so an optional field could never be cleared.
    Existing data changes when a user submits such a field blank: check forms whose
-   optional fields were left blank on purpose to keep a value. A password field is not
-   affected: left blank on edit, it still keeps the stored hash. Fields that are not
+   optional fields were left blank on purpose to keep a value. A field the request does
+   not send at all is not written, so its stored value is kept, as before: an app that
+   builds a `FormInput` itself, or posts a partial form, sees no change for the fields it
+   leaves out (`FormInput::has` tells the two apart). A password field is not affected:
+   left blank on edit, it still keeps the stored hash. A checkbox that is not sent is
+   `false`, as before, because an unticked HTML checkbox sends nothing. Fields that are not
    `Option` are unchanged and still required.
-3. **Runtime resource field names must be lowercase identifiers.** A `FieldDef` name must
-   be lowercase ASCII letters, digits and `_`, start with a letter, and be at most 64 bytes
-   (`MAX_FIELD_NAME`). `register_runtime` refuses any other name with
-   `RuntimeError::InvalidFieldName`. Rename such fields (and their columns and row keys)
-   before registering them.
 
 Everything else under Changed below has been on the main branch since 0.2.0 and is also
 breaking for an app on 0.2.0: the move from Diesel to Orbit (`orbit-orm`), the async
@@ -39,14 +38,10 @@ section covers the Orbit setup.
 ### Changed
 
 - `FieldErrors` is `HashMap<String, String>`. See the migration notes.
-- `#[derive(IgniteResource)]` writes NULL for a blank optional field on update, as a
-  runtime resource already did, so the two kinds of resource save a cleared field alike.
-  A blank password on update is still skipped.
-- Runtime resources keep their field names owned. The process-wide name interner (and its
-  `Box::leak`) is gone, so registering, editing and removing runtime resources keeps
-  nothing after a resource is removed. The 64-byte, lowercase-identifier field-name rule
-  stays, as validation.
-
+- `#[derive(IgniteResource)]` writes NULL for an optional field sent blank on update, and
+  leaves out one that the form did not send, as a runtime resource does, so the two kinds
+  of resource save a cleared field alike. A blank password on update is still skipped. The
+  generated input struct has a hidden `__ignite_sent` field for this.
 - Migrations run on Orbit (`orbit-orm`) instead of Diesel. `ignite migrate`, `ignite migrate:status`
   and `ignite migrate:rollback` keep their names. The migrations are recorded in Diesel's
   `__diesel_schema_migrations` table. The rows Diesel wrote are batch 0 and are not run again.
@@ -67,6 +62,14 @@ section covers the Orbit setup.
   writable columns `#[orbit(fillable)]`.
 - Connection failure at start stops the launch with an error. `Ignite::new()` reads the environment
   and no longer connects.
+- The derive's message for an unsupported field type lists the types it now supports.
+- A resource's number input still accepts any value in the browser, as before. The
+  server checks an integer as a whole number and a decimal as a number.
+- The last-super-admin rule counts only enabled users. A disabled super-admin cannot lose
+  the role while no enabled super-admin is left, and the last enabled one cannot be disabled.
+- An upgrade gives `super-admin` to every user who exists when the migration runs, so they
+  keep full access. A user created after the upgrade has no roles and sees no resource
+  until `ignite user role add` gives them one.
 
 ### Added
 
@@ -78,6 +81,12 @@ section covers the Orbit setup.
   `RuntimeError` (`InvalidSlug`, `SlugTaken`, `InvalidFieldName`, `DuplicateField`,
   `NotRegistered`). `ignite_panel::register_runtime_permissions` creates its five permissions
   at registration; without it, the panel creates them on the next signed-in request.
+  A field name must be a lowercase identifier: lowercase ASCII letters, digits and `_`,
+  starting with a letter, at most 64 bytes (`MAX_FIELD_NAME`); `register_runtime` refuses
+  any other with `RuntimeError::InvalidFieldName`. Field names are owned by their resource
+  and freed with it: no name is kept for the life of the process. On update, an optional
+  field sent blank is `null` in the row and one not sent is left out.
+- `FormInput::has`, which tells a field sent blank from one the form did not send.
 - Roles and permissions, modelled on Filament and Filament Shield. Each resource has the
   abilities `<slug>.viewAny`, `<slug>.view`, `<slug>.create`, `<slug>.update` and
   `<slug>.delete`, which the panel registers when the app starts. The routes answer 403
@@ -103,11 +112,12 @@ section covers the Orbit setup.
 - Static selects: `#[ignite(options = [("draft", "Draft"), ("published", "Published")])]` on
   a `String` field. A submitted value must be one of the choices.
 - Dynamic selects: `#[ignite(options = load_choices)]` on a `String` or integer field, where
-  `load_choices` is a function `fn(&mut MysqlConnection) -> QueryResult<Vec<(String, String)>>`
-  that the panel calls each time it shows the form. A new `IgniteResource::options` method
+  `load_choices` is an async function
+  `async fn(&Database) -> Result<Vec<(String, String)>, orbit_orm::Error>` that the panel
+  calls each time it shows the form. A new `IgniteResource::options` method
   returns the choices of a field by name, and the panel checks a submitted value against them.
-- Relation selects: `#[ignite(belongs_to = schema::categories, display = name)]` on an `i32`
-  or `i64` field stores the related row's `id`. The select lists the related rows by their
+- Relation selects: `#[ignite(belongs_to = Category, display = name)]`, where `Category` is
+  the related Orbit model, on an `i32` or `i64` field stores the related row's `id`. The select lists the related rows by their
   `display` column, and the list and the dashboard show that name in place of the id.
 - A select starts with a "Select an option" placeholder, so a submitted form never sends the
   first choice by accident. Profile selects show it too.
@@ -124,17 +134,6 @@ section covers the Orbit setup.
 - The migration `20261115000000_password_reset_tokens`, which adds the table
   `password_reset_tokens`. The token is stored as an argon2 hash.
 - A "Forgot password?" link on the sign-in page.
-
-### Changed
-
-- The derive's message for an unsupported field type lists the types it now supports.
-- A resource's number input still accepts any value in the browser, as before. The
-  server checks an integer as a whole number and a decimal as a number.
-- The last-super-admin rule counts only enabled users. A disabled super-admin cannot lose
-  the role while no enabled super-admin is left, and the last enabled one cannot be disabled.
-- An upgrade gives `super-admin` to every user who exists when the migration runs, so they
-  keep full access. A user created after the upgrade has no roles and sees no resource
-  until `ignite user role add` gives them one.
 
 
 ## [0.2.0] - 2026-11-09

@@ -21,6 +21,14 @@ impl FormInput {
             .filter(|value| !value.trim().is_empty())
     }
 
+    /// Returns true when the form sent the field `name` at all, even blank. A field that is
+    /// sent blank is one the user cleared; a field that is not sent is one the form does not
+    /// have, so an update keeps its stored value. An unticked HTML checkbox sends nothing, so
+    /// use [`checkbox`](Self::checkbox) for a checkbox, not this.
+    pub fn has(&self, name: &str) -> bool {
+        self.0.contains_key(name)
+    }
+
     /// Returns true when the checkbox `name` was ticked. An HTML checkbox
     /// sends `on` when ticked and nothing when not, so `on`, `1` and `true`
     /// (in any case) count as ticked.
@@ -90,5 +98,15 @@ mod tests {
         assert!(!input.checkbox("d"));
         assert!(!input.checkbox("e"));
         assert!(!input.checkbox("missing"));
+    }
+
+    #[test]
+    fn has_tells_a_blank_field_from_a_missing_one() {
+        let input = form(&[("name", "Ada"), ("note", "")]);
+
+        assert!(input.has("name"));
+        assert!(input.has("note"), "sent blank");
+        assert_eq!(input.get("note"), None);
+        assert!(!input.has("missing"));
     }
 }
