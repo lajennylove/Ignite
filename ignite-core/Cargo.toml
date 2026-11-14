@@ -2,6 +2,8 @@
 name = "ignite-core"
 version = "0.3.0"
 license = "MIT"
+description = "Core types for Ignite, the admin panel for Rocket.rs: resources, fields, forms and runtime resources."
+repository = "https://github.com/lajennylove/Ignite"
 edition = "2021"
 
 [dependencies]

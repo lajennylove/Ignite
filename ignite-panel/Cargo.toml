@@ -2,6 +2,8 @@
 name = "ignite-panel"
 version = "0.3.0"
 license = "MIT"
+description = "The Ignite admin panel for Rocket.rs, built on Propel views and Orbit."
+repository = "https://github.com/lajennylove/Ignite"
 edition = "2021"
 # Lets an app's build script read the views directory from DEP_IGNITE_PANEL_VIEWS_DIR.
 links = "ignite_panel"
