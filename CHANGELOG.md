@@ -63,7 +63,7 @@ All notable changes to Ignite are listed here. The format follows
   directory: `storage` in the working directory, or the path given to the new
   `Ignite::storage_dir`. The `user_avatars` table of the migration `20261111000000_profile`
   now has a `path` column (relative to the storage directory) instead of the MySQL-only
-  `data MEDIUMBLOB` and `mime`, so the migration has no database-specific SQL;
+  `data MEDIUMBLOB`, so the migration has no database-specific SQL;
   `users.avatar_mime` is the only record of the picture's type, and the panel serves the
   picture with it. Replacing a picture with one of another type, removing it, and deleting a
   user (`users::delete_user`, `ignite user delete`) remove the old file.

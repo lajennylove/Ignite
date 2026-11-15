@@ -177,6 +177,7 @@ impl AdminTheme for IgniteTheme {
 
 /// Why a theme could not be registered or chosen.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ThemeError {
     /// No theme is registered with this name.
     Unknown(String),

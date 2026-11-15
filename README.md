@@ -247,7 +247,7 @@ ignite user delete editor@example.com
 - The last enabled super-admin cannot be disabled, and a disabled super-admin does not count as one who keeps the panel open, so the role cannot be removed from the last enabled super-admin either.
 - `ignite user password` reads the new password the way `ignite user create` does: asked for twice in a terminal, or from standard input with `--password-stdin`. It ends the user's sessions, as the panel's change-password form does for other devices.
 - `ignite user delete` deletes a user. The last enabled super-admin cannot be deleted. An app's resource deletes a user with `users::delete_user(&db, id)`.
-- Deleting a user deletes their session rows and their picture row too, through the foreign keys, and removes their picture file from the storage directory after the delete commits. The sign-in throttle rows are keyed by email and address rather than by user, and they expire after one minute, so they need no cleanup.
+- Deleting a user deletes their session rows in the same transaction, before the user's row, so they go on every database, SQLite included, where the sessions table has no foreign key to the users. Their picture row and role rows go through the foreign keys, and their picture file is removed from the storage directory after the delete commits. The sign-in throttle rows are keyed by email and address rather than by user, and they expire after one minute, so they need no cleanup.
 
 ### User lifecycle callbacks
 
