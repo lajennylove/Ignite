@@ -15,7 +15,7 @@
 
 mod common;
 
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use common::{database_url, LOCK};
 use ignite_panel::{migrate, migration_status, pending_migrations, rollback};
@@ -107,12 +107,20 @@ fn on_sqlite(_db: &Database) -> bool {
 async fn migrate_check_and_roll_back(db: &Database) {
     clean(db).await;
 
+    // Before the first migrate everything is pending, and reading that writes nothing.
+    assert_status(db, false).await;
+    assert!(
+        !table_exists(db, "__diesel_schema_migrations").await,
+        "the status is read-only: no migrations table is created"
+    );
+
     let applied = migrate(db).await.expect("migrate");
     assert_eq!(applied, NAMES, "every migration runs, in order");
     assert!(
         migrate(db).await.expect("migrate again").is_empty(),
         "a second run applies nothing"
     );
+    assert_status(db, true).await;
     for table in TABLES {
         assert!(table_exists(db, table).await, "{table} exists");
     }
@@ -257,18 +265,49 @@ async fn migrate_check_and_roll_back(db: &Database) {
         assert!(!table_exists(db, table).await, "{table} is gone");
     }
     assert!(rollback(db).await.expect("rollback again").is_empty());
+    assert_status(db, false).await;
 
     clean(db).await;
 }
 
-/// Runs the `ignite` binary on `url`.
-fn ignite(url: &str, args: &[&str]) -> (i32, String) {
-    let output = Command::new(env!("CARGO_BIN_EXE_ignite"))
+/// `migration_status` lists every migration with `applied`, and `pending_migrations` lists
+/// all of them when none is applied, or none when all are.
+async fn assert_status(db: &Database, applied: bool) {
+    let status = migration_status(db).await.expect("migration_status");
+    assert_eq!(
+        status,
+        NAMES
+            .iter()
+            .map(|name| (name.to_string(), applied))
+            .collect::<Vec<_>>()
+    );
+    let pending = pending_migrations(db).await.expect("pending_migrations");
+    if applied {
+        assert!(pending.is_empty(), "{pending:?}");
+    } else {
+        assert_eq!(pending, NAMES);
+    }
+}
+
+/// Runs the `ignite` binary on `url`, with `stdin` as its standard input.
+fn ignite_with(url: &str, args: &[&str], stdin: &str) -> (i32, String) {
+    use std::io::Write;
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ignite"))
         .args(args)
         .env("DATABASE_URL", url)
         .current_dir(std::env::temp_dir())
-        .output()
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .expect("run the ignite binary");
+    child
+        .stdin
+        .take()
+        .expect("stdin")
+        .write_all(stdin.as_bytes())
+        .expect("write stdin");
+    let output = child.wait_with_output().expect("wait for ignite");
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
     let stderr = String::from_utf8_lossy(&output.stderr);
     (
@@ -277,10 +316,41 @@ fn ignite(url: &str, args: &[&str]) -> (i32, String) {
     )
 }
 
+/// Runs the `ignite` binary on `url`, with nothing on standard input.
+fn ignite(url: &str, args: &[&str]) -> (i32, String) {
+    ignite_with(url, args, "")
+}
+
+/// `ignite migrate:status` lists every migration as `state`.
+fn assert_cli_status(url: &str, state: &str) {
+    let (code, out) = ignite(url, &["migrate:status"]);
+    assert_eq!(code, 0, "{out}");
+    for name in NAMES {
+        assert!(out.contains(&format!("{state:<8} {name}")), "{out}");
+    }
+}
+
+/// `ignite user create` for `email`, with the password on standard input.
+fn create_user(url: &str, email: &str) -> (i32, String) {
+    ignite_with(
+        url,
+        &["user", "create", "--email", email, "--password-stdin"],
+        "a-long-password\n",
+    )
+}
+
 /// `ignite migrate` applies every migration, then nothing, and `ignite migrate:rollback`
-/// reverts them, on the database at `url`, which `db` is connected to.
+/// reverts them, on the database at `url`, which `db` is connected to. `ignite
+/// migrate:status` follows along, and `ignite user create` is refused until the migrations
+/// have run. Creating the user afterwards is checked on MySQL only, where the panel's runtime
+/// SQL runs.
 fn cli_migrate_and_roll_back(rt: &Runtime, db: &Database, url: &str) {
     rt.block_on(clean(db));
+
+    assert_cli_status(url, "Pending");
+    let (code, out) = create_user(url, "cli-user@example.test");
+    assert_eq!(code, 1, "{out}");
+    assert!(out.contains("Run `ignite migrate` first."), "{out}");
 
     let (code, out) = ignite(url, &["migrate"]);
     assert_eq!(code, 0, "{out}");
@@ -293,6 +363,12 @@ fn cli_migrate_and_roll_back(rt: &Runtime, db: &Database, url: &str) {
     for table in TABLES {
         assert!(rt.block_on(table_exists(db, table)), "{table} exists");
     }
+    assert_cli_status(url, "Applied");
+    if db.driver() == Driver::MySql {
+        let (code, out) = create_user(url, "cli-user@example.test");
+        assert_eq!(code, 0, "{out}");
+        assert!(out.contains("Created user #"), "{out}");
+    }
 
     let (code, out) = ignite(url, &["migrate:rollback"]);
     assert_eq!(code, 0, "{out}");
@@ -303,6 +379,7 @@ fn cli_migrate_and_roll_back(rt: &Runtime, db: &Database, url: &str) {
     for table in TABLES {
         assert!(!rt.block_on(table_exists(db, table)), "{table} is gone");
     }
+    assert_cli_status(url, "Pending");
 
     rt.block_on(clean(db));
 }
@@ -381,6 +458,16 @@ fn an_install_from_the_old_sql_is_not_migrated_twice_and_rolls_back() {
         assert!(
             migrate(&db).await.expect("migrate").is_empty(),
             "nothing runs twice"
+        );
+        assert_eq!(
+            count(
+                &db,
+                "SELECT COUNT(*) FROM users WHERE email = 'old@example.test'",
+                &[]
+            )
+            .await,
+            1,
+            "the existing user is kept"
         );
         let status = migration_status(&db).await.expect("status");
         assert_eq!(

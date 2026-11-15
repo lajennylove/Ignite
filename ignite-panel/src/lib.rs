@@ -29,8 +29,7 @@ mod views;
 
 use std::collections::HashSet;
 
-use orbit_orm::__sqlx as sqlx;
-use orbit_orm::{Database, Error as OrbitError, Migrator};
+use orbit_orm::{raw, Database, Driver, Error as OrbitError, Migrator};
 
 pub use csrf::{CsrfForm, CsrfToken};
 pub use embedded::EmbeddedViews;
@@ -128,39 +127,46 @@ pub async fn migration_status(db: &Database) -> Result<Vec<(String, bool)>, Orbi
 
 /// Reverts the most recently applied batch of the panel's migrations, running the down
 /// statements of each in reverse order, and returns the names it reverted, last first. A batch
-/// is the set of migrations that one `migrate` run applied. The history that Diesel recorded is batch 0, so
-/// the rollback that reaches it reverts those migrations too. Other migrations in the same
-/// database are not touched. Returns nothing when no migration of the panel is applied.
+/// is the set of migrations that one `migrate` run applied. The history that Diesel recorded
+/// is batch 0, so the rollback that reaches it reverts those migrations too. Other migrations
+/// in the same database are not touched. Returns nothing when no migration of the panel is applied.
 pub async fn rollback(db: &Database) -> Result<Vec<String>, OrbitError> {
     let migrator = migrator()?;
     migrator.rollback(db).await
 }
 
-/// The names of the migrations that are applied. It reads only.
+/// The names of the migrations that are applied. It reads only: unlike Orbit's
+/// `Migrator::status`, it does not create the migrations table.
 async fn applied_names(db: &Database, migrator: &Migrator) -> Result<HashSet<String>, OrbitError> {
     if !table_exists(db, MIGRATIONS_TABLE).await? {
         return Ok(HashSet::new());
     }
-    let versions: Vec<String> =
-        sqlx::query_scalar("SELECT version FROM __diesel_schema_migrations")
-            .fetch_all(db.pool())
-            .await?;
+    let versions: Vec<(String,)> =
+        raw::fetch_all(db, "SELECT version FROM __diesel_schema_migrations", &[]).await?;
     Ok(migrator
         .migrations()
         .iter()
-        .filter(|migration| versions.iter().any(|v| v == &migration.name[..14]))
+        .filter(|migration| versions.iter().any(|(v,)| v == &migration.name[..14]))
         .map(|migration| migration.name.clone())
         .collect())
 }
 
-/// Whether a table of the connected database exists. Reads `information_schema` only.
+/// Whether a table of the connected database exists. Reads the database's catalog only:
+/// `information_schema` on MySQL and PostgreSQL, `sqlite_master` on SQLite.
 async fn table_exists(db: &Database, table: &str) -> Result<bool, OrbitError> {
-    let count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM information_schema.tables \
-         WHERE table_schema = DATABASE() AND table_name = ?",
-    )
-    .bind(table)
-    .fetch_one(db.pool())
-    .await?;
+    let sql = match db.driver() {
+        Driver::MySql => {
+            "SELECT COUNT(*) FROM information_schema.tables \
+             WHERE table_schema = DATABASE() AND table_name = ?"
+        }
+        #[cfg(feature = "postgres")]
+        Driver::Postgres => {
+            "SELECT COUNT(*) FROM information_schema.tables \
+             WHERE table_schema = current_schema() AND table_name = ?"
+        }
+        #[cfg(feature = "sqlite")]
+        Driver::Sqlite => "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?",
+    };
+    let count: i64 = raw::fetch_scalar(db, sql, &[table.into()]).await?;
     Ok(count > 0)
 }

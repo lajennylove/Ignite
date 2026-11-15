@@ -199,7 +199,7 @@ fn rollback_reverts_the_last_batch_and_migrate_restores_it() {
         out.contains("reverted 20261115000000_password_reset_tokens."),
         "stdout: {out}"
     );
-    assert!(!index_exists(&conn), "down.sql dropped the index");
+    assert!(!index_exists(&conn), "the down migration dropped the index");
     assert!(
         !version_recorded(&conn),
         "the record of the migration is removed"

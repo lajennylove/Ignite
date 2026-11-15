@@ -2,9 +2,12 @@
 //! with `Schema::create` and `Blueprint`. Each migration renders the SQL of the connected
 //! database when it runs, so the same set serves SQLite, MySQL and MariaDB, and PostgreSQL.
 //!
-//! One module per migration, named after it. A migration's name never changes: Orbit records
-//! it in `__diesel_schema_migrations`, so an install that ran the earlier SQL files has the
-//! same history and nothing runs twice. The names of indexes, uniques and foreign keys are
+//! One module per migration, named after it. Orbit records only the 14-digit version at the
+//! start of a migration's name (`20261108000000` for `20261108000000_create_users`) in
+//! `__diesel_schema_migrations`, and matches applied migrations by it. The version of a
+//! released migration must never change, or an install would run it again; keep the whole
+//! name unchanged too. An install that ran the earlier SQL files therefore has the same
+//! history, and nothing runs twice. The names of indexes, uniques and foreign keys are
 //! those of the earlier SQL too, so a rollback finds them on an existing install.
 //!
 //! A new migration gets its own module and goes at the end of [`all`].

@@ -4,7 +4,7 @@
 //!   Run it as a deploy step, before the first start. The app never migrates on boot.
 //! - `ignite migrate:status` lists each migration as Applied or Pending.
 //! - `ignite migrate:rollback` reverts the most recently applied batch, the migrations that
-//!   one `ignite migrate` applied, each with its `down.sql`, last first.
+//!   one `ignite migrate` applied, each with its down migration, last first.
 //! - `ignite user create --email <email> [--name <name>]` creates a user. It does not
 //!   migrate: when migrations are pending it stops and says to run `ignite migrate`.
 //! - `ignite role create <name>` creates a role.
