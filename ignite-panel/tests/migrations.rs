@@ -8,6 +8,10 @@
 //! find nothing to run, report everything applied, and roll that schema back by the names of
 //! its indexes and keys. The old files are fixtures in `tests/fixtures/migrations/`.
 //!
+//! SQLite also deletes users through the panel's functions and `ignite user delete`, which
+//! must delete the sessions themselves: SQLite cannot add `sessions_user_fk` to the existing
+//! sessions table.
+//!
 //! The databases come from the environment only: `DATABASE_URL` (MySQL or MariaDB, as the
 //! other tests), `IGNITE_TEST_POSTGRES_URL` and `IGNITE_TEST_SQLITE_URL`. The PostgreSQL and
 //! SQLite tests build with the `postgres` and `sqlite` features, and skip with a notice when
@@ -567,4 +571,108 @@ fn the_migrations_run_and_roll_back_on_sqlite() {
     assert_eq!(db.driver(), Driver::Sqlite);
     rt.block_on(migrate_check_and_roll_back(&db));
     cli_migrate_and_roll_back(&rt, &db, &url);
+}
+
+/// Deleting a user on SQLite deletes their sessions too. SQLite has no `sessions_user_fk`
+/// (it cannot add a foreign key to an existing table), so the panel deletes them itself, in
+/// `users::delete_user`, in `authz::delete_user` and in the `ignite user delete` command.
+#[cfg(feature = "sqlite")]
+#[test]
+fn deleting_a_user_deletes_their_sessions_on_sqlite() {
+    let Ok(url) = std::env::var("IGNITE_TEST_SQLITE_URL") else {
+        eprintln!("skipped: set IGNITE_TEST_SQLITE_URL to delete users on SQLite");
+        return;
+    };
+    // The user callbacks are process-wide: none of another test's may run here.
+    let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    ignite_panel::users::flush_callbacks();
+    let rt = runtime();
+    let db = rt
+        .block_on(Database::connect(&url))
+        .expect("connect to IGNITE_TEST_SQLITE_URL");
+    assert_eq!(db.driver(), Driver::Sqlite);
+    rt.block_on(async {
+        clean(&db).await;
+        migrate(&db).await.expect("migrate");
+
+        let mut ids = Vec::new();
+        for name in ["ann", "bob", "cat", "dan"] {
+            let email = format!("{name}@example.test");
+            exec(
+                &db,
+                "INSERT INTO users (name, email, password_hash) VALUES (?, ?, 'x')",
+                &[name.into(), email.as_str().into()],
+            )
+            .await;
+            let id = count(&db, "SELECT id FROM users WHERE email = ?", &[email.into()]).await;
+            exec(
+                &db,
+                "INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, '2099-01-01 00:00:00')",
+                &[format!("session-{name}").into(), id.into()],
+            )
+            .await;
+            ids.push(id);
+        }
+        let (ann, bob, cat, dan) = (ids[0], ids[1], ids[2], ids[3]);
+        // A picture row, so the delete reads its path; no file exists, which does not fail it.
+        exec(
+            &db,
+            "INSERT INTO user_avatars (user_id, path) VALUES (?, 'avatars/ignite-sqlite-test-missing.png')",
+            &[ann.into()],
+        )
+        .await;
+        let sessions_of = |id: i64| {
+            let db = &db;
+            async move {
+                count(
+                    db,
+                    "SELECT COUNT(*) FROM sessions WHERE user_id = ?",
+                    &[id.into()],
+                )
+                .await
+            }
+        };
+
+        let deleted = ignite_panel::users::delete_user(&db, ann)
+            .await
+            .expect("users::delete_user on SQLite");
+        assert_eq!(deleted, 1);
+        assert_eq!(sessions_of(ann).await, 0, "Ann's sessions go with her");
+        assert_eq!(
+            count(&db, "SELECT COUNT(*) FROM users WHERE id = ?", &[ann.into()]).await,
+            0
+        );
+        assert_eq!(
+            count(
+                &db,
+                "SELECT COUNT(*) FROM user_avatars WHERE user_id = ?",
+                &[ann.into()]
+            )
+            .await,
+            0
+        );
+        assert_eq!(sessions_of(bob).await, 1, "Bob's session stays");
+        assert_eq!(sessions_of(cat).await, 1, "Cat's session stays");
+
+        ignite_panel::authz::delete_user(&db, "bob@example.test")
+            .await
+            .expect("authz::delete_user (ignite user delete) on SQLite");
+        assert_eq!(sessions_of(bob).await, 0, "Bob's sessions go with him");
+        assert_eq!(
+            count(&db, "SELECT COUNT(*) FROM users WHERE id = ?", &[bob.into()]).await,
+            0
+        );
+        assert_eq!(sessions_of(cat).await, 1, "Cat's session stays");
+
+        let (code, out) = ignite(&url, &["user", "delete", "cat@example.test"]);
+        assert_eq!(code, 0, "{out}");
+        assert_eq!(sessions_of(cat).await, 0, "Cat's sessions go with her");
+        assert_eq!(
+            count(&db, "SELECT COUNT(*) FROM users WHERE id = ?", &[cat.into()]).await,
+            0
+        );
+        assert_eq!(sessions_of(dan).await, 1, "Dan's session stays");
+
+        clean(&db).await;
+    });
 }

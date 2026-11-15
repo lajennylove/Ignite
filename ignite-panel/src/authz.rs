@@ -375,13 +375,14 @@ pub async fn delete_user(db: &Database, email: &str) -> Result<(), AuthzError> {
     let user = find_user(db, email).await?;
     let picture = db
         .transaction(async |tx| {
-            // The same lock as `remove_role`, so two changes to the super-admins cannot both pass.
-            raw::execute(
-                &mut *tx,
-                "SELECT id FROM roles WHERE name = ? FOR UPDATE",
-                &[SUPER_ADMIN.into()],
-            )
-            .await?;
+            // The same lock as `remove_role`, so two changes to the super-admins cannot both
+            // pass. Orbit's lock is portable: SQLite has no row locks, so it is left out there.
+            Role::query()
+                .where_eq("name", SUPER_ADMIN)
+                .select(&["id"])
+                .for_update()
+                .get_as::<(i64,)>(&mut *tx)
+                .await?;
             if user.disabled_at.is_none()
                 && is_super_admin(&mut *tx, user.id).await?
                 && enabled_super_admins_besides(&mut *tx, user.id).await? == 0

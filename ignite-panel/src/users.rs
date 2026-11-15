@@ -492,14 +492,15 @@ pub(crate) async fn delete_in(
     tx: &mut Transaction,
     id: i64,
 ) -> Result<(u64, Option<String>), Error> {
-    // Locking the row means two deletes of one user cannot both run the callbacks.
-    let found: Vec<(i64,)> = raw::fetch_all(
-        &mut *tx,
-        "SELECT id FROM users WHERE id = ? FOR UPDATE",
-        &[id.into()],
-    )
-    .await?;
-    if found.is_empty() {
+    // Locking the row means two deletes of one user cannot both run the callbacks. SQLite has
+    // no row locks, so Orbit leaves the clause out there, as Laravel's SQLite grammar does.
+    let found: Option<(i64,)> = User::query()
+        .where_eq("id", id)
+        .select(&["id"])
+        .for_update()
+        .first_as(&mut *tx)
+        .await?;
+    if found.is_none() {
         return Ok((0, None));
     }
     let picture = avatar_path(&mut *tx, id).await?;
