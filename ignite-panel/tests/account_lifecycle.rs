@@ -291,6 +291,72 @@ fn deleting_a_user_deletes_their_session_rows() {
     );
 }
 
+/// Drops `sessions_user_fk` while it lives, the way a SQLite install has no session key, and
+/// adds it back when dropped, so the rollback in the next `reset` finds the key to drop.
+struct WithoutSessionKey<'a>(&'a TestDb);
+
+impl<'a> WithoutSessionKey<'a> {
+    fn new(conn: &'a TestDb) -> Self {
+        conn.exec("ALTER TABLE sessions DROP FOREIGN KEY sessions_user_fk");
+        WithoutSessionKey(conn)
+    }
+}
+
+impl Drop for WithoutSessionKey<'_> {
+    fn drop(&mut self) {
+        // A failed test may leave rows whose user is gone, and the key refuses them.
+        self.0
+            .exec("DELETE FROM sessions WHERE user_id NOT IN (SELECT id FROM users)");
+        self.0.exec(
+            "ALTER TABLE sessions ADD CONSTRAINT sessions_user_fk \
+             FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE",
+        );
+    }
+}
+
+/// Signs in Ada and the test user, and returns their ids.
+fn ada_and_admin_signed_in(conn: &TestDb) -> (i64, i64) {
+    assert_eq!(sign_in(&client(None), ADA, ADA_PASSWORD), Status::SeeOther);
+    assert_eq!(sign_in(&client(None), EMAIL, PASSWORD), Status::SeeOther);
+    let (ada_id, admin_id) = (user_id(conn, ADA), user_id(conn, EMAIL));
+    assert_eq!(sessions_of(conn, ada_id), 1);
+    assert_eq!(sessions_of(conn, admin_id), 1);
+    (ada_id, admin_id)
+}
+
+#[test]
+fn deleting_a_user_deletes_their_sessions_without_the_session_key() {
+    let (_guard, conn) = reset_with_ada();
+    let (ada_id, admin_id) = ada_and_admin_signed_in(&conn);
+    let _no_key = WithoutSessionKey::new(&conn);
+
+    assert_eq!(conn.run(users::delete_user(&conn.db, ada_id)).unwrap(), 1);
+
+    assert_eq!(
+        sessions_of(&conn, ada_id),
+        0,
+        "the sessions go with the user"
+    );
+    assert_eq!(sessions_of(&conn, admin_id), 1, "other users keep theirs");
+}
+
+#[test]
+fn deleting_a_user_from_the_command_library_deletes_their_sessions_without_the_session_key() {
+    let (_guard, conn) = reset_with_ada();
+    let (ada_id, admin_id) = ada_and_admin_signed_in(&conn);
+    let _no_key = WithoutSessionKey::new(&conn);
+
+    conn.run(authz::delete_user(&conn.db, ADA))
+        .expect("delete Ada");
+
+    assert_eq!(
+        sessions_of(&conn, ada_id),
+        0,
+        "the sessions go with the user"
+    );
+    assert_eq!(sessions_of(&conn, admin_id), 1, "other users keep theirs");
+}
+
 const PNG: &[u8] = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR";
 
 /// Gives Ada a picture through a panel that stores files in the test's storage directory, and

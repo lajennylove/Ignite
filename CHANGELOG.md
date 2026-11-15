@@ -77,8 +77,9 @@ All notable changes to Ignite are listed here. The format follows
   unchanged, so an existing install's history matches and nothing runs twice; on MySQL and
   MariaDB they build the same tables as before. On SQLite the `sessions_user_fk` key of
   `20261114000000_account_lifecycle` is not created, because SQLite cannot add a foreign key
-  to an existing table. `ignite migrate:status`, and the pending-migrations check of the
-  other commands, read the migrations table on all three databases too. The panel's runtime
+  to an existing table; `users::delete_user` and `ignite user delete` delete the user's
+  sessions themselves, so they go with the user there too. `ignite migrate:status`, and the
+  pending-migrations check of the other commands, read the migrations table on all three databases too. The panel's runtime
   queries still need MySQL or MariaDB.
 - **Breaking:** `FieldKind` and `FieldKindDef` have new variants, so an exhaustive `match`
   on them needs new arms.

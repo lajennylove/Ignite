@@ -467,14 +467,14 @@ pub async fn create_user(
 }
 
 /// Deletes the user with `id` and returns the number of rows deleted: 0 when there is no such
-/// user, and then no callback runs. Their sessions, roles and picture row go with them,
-/// through the foreign keys. Their picture file is removed after the transaction commits; a
-/// file that is missing or cannot be removed does not fail the delete.
+/// user, and then no callback runs. Their sessions are deleted with them, and their roles and
+/// picture row go through the foreign keys. Their picture file is removed after the
+/// transaction commits; a file that is missing or cannot be removed does not fail the delete.
 ///
 /// In one transaction, the app's [`on_user_deleting`](crate::Ignite::on_user_deleting)
-/// callbacks run first, while the user's row still exists, so they can read the user and
-/// remove or reassign the app's rows that refer to it; then the row is deleted; then the
-/// [`on_user_deleted`](crate::Ignite::on_user_deleted) callbacks run. Each kind runs in the
+/// callbacks run first, while the user's row and sessions still exist, so they can read the
+/// user and remove or reassign the app's rows that refer to it; then the sessions and the row
+/// are deleted; then the [`on_user_deleted`](crate::Ignite::on_user_deleted) callbacks run. Each kind runs in the
 /// order it was registered. When any callback returns an error, nothing is deleted and the
 /// error is returned.
 ///
@@ -508,6 +508,10 @@ pub(crate) async fn delete_in(
     for callback in &callbacks.deleting {
         callback(id, &mut *tx).await?;
     }
+    // A SQLite install has no `sessions_user_fk` (SQLite cannot add a key to an existing
+    // table), so the sessions are deleted here, not left to the key. After the deleting
+    // callbacks, which see the user as it was, and before the user's row.
+    sessions::delete_for_user(&mut *tx, id).await?;
     let deleted = User::query().where_eq("id", id).delete(&mut *tx).await?;
     for callback in &callbacks.deleted {
         callback(id, &mut *tx).await?;
