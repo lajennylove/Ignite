@@ -93,6 +93,30 @@ async fn table_exists(db: &Database, table: &str) -> bool {
     count(db, sql, &[table.into()]).await > 0
 }
 
+/// The columns of `user_avatars`: the picture's type is `users.avatar_mime` only.
+const AVATAR_COLUMNS: [&str; 2] = ["user_id", "path"];
+
+/// The column names of `table`, in order, read from the connected database's catalog.
+async fn columns(db: &Database, table: &str) -> Vec<String> {
+    let sql = match db.driver() {
+        Driver::MySql => {
+            "SELECT CAST(column_name AS CHAR) FROM information_schema.columns \
+             WHERE table_schema = DATABASE() AND table_name = ? ORDER BY ordinal_position"
+        }
+        #[cfg(feature = "postgres")]
+        Driver::Postgres => {
+            "SELECT CAST(column_name AS TEXT) FROM information_schema.columns \
+             WHERE table_schema = current_schema() AND table_name = ? ORDER BY ordinal_position"
+        }
+        #[cfg(feature = "sqlite")]
+        Driver::Sqlite => "SELECT name FROM pragma_table_info(?) ORDER BY cid",
+    };
+    let rows: Vec<(String,)> = raw::fetch_all(db, sql, &[table.into()])
+        .await
+        .unwrap_or_else(|e| panic!("the columns of {table}: {e}"));
+    rows.into_iter().map(|(name,)| name).collect()
+}
+
 #[cfg(feature = "sqlite")]
 fn on_sqlite(db: &Database) -> bool {
     db.driver() == Driver::Sqlite
@@ -124,6 +148,7 @@ async fn migrate_check_and_roll_back(db: &Database) {
     for table in TABLES {
         assert!(table_exists(db, table).await, "{table} exists");
     }
+    assert_eq!(columns(db, "user_avatars").await, AVATAR_COLUMNS);
 
     // A user, with the defaults of the users table.
     exec(
@@ -166,7 +191,7 @@ async fn migrate_check_and_roll_back(db: &Database) {
     .await;
     exec(
         db,
-        "INSERT INTO user_avatars (user_id, path, mime) VALUES (?, 'avatars/1.png', 'image/png')",
+        "INSERT INTO user_avatars (user_id, path) VALUES (?, 'avatars/1.png')",
         &[ann.into()],
     )
     .await;
@@ -498,23 +523,7 @@ fn an_install_from_the_old_sql_is_not_migrated_twice_and_rolls_back() {
         // The new migrations build the same tables as the old SQL did.
         assert_eq!(migrate(&db).await.expect("migrate").len(), 9);
         assert_eq!(create_statements(&db, &compared).await, old);
-        let avatar_columns: Vec<(String,)> = raw::fetch_all(
-            &db,
-            "SELECT CAST(column_name AS CHAR) FROM information_schema.columns \
-             WHERE table_schema = DATABASE() AND table_name = 'user_avatars' \
-             ORDER BY ordinal_position",
-            &[],
-        )
-        .await
-        .expect("the avatar columns");
-        assert_eq!(
-            avatar_columns,
-            vec![
-                ("user_id".to_owned(),),
-                ("path".to_owned(),),
-                ("mime".to_owned(),)
-            ]
-        );
+        assert_eq!(columns(&db, "user_avatars").await, AVATAR_COLUMNS);
 
         clean(&db).await;
     });

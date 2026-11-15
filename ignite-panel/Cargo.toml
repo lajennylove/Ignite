@@ -8,10 +8,8 @@ edition = "2021"
 # Lets an app's build script read the views directory from DEP_IGNITE_PANEL_VIEWS_DIR.
 links = "ignite_panel"
 
-# The database drivers, forwarded to Orbit. MySQL and MariaDB are the default.
+# The database drivers beside MySQL and MariaDB, which Orbit always builds, forwarded to it.
 [features]
-default = ["mysql"]
-mysql = ["orbit-orm/mysql"]
 postgres = ["orbit-orm/postgres"]
 sqlite = ["orbit-orm/sqlite"]
 

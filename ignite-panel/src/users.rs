@@ -54,7 +54,7 @@ pub struct User {
 }
 
 /// A row of the `user_avatars` table, one for each user who has a profile picture: the path
-/// of its file, relative to the storage directory, and its type. See
+/// of its file, relative to the storage directory. Its type is [`User::avatar_mime`]. See
 /// `src/migrations/profile.rs`.
 #[derive(Debug, Clone, OrbitModel)]
 #[orbit(table = "user_avatars", primary_key = "user_id")]
@@ -64,8 +64,6 @@ struct UserAvatar {
     user_id: i64,
     #[orbit(fillable)]
     path: String,
-    #[orbit(fillable)]
-    mime: String,
 }
 
 /// The themes a user can choose.
@@ -171,15 +169,16 @@ pub async fn email_taken<'a>(
 ///
 /// The picture is a file in the storage directory (see
 /// [`Ignite::storage_dir`](crate::Ignite::storage_dir)), `avatars/<id>.<extension>`; the
-/// `user_avatars` row keeps that path, relative to the directory, and the type. The picture
-/// is first written to a temporary file in the `avatars` folder. Then the row and
-/// [`User::avatar_mime`] are written in one transaction. When the transaction fails, only the
-/// temporary file is removed, so the earlier picture is kept. After the commit, the temporary
-/// file is renamed into place and an earlier file with another extension is removed. If that
-/// rename fails, the error is logged and returned and the temporary file is removed; the row
-/// already names the new file, so the panel serves the earlier picture when it had the same
-/// extension, and otherwise finds none (404), until the user saves one again. A crash between the write and
-/// the rename can leave a `.tmp` file in the folder.
+/// `user_avatars` row keeps that path, relative to the directory, and [`User::avatar_mime`]
+/// keeps the type. The picture is first written to a temporary file in the `avatars` folder.
+/// Then the row and [`User::avatar_mime`] are written in one transaction. When the
+/// transaction fails, only the temporary file is removed, so the earlier picture is kept.
+/// After the commit, the temporary file is renamed into place and an earlier file with another
+/// extension is removed. If that rename fails, the error is logged and returned and the
+/// temporary file is removed; the row already names the new file, so the panel serves the
+/// earlier picture when it had the same extension, and otherwise finds none (404), until the
+/// user saves one again. A crash between the write and the rename can leave a `.tmp` file in
+/// the folder.
 pub async fn set_avatar(db: &Database, id: i64, mime: &str, data: &[u8]) -> Result<(), Error> {
     let extension = crate::profile::picture_extension(mime).ok_or_else(|| {
         io_error(io::Error::new(
@@ -202,11 +201,7 @@ pub async fn set_avatar(db: &Database, id: i64, mime: &str, data: &[u8]) -> Resu
             UserAvatar::query()
                 .replace(
                     &mut *tx,
-                    &[
-                        ("user_id", id.into()),
-                        ("path", path.as_str().into()),
-                        ("mime", mime.into()),
-                    ],
+                    &[("user_id", id.into()), ("path", path.as_str().into())],
                 )
                 .await?;
             User::query()
@@ -261,16 +256,20 @@ pub async fn remove_avatar(db: &Database, id: i64) -> Result<(), Error> {
     Ok(())
 }
 
-/// The profile picture of the user with `id`: its type and its bytes, read from its file, if
-/// there is one. A stored path that is absolute or leaves the storage directory is refused,
-/// as is a file that is missing: both are `None`.
+/// The profile picture of the user with `id`: its type, from [`User::avatar_mime`], and its
+/// bytes, read from its file, if there is one. A user without a type has no picture. A stored
+/// path that is absolute or leaves the storage directory is refused, as is a file that is
+/// missing: both are `None`.
 pub async fn avatar(db: &Database, id: i64) -> Result<Option<(String, Vec<u8>)>, Error> {
-    let row: Option<(String, String)> = UserAvatar::query()
-        .where_eq("user_id", id)
-        .select(&["path", "mime"])
-        .first_as(db)
-        .await?;
-    let Some((path, mime)) = row else {
+    let row: Option<(String, Option<String>)> = raw::fetch_all(
+        db,
+        "SELECT user_avatars.path, users.avatar_mime FROM user_avatars \
+         JOIN users ON users.id = user_avatars.user_id WHERE user_avatars.user_id = ?",
+        &[id.into()],
+    )
+    .await?
+    .pop();
+    let Some((path, Some(mime))) = row else {
         return Ok(None);
     };
     let Some(file) = storage_file(&path) else {
@@ -474,9 +473,9 @@ pub async fn create_user(
 /// In one transaction, the app's [`on_user_deleting`](crate::Ignite::on_user_deleting)
 /// callbacks run first, while the user's row and sessions still exist, so they can read the
 /// user and remove or reassign the app's rows that refer to it; then the sessions and the row
-/// are deleted; then the [`on_user_deleted`](crate::Ignite::on_user_deleted) callbacks run. Each kind runs in the
-/// order it was registered. When any callback returns an error, nothing is deleted and the
-/// error is returned.
+/// are deleted; then the [`on_user_deleted`](crate::Ignite::on_user_deleted) callbacks run.
+/// Each kind runs in the order it was registered. When any callback returns an error, nothing
+/// is deleted and the error is returned.
 ///
 /// It does not check roles. `ignite user delete` refuses the last enabled super-admin.
 pub async fn delete_user(db: &Database, id: i64) -> Result<u64, Error> {

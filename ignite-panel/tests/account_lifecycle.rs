@@ -425,7 +425,7 @@ fn the_stock_command_removes_the_picture_from_the_default_storage_directory() {
     let file = work.join(format!("storage/avatars/{ada_id}.png"));
     std::fs::write(&file, PNG).unwrap();
     conn.exec_with(
-        "INSERT INTO user_avatars (user_id, path, mime) VALUES (?, ?, 'image/png')",
+        "INSERT INTO user_avatars (user_id, path) VALUES (?, ?)",
         &[
             ada_id.into(),
             format!("avatars/{ada_id}.png").as_str().into(),

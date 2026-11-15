@@ -4,12 +4,10 @@ use orbit_orm::schema::{self, Action};
 use orbit_orm::Migration;
 
 /// The picture's type on the user (NULL when the user keeps their initials), and the values
-/// of the fields the app adds, as a JSON object. The picture itself is a file in the panel's
-/// storage directory, as WordPress keeps uploads on disk: its own table keeps the file's path,
-/// relative to the storage directory (such as `avatars/42.png`), and its type.
-///
-/// Installs that ran this migration before avatars moved to disk have a `data` blob column in
-/// `user_avatars` instead of `path` and `mime`; the rollback drops the table either way.
+/// of the fields the app adds, as a JSON object. `users.avatar_mime` is the only record of the
+/// picture's type. The picture itself is a file in the panel's storage directory, as WordPress
+/// keeps uploads on disk: its own table keeps the file's path, relative to the storage
+/// directory (such as `avatars/42.png`).
 pub(super) fn migration() -> Migration {
     Migration::schema(
         "20261111000000_profile",
@@ -21,7 +19,6 @@ pub(super) fn migration() -> Migration {
             schema::create_if_not_exists("user_avatars", |t| {
                 t.big_integer("user_id").primary();
                 t.string("path");
-                t.string("mime").length(32);
                 t.foreign("user_id")
                     .references("users", "id")
                     .on_delete(Action::Cascade)

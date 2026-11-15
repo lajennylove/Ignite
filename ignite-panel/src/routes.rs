@@ -742,8 +742,8 @@ async fn remove_avatar(
 }
 
 /// The signed-in user's picture, read from its file in the storage directory and served with
-/// the type it was stored with. A missing file, or a stored path that leaves the storage
-/// directory, is 404.
+/// the type on the user (`users.avatar_mime`). A missing file or type, or a stored path that
+/// leaves the storage directory, is 404.
 #[get("/profile/avatar")]
 async fn avatar(
     session: AdminUser,

@@ -62,13 +62,12 @@ All notable changes to Ignite are listed here. The format follows
   its uploads. They are written to `avatars/<user id>.<png|jpg|webp>` in the panel's storage
   directory: `storage` in the working directory, or the path given to the new
   `Ignite::storage_dir`. The `user_avatars` table of the migration `20261111000000_profile`
-  now has `path` (relative to the storage directory) and `mime` columns instead of the
-  MySQL-only `data MEDIUMBLOB`, so the migration has no database-specific SQL. Replacing a
-  picture with one of another type, removing it, and deleting a user (`users::delete_user`,
-  `ignite user delete`) remove the old file. `users::flush_storage_dir` restores the default
-  directory. **Existing installs:** the migration is not run again on a database that has
-  it, and no data migration is provided; move each `user_avatars.data` blob to its file and
-  change the table to the new columns by hand before upgrading.
+  now has a `path` column (relative to the storage directory) instead of the MySQL-only
+  `data MEDIUMBLOB` and `mime`, so the migration has no database-specific SQL;
+  `users.avatar_mime` is the only record of the picture's type, and the panel serves the
+  picture with it. Replacing a picture with one of another type, removing it, and deleting a
+  user (`users::delete_user`, `ignite user delete`) remove the old file.
+  `users::flush_storage_dir` restores the default directory.
 - The panel's nine migrations are written with Orbit's schema builder, in
   `ignite-panel/src/migrations/`, instead of the MySQL `up.sql` and `down.sql` files in
   `ignite-panel/migrations/`, which are gone. `ignite migrate` and `migrate:rollback` now run
@@ -79,8 +78,8 @@ All notable changes to Ignite are listed here. The format follows
   `20261114000000_account_lifecycle` is not created, because SQLite cannot add a foreign key
   to an existing table; `users::delete_user` and `ignite user delete` delete the user's
   sessions themselves, so they go with the user there too. `ignite migrate:status`, and the
-  pending-migrations check of the other commands, read the migrations table on all three databases too. The panel's runtime
-  queries still need MySQL or MariaDB.
+  pending-migrations check of the other commands, read the migrations table on all three
+  databases too. The panel's runtime queries still need MySQL or MariaDB.
 - **Breaking:** `FieldKind` and `FieldKindDef` have new variants, so an exhaustive `match`
   on them needs new arms.
 - **Breaking:** `AuthzError` has a new variant, `CannotDeleteLastSuperAdmin`.

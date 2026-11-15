@@ -18,12 +18,14 @@ fn test_user_id() -> i64 {
         .id
 }
 
-/// The `user_avatars` row of the user with `id`: its path and its type.
-fn avatar_row(id: i64) -> Option<(String, String)> {
+/// The `user_avatars` row of the user with `id`, with the picture's type from
+/// `users.avatar_mime`, its only source: its path and its type.
+fn avatar_row(id: i64) -> Option<(String, Option<String>)> {
     let conn = common::test_db();
-    conn.run(orbit_orm::raw::fetch_all::<(String, String)>(
+    conn.run(orbit_orm::raw::fetch_all::<(String, Option<String>)>(
         &conn.db,
-        "SELECT path, mime FROM user_avatars WHERE user_id = ?",
+        "SELECT a.path, u.avatar_mime FROM user_avatars a JOIN users u ON u.id = a.user_id \
+         WHERE a.user_id = ?",
         &[id.into()],
     ))
     .expect("read the avatar row")
@@ -226,7 +228,7 @@ fn a_picture_is_stored_shown_and_removed() {
     assert_eq!(std::fs::read(&file).expect("the picture is on disk"), PNG);
     assert_eq!(
         avatar_row(id),
-        Some((format!("avatars/{id}.png"), "image/png".to_string()))
+        Some((format!("avatars/{id}.png"), Some("image/png".to_string())))
     );
 
     let served = client.get("/admin/profile/avatar?v=1").dispatch();
@@ -272,7 +274,7 @@ fn a_picture_of_another_type_replaces_the_file() {
     assert_eq!(std::fs::read(&jpg).expect("the new file"), JPEG);
     assert_eq!(
         avatar_row(id),
-        Some((format!("avatars/{id}.jpg"), "image/jpeg".to_string()))
+        Some((format!("avatars/{id}.jpg"), Some("image/jpeg".to_string())))
     );
     let served = client.get("/admin/profile/avatar?v=2").dispatch();
     assert_eq!(served.status(), Status::Ok);
@@ -286,6 +288,34 @@ fn a_picture_of_another_type_replaces_the_file() {
 }
 
 #[test]
+fn the_picture_is_served_with_the_type_on_the_user() {
+    let _guard = reset();
+    let client = signed_in(None);
+    let id = test_user_id();
+    upload(&client, PNG);
+
+    // `users.avatar_mime` is the only record of the type, so the route serves what it says.
+    let conn = common::test_db();
+    conn.exec_with(
+        "UPDATE users SET avatar_mime = 'image/webp' WHERE id = ?",
+        &[id.into()],
+    );
+    let served = client.get("/admin/profile/avatar?v=2").dispatch();
+    assert_eq!(served.status(), Status::Ok);
+    assert_eq!(served.content_type(), Some(ContentType::WEBP));
+
+    // Without a type on the user there is no picture to serve.
+    conn.exec_with(
+        "UPDATE users SET avatar_mime = NULL WHERE id = ?",
+        &[id.into()],
+    );
+    assert_eq!(
+        client.get("/admin/profile/avatar?v=3").dispatch().status(),
+        Status::NotFound
+    );
+}
+
+#[test]
 fn a_failed_save_keeps_the_earlier_picture() {
     let _guard = reset();
     let client = signed_in(None);
@@ -293,9 +323,9 @@ fn a_failed_save_keeps_the_earlier_picture() {
     upload(&client, PNG);
     let file = storage_dir().join(format!("avatars/{id}.png"));
 
-    // The row cannot be written while its `mime` column is missing, so the transaction fails.
+    // The row cannot be written while its `path` column is missing, so the transaction fails.
     let conn = common::test_db();
-    conn.exec("ALTER TABLE user_avatars CHANGE mime mime_gone VARCHAR(32) NOT NULL");
+    conn.exec("ALTER TABLE user_avatars CHANGE path path_gone VARCHAR(255) NOT NULL");
     let other_png: Vec<u8> = [PNG, b"another picture"].concat();
     let token = common::csrf_token(&client);
     let (header, body) = picture_upload(&token, &other_png);
@@ -304,7 +334,7 @@ fn a_failed_save_keeps_the_earlier_picture() {
         .header(header)
         .body(body)
         .dispatch();
-    conn.exec("ALTER TABLE user_avatars CHANGE mime_gone mime VARCHAR(32) NOT NULL");
+    conn.exec("ALTER TABLE user_avatars CHANGE path_gone path VARCHAR(255) NOT NULL");
     assert_eq!(response.status(), Status::InternalServerError);
 
     assert_eq!(
