@@ -1,5 +1,6 @@
 //! The `users` table the panel signs in with: its schema, argon2 password
-//! hashes, profile pictures, and the lookups the login and the CLI need.
+//! hashes, profile pictures (files in the storage directory), and the lookups the login and
+//! the CLI need.
 //!
 //! [`create_user`] and [`delete_user`] are the only ways Ignite creates and deletes a user,
 //! from the panel, the CLI or an app's resource. Each runs the app's lifecycle callbacks,
@@ -9,11 +10,15 @@
 //! writes the user, so the app's own rows are written or removed with it.
 
 use std::future::Future;
+use std::io;
+use std::path::{Component, Path, PathBuf};
 use std::pin::Pin;
 use std::sync::{Arc, PoisonError, RwLock};
 
 use chrono::{NaiveDateTime, Utc};
 use orbit_orm::{raw, Database, Error, Executor, Model, Operator, OrbitModel, Transaction, Value};
+use rand_core::{OsRng, RngCore};
+use rocket::tokio::fs;
 
 use crate::sessions;
 
@@ -48,7 +53,8 @@ pub struct User {
     pub disabled_at: Option<NaiveDateTime>,
 }
 
-/// A row of the `user_avatars` table, one for each user who has a profile picture. See
+/// A row of the `user_avatars` table, one for each user who has a profile picture: the path
+/// of its file, relative to the storage directory, and its type. See
 /// `migrations/20261111000000_profile`.
 #[derive(Debug, Clone, OrbitModel)]
 #[orbit(table = "user_avatars", primary_key = "user_id")]
@@ -57,7 +63,9 @@ struct UserAvatar {
     #[orbit(fillable)]
     user_id: i64,
     #[orbit(fillable)]
-    data: Vec<u8>,
+    path: String,
+    #[orbit(fillable)]
+    mime: String,
 }
 
 /// The themes a user can choose.
@@ -158,56 +166,165 @@ pub async fn email_taken<'a>(
         .await
 }
 
-/// Stores the profile picture of the user with `id`, replacing any earlier one.
+/// Stores the profile picture of the user with `id`, replacing any earlier one. `mime` is one
+/// of the types the panel accepts: "image/png", "image/jpeg" or "image/webp".
+///
+/// The picture is a file in the storage directory (see
+/// [`Ignite::storage_dir`](crate::Ignite::storage_dir)), `avatars/<id>.<extension>`; the
+/// `user_avatars` row keeps that path, relative to the directory, and the type. The file is
+/// written under a temporary name and renamed into place, then the row and
+/// [`User::avatar_mime`] are written in one transaction. When the transaction fails, the new
+/// file is removed. After it commits, an earlier file with another extension is removed.
 pub async fn set_avatar(db: &Database, id: i64, mime: &str, data: &[u8]) -> Result<(), Error> {
-    db.transaction(async |tx| {
-        UserAvatar::query()
-            .replace(
-                &mut *tx,
-                &[("user_id", id.into()), ("data", data.to_vec().into())],
-            )
-            .await?;
-        User::query()
-            .where_eq("id", id)
-            .update(&mut *tx, &[("avatar_mime", mime.into())])
-            .await?;
-        Ok::<(), Error>(())
-    })
-    .await
+    let extension = crate::profile::picture_extension(mime).ok_or_else(|| {
+        io_error(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("a profile picture cannot be of type {mime}"),
+        ))
+    })?;
+    let path = format!("{AVATARS}/{id}.{extension}");
+    let storage = storage_dir();
+    let folder = storage.join(AVATARS);
+    fs::create_dir_all(&folder).await.map_err(io_error)?;
+    let temporary = folder.join(format!(".{id}.{:016x}.tmp", OsRng.next_u64()));
+    if let Err(error) = fs::write(&temporary, data).await {
+        let _ = fs::remove_file(&temporary).await;
+        return Err(io_error(error));
+    }
+    let file = storage.join(&path);
+    if let Err(error) = fs::rename(&temporary, &file).await {
+        let _ = fs::remove_file(&temporary).await;
+        return Err(io_error(error));
+    }
+
+    let saved = db
+        .transaction(async |tx| {
+            let earlier = avatar_path(&mut *tx, id).await?;
+            UserAvatar::query()
+                .replace(
+                    &mut *tx,
+                    &[
+                        ("user_id", id.into()),
+                        ("path", path.as_str().into()),
+                        ("mime", mime.into()),
+                    ],
+                )
+                .await?;
+            User::query()
+                .where_eq("id", id)
+                .update(&mut *tx, &[("avatar_mime", mime.into())])
+                .await?;
+            Ok::<_, Error>(earlier)
+        })
+        .await;
+    match saved {
+        Ok(earlier) => {
+            if let Some(earlier) = earlier.filter(|earlier| *earlier != path) {
+                remove_avatar_file(&earlier).await;
+            }
+            Ok(())
+        }
+        Err(error) => {
+            remove_avatar_file(&path).await;
+            Err(error)
+        }
+    }
 }
 
-/// Removes the profile picture of the user with `id`. The initials show again.
+/// Removes the profile picture of the user with `id`. The initials show again. The row and
+/// [`User::avatar_mime`] are cleared in one transaction, then the file is removed.
 pub async fn remove_avatar(db: &Database, id: i64) -> Result<(), Error> {
-    db.transaction(async |tx| {
-        UserAvatar::query()
-            .where_eq("user_id", id)
-            .delete(&mut *tx)
-            .await?;
-        User::query()
-            .where_eq("id", id)
-            .update(&mut *tx, &[("avatar_mime", Value::Null)])
-            .await?;
-        Ok::<(), Error>(())
-    })
-    .await
+    let path = db
+        .transaction(async |tx| {
+            let path = avatar_path(&mut *tx, id).await?;
+            UserAvatar::query()
+                .where_eq("user_id", id)
+                .delete(&mut *tx)
+                .await?;
+            User::query()
+                .where_eq("id", id)
+                .update(&mut *tx, &[("avatar_mime", Value::Null)])
+                .await?;
+            Ok::<_, Error>(path)
+        })
+        .await?;
+    if let Some(path) = path {
+        remove_avatar_file(&path).await;
+    }
+    Ok(())
 }
 
-/// The profile picture of the user with `id`: its type and its bytes, if there is one.
+/// The profile picture of the user with `id`: its type and its bytes, read from its file, if
+/// there is one. A stored path that is absolute or leaves the storage directory is refused,
+/// as is a file that is missing: both are `None`.
 pub async fn avatar(db: &Database, id: i64) -> Result<Option<(String, Vec<u8>)>, Error> {
-    let mime: Option<(Option<String>,)> = User::query()
-        .where_eq("id", id)
-        .select(&["avatar_mime"])
+    let row: Option<(String, String)> = UserAvatar::query()
+        .where_eq("user_id", id)
+        .select(&["path", "mime"])
         .first_as(db)
         .await?;
-    let Some((Some(mime),)) = mime else {
+    let Some((path, mime)) = row else {
         return Ok(None);
     };
-    let data: Option<(Vec<u8>,)> = UserAvatar::query()
+    let Some(file) = storage_file(&path) else {
+        return Ok(None);
+    };
+    match fs::read(&file).await {
+        Ok(bytes) => Ok(Some((mime, bytes))),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(io_error(error)),
+    }
+}
+
+/// The folder of the storage directory that holds the profile pictures.
+const AVATARS: &str = "avatars";
+
+/// The stored path of the picture of the user with `id`, if they have one.
+async fn avatar_path(tx: &mut Transaction, id: i64) -> Result<Option<String>, Error> {
+    let row: Option<(String,)> = UserAvatar::query()
         .where_eq("user_id", id)
-        .select(&["data"])
-        .first_as(db)
+        .select(&["path"])
+        .first_as(&mut *tx)
         .await?;
-    Ok(data.map(|(data,)| (mime, data)))
+    Ok(row.map(|(path,)| path))
+}
+
+/// The file at `path` in the storage directory. `None` when `path` is absolute or has a part
+/// such as `..`, so a stored path never reaches a file outside the directory.
+fn storage_file(path: &str) -> Option<PathBuf> {
+    let relative = Path::new(path);
+    let inside = !path.is_empty()
+        && !path.contains("..")
+        && relative
+            .components()
+            .all(|part| matches!(part, Component::Normal(_)));
+    inside.then(|| storage_dir().join(relative))
+}
+
+/// Removes the picture file at the stored `path`. The row is already gone, so a failure is
+/// logged and not returned; a file that is already missing is not a failure.
+async fn remove_avatar_file(path: &str) {
+    let Some(file) = storage_file(path) else {
+        rocket::warn!(
+            "ignite: not removing the picture at {path}: it is outside the storage directory"
+        );
+        return;
+    };
+    match fs::remove_file(&file).await {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => {
+            rocket::warn!(
+                "ignite: could not remove the picture {}: {error}",
+                file.display()
+            )
+        }
+    }
+}
+
+/// Turns a file error into a database error, so the callers have one error type.
+fn io_error(error: io::Error) -> Error {
+    Error::Database(orbit_orm::__sqlx::Error::Io(error))
 }
 
 pub use ignite_core::{hash_password, verify_password};
@@ -265,6 +382,37 @@ pub fn flush_callbacks() {
     install_callbacks(UserCallbacks::default());
 }
 
+/// The storage directory when no builder sets one: `storage` in the working directory, as
+/// Laravel's `storage/`.
+pub(crate) const DEFAULT_STORAGE_DIR: &str = "storage";
+
+/// The directory the panel keeps its files in, set by the builder's
+/// [`storage_dir`](crate::Ignite::storage_dir). Process-wide, as [`CALLBACKS`] is, because
+/// [`delete_user`] removes the user's picture with only a [`Database`]. `None` is the default.
+static STORAGE_DIR: RwLock<Option<PathBuf>> = RwLock::new(None);
+
+/// Makes `dir` the storage directory, replacing any set before. Called by the builder when the
+/// panel is built and when the app runs its command line.
+pub(crate) fn install_storage_dir(dir: PathBuf) {
+    *STORAGE_DIR.write().unwrap_or_else(PoisonError::into_inner) = Some(dir);
+}
+
+/// Restores the default storage directory, `storage` in the working directory, until a
+/// builder sets its own again. The setting is process-wide, so a test suite that builds panels
+/// with their own directory calls it, as it calls [`flush_callbacks`].
+pub fn flush_storage_dir() {
+    *STORAGE_DIR.write().unwrap_or_else(PoisonError::into_inner) = None;
+}
+
+/// The storage directory in use now.
+fn storage_dir() -> PathBuf {
+    STORAGE_DIR
+        .read()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone()
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_STORAGE_DIR))
+}
+
 /// A copy of the callbacks that run now. No lock is held while they run.
 fn callbacks() -> UserCallbacks {
     CALLBACKS
@@ -309,8 +457,9 @@ pub async fn create_user(
 }
 
 /// Deletes the user with `id` and returns the number of rows deleted: 0 when there is no such
-/// user, and then no callback runs. Their sessions, roles and profile picture go with them,
-/// through the foreign keys.
+/// user, and then no callback runs. Their sessions, roles and picture row go with them,
+/// through the foreign keys. Their picture file is removed after the transaction commits; a
+/// file that is missing or cannot be removed does not fail the delete.
 ///
 /// In one transaction, the app's [`on_user_deleting`](crate::Ignite::on_user_deleting)
 /// callbacks run first, while the user's row still exists, so they can read the user and
@@ -321,12 +470,19 @@ pub async fn create_user(
 ///
 /// It does not check roles. `ignite user delete` refuses the last enabled super-admin.
 pub async fn delete_user(db: &Database, id: i64) -> Result<u64, Error> {
-    db.transaction(async |tx| delete_in(tx, id).await).await
+    let (deleted, picture) = db.transaction(async |tx| delete_in(tx, id).await).await?;
+    remove_picture_of_deleted(picture).await;
+    Ok(deleted)
 }
 
 /// [`delete_user`] inside a transaction the caller already has, so a command can check and
-/// delete in one transaction.
-pub(crate) async fn delete_in(tx: &mut Transaction, id: i64) -> Result<u64, Error> {
+/// delete in one transaction. Returns the number of rows deleted and the stored path of the
+/// user's picture, read before the delete; the caller passes it to
+/// [`remove_picture_of_deleted`] once the transaction has committed.
+pub(crate) async fn delete_in(
+    tx: &mut Transaction,
+    id: i64,
+) -> Result<(u64, Option<String>), Error> {
     // Locking the row means two deletes of one user cannot both run the callbacks.
     let found: Vec<(i64,)> = raw::fetch_all(
         &mut *tx,
@@ -335,8 +491,9 @@ pub(crate) async fn delete_in(tx: &mut Transaction, id: i64) -> Result<u64, Erro
     )
     .await?;
     if found.is_empty() {
-        return Ok(0);
+        return Ok((0, None));
     }
+    let picture = avatar_path(&mut *tx, id).await?;
     let callbacks = callbacks();
     for callback in &callbacks.deleting {
         callback(id, &mut *tx).await?;
@@ -345,7 +502,15 @@ pub(crate) async fn delete_in(tx: &mut Transaction, id: i64) -> Result<u64, Erro
     for callback in &callbacks.deleted {
         callback(id, &mut *tx).await?;
     }
-    Ok(deleted)
+    Ok((deleted, picture))
+}
+
+/// Removes the picture file of a user whose delete has committed, given the path
+/// [`delete_in`] returned.
+pub(crate) async fn remove_picture_of_deleted(picture: Option<String>) {
+    if let Some(path) = picture {
+        remove_avatar_file(&path).await;
+    }
 }
 
 /// Turns a hashing failure into a database error, so the callers have one error type.

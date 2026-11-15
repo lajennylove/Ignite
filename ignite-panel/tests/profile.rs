@@ -2,10 +2,45 @@
 
 mod common;
 
-use common::{reset, signed_in, with_token, PASSWORD};
+use common::{reset, signed_in, storage_dir, with_token, EMAIL, PASSWORD};
 use rocket::http::{ContentType, Header, Status};
+use rocket::local::blocking::Client;
 
 const PNG: &[u8] = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR";
+const JPEG: &[u8] = b"\xFF\xD8\xFF\xE0\0\x10JFIF";
+
+/// The id of the test user.
+fn test_user_id() -> i64 {
+    let conn = common::test_db();
+    conn.run(ignite_panel::users::find_by_email(&conn.db, EMAIL))
+        .expect("read the test user")
+        .expect("the test user exists")
+        .id
+}
+
+/// The `user_avatars` row of the user with `id`: its path and its type.
+fn avatar_row(id: i64) -> Option<(String, String)> {
+    let conn = common::test_db();
+    conn.run(orbit_orm::raw::fetch_all::<(String, String)>(
+        &conn.db,
+        "SELECT path, mime FROM user_avatars WHERE user_id = ?",
+        &[id.into()],
+    ))
+    .expect("read the avatar row")
+    .pop()
+}
+
+/// Uploads `file` as the signed-in user's picture.
+fn upload(client: &Client, file: &[u8]) {
+    let token = common::csrf_token(client);
+    let (header, body) = picture_upload(&token, file);
+    let response = client
+        .post("/admin/profile/avatar")
+        .header(header)
+        .body(body)
+        .dispatch();
+    assert_eq!(response.status(), Status::SeeOther);
+}
 
 /// A multipart body with the token and one picture, and its Content-Type header.
 fn picture_upload(token: &str, file: &[u8]) -> (Header<'static>, Vec<u8>) {
@@ -184,6 +219,16 @@ fn a_picture_is_stored_shown_and_removed() {
         .dispatch();
     assert_eq!(response.status(), Status::SeeOther);
 
+    // The file is on disk, named from the user's id; the row keeps its path, relative to the
+    // storage directory, and its type.
+    let id = test_user_id();
+    let file = storage_dir().join(format!("avatars/{id}.png"));
+    assert_eq!(std::fs::read(&file).expect("the picture is on disk"), PNG);
+    assert_eq!(
+        avatar_row(id),
+        Some((format!("avatars/{id}.png"), "image/png".to_string()))
+    );
+
     let served = client.get("/admin/profile/avatar?v=1").dispatch();
     assert_eq!(served.status(), Status::Ok);
     assert_eq!(served.content_type(), Some(ContentType::PNG));
@@ -209,6 +254,65 @@ fn a_picture_is_stored_shown_and_removed() {
         client.get("/admin/profile/avatar?v=2").dispatch().status(),
         Status::NotFound
     );
+    assert!(!file.exists(), "removing the picture removes its file");
+    assert_eq!(avatar_row(id), None);
+}
+
+#[test]
+fn a_picture_of_another_type_replaces_the_file() {
+    let _guard = reset();
+    let client = signed_in(None);
+    let id = test_user_id();
+    upload(&client, PNG);
+    upload(&client, JPEG);
+
+    let png = storage_dir().join(format!("avatars/{id}.png"));
+    let jpg = storage_dir().join(format!("avatars/{id}.jpg"));
+    assert!(!png.exists(), "the old file is removed");
+    assert_eq!(std::fs::read(&jpg).expect("the new file"), JPEG);
+    assert_eq!(
+        avatar_row(id),
+        Some((format!("avatars/{id}.jpg"), "image/jpeg".to_string()))
+    );
+    let served = client.get("/admin/profile/avatar?v=2").dispatch();
+    assert_eq!(served.status(), Status::Ok);
+    assert_eq!(served.content_type(), Some(ContentType::JPEG));
+    assert_eq!(served.into_bytes().unwrap(), JPEG);
+    let names: Vec<_> = std::fs::read_dir(storage_dir().join("avatars"))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .collect();
+    assert_eq!(names, [format!("{id}.jpg")], "no temporary file is left");
+}
+
+#[test]
+fn a_stored_path_outside_the_storage_directory_is_not_served() {
+    let _guard = reset();
+    let client = signed_in(None);
+    let id = test_user_id();
+    upload(&client, PNG);
+
+    // A file next to the storage directory, which a path with `..` would reach.
+    let outside = format!("ignite-test-outside-{}.png", std::process::id());
+    let outside_file = storage_dir().parent().unwrap().join(&outside);
+    std::fs::write(&outside_file, PNG).unwrap();
+    let conn = common::test_db();
+    for path in [
+        format!("../{outside}"),
+        format!("avatars/../../{outside}"),
+        outside_file.to_string_lossy().into_owned(),
+    ] {
+        conn.exec_with(
+            "UPDATE user_avatars SET path = ? WHERE user_id = ?",
+            &[path.as_str().into(), id.into()],
+        );
+        assert_eq!(
+            client.get("/admin/profile/avatar?v=1").dispatch().status(),
+            Status::NotFound,
+            "{path} is refused"
+        );
+    }
+    std::fs::remove_file(outside_file).unwrap();
 }
 
 #[test]

@@ -291,6 +291,93 @@ fn deleting_a_user_deletes_their_session_rows() {
     );
 }
 
+const PNG: &[u8] = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR";
+
+/// Gives Ada a picture through a panel that stores files in the test's storage directory, and
+/// returns her id and the picture's file.
+fn ada_with_a_picture(conn: &TestDb) -> (i64, std::path::PathBuf) {
+    // Building the panel makes its storage directory the process's.
+    let _panel = client(None);
+    let ada_id = user_id(conn, ADA);
+    conn.run(users::set_avatar(&conn.db, ada_id, "image/png", PNG))
+        .expect("store Ada's picture");
+    let file = storage_dir().join(format!("avatars/{ada_id}.png"));
+    assert!(file.exists(), "the picture is on disk");
+    (ada_id, file)
+}
+
+#[test]
+fn deleting_a_user_removes_their_picture_file() {
+    let (_guard, conn) = reset_with_ada();
+    let (ada_id, file) = ada_with_a_picture(&conn);
+
+    assert_eq!(conn.run(users::delete_user(&conn.db, ada_id)).unwrap(), 1);
+
+    assert!(!file.exists(), "the file goes with the user");
+    assert_eq!(
+        conn.count(
+            "SELECT COUNT(*) FROM user_avatars WHERE user_id = ?",
+            &[ada_id.into()]
+        ),
+        0
+    );
+}
+
+#[test]
+fn deleting_a_user_from_the_command_library_removes_their_picture_file() {
+    let (_guard, conn) = reset_with_ada();
+    let (_, file) = ada_with_a_picture(&conn);
+
+    conn.run(authz::delete_user(&conn.db, ADA))
+        .expect("delete Ada");
+
+    assert!(!file.exists(), "the file goes with the user");
+}
+
+#[test]
+fn deleting_a_user_whose_picture_file_is_missing_is_not_an_error() {
+    let (_guard, conn) = reset_with_ada();
+    let (ada_id, file) = ada_with_a_picture(&conn);
+    std::fs::remove_file(&file).unwrap();
+
+    assert_eq!(conn.run(users::delete_user(&conn.db, ada_id)).unwrap(), 1);
+    assert_eq!(
+        conn.count("SELECT COUNT(*) FROM users WHERE id = ?", &[ada_id.into()]),
+        0
+    );
+}
+
+#[test]
+fn the_stock_command_removes_the_picture_from_the_default_storage_directory() {
+    let (_guard, conn) = reset_with_ada();
+    let ada_id = user_id(&conn, ADA);
+    // The stock `ignite` has no builder, so its storage directory is `storage` in the working
+    // directory. The picture is put there by hand.
+    let work = std::env::temp_dir().join(format!("ignite-test-cwd-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&work);
+    std::fs::create_dir_all(work.join("storage/avatars")).unwrap();
+    let file = work.join(format!("storage/avatars/{ada_id}.png"));
+    std::fs::write(&file, PNG).unwrap();
+    conn.exec_with(
+        "INSERT INTO user_avatars (user_id, path, mime) VALUES (?, ?, 'image/png')",
+        &[
+            ada_id.into(),
+            format!("avatars/{ada_id}.png").as_str().into(),
+        ],
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_ignite"))
+        .args(["user", "delete", ADA])
+        .env("DATABASE_URL", database_url())
+        .current_dir(&work)
+        .output()
+        .expect("run the ignite binary");
+    assert_eq!(output.status.code(), Some(0), "{}", text(&output.stderr));
+
+    assert!(!file.exists(), "the file goes with the user");
+    std::fs::remove_dir_all(&work).unwrap();
+}
+
 /// The migrations that ran before the account lifecycle migration.
 const BEFORE_LIFECYCLE: [&str; 7] = [
     "20261108000000_create_users",

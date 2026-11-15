@@ -3,6 +3,7 @@
 //! database, and the client helpers. The tests share one table, so they run one at a time.
 
 use std::future::Future;
+use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
 
 use ignite_core::{
@@ -309,6 +310,10 @@ pub fn reset() -> MutexGuard<'static, ()> {
     // The user callbacks are process-wide: an earlier test's panel must not run its callbacks
     // for the users created here, or in the test that follows until it builds its own panel.
     users::flush_callbacks();
+    // The storage directory is process-wide too: back to the default until a panel sets the
+    // test's own, which starts empty.
+    users::flush_storage_dir();
+    let _ = std::fs::remove_dir_all(storage_dir());
     std::env::set_var("DATABASE_URL", database_url());
     let t = test_db();
     t.exec("DROP TABLE IF EXISTS widgets");
@@ -389,10 +394,17 @@ pub fn client_with_mailer(mount: Option<&str>, mailer: RecordingMailer) -> Clien
     Client::tracked(rocket::build().attach(ignite.fairing())).expect("valid rocket")
 }
 
+/// The storage directory of the test panels: one per test process, under the system's
+/// temporary directory, so the tests never write into the repository. `reset` empties it.
+pub fn storage_dir() -> PathBuf {
+    std::env::temp_dir().join(format!("ignite-test-storage-{}", std::process::id()))
+}
+
 /// The panel with the `Widgets` resource and the app's profile field, under `mount`.
 fn builder(mount: Option<&str>) -> Ignite {
     // An app's own profile field, declared the way the developer declares it.
     let mut ignite = Ignite::new()
+        .storage_dir(storage_dir())
         .resource::<Widgets>()
         .profile_field(ignite_core::Field {
             name: "job_title",

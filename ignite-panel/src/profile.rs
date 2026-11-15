@@ -269,9 +269,27 @@ pub(crate) fn picture_type(bytes: &[u8]) -> Option<&'static str> {
     }
 }
 
+/// The file extension of a picture of type `mime`, one of the types [`picture_type`] accepts.
+pub(crate) fn picture_extension(mime: &str) -> Option<&'static str> {
+    match mime {
+        "image/png" => Some("png"),
+        "image/jpeg" => Some("jpg"),
+        "image/webp" => Some("webp"),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn each_accepted_picture_type_has_an_extension() {
+        assert_eq!(picture_extension("image/png"), Some("png"));
+        assert_eq!(picture_extension("image/jpeg"), Some("jpg"));
+        assert_eq!(picture_extension("image/webp"), Some("webp"));
+        assert_eq!(picture_extension("image/gif"), None);
+    }
 
     #[test]
     fn a_picture_is_recognised_by_its_bytes() {

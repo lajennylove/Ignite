@@ -124,6 +124,12 @@ rocket::build().attach(
 
 The panel is served under `/admin`. Its health check is `GET /up`, at the application root. It answers with a minimal HTML page, "Application up", and needs no sign-in. The documentation explains how to define a resource, its fields and columns, the profile fields an app adds, and how to extend the layout.
 
+### Storage directory
+
+The panel keeps its files on disk, in a storage directory: `storage` in the working directory, as Laravel's `storage/`, or the path given to `Ignite::storage_dir`. The users' profile pictures are in its `avatars` folder, one file per user named from the user's id, such as `avatars/42.png`; the database keeps only that path, relative to the storage directory, and the picture's type, as WordPress keeps its uploads. The panel serves a picture at `/admin/profile/avatar`. Replacing a picture with one of another type, removing it, and deleting the user remove the old file. The folders are created when the first picture is saved.
+
+Keep the storage directory out of git, give the app's user write access to it, and keep it across deploys (include it in backups). An app that sets `storage_dir` and runs its command through its builder (`run_cli`) has `ignite user delete` remove pictures from the same directory. The setting is process-wide, as the user callbacks are: the most recently configured `Ignite` sets it. The stock `ignite` command uses `storage` in its working directory.
+
 ## Resources
 
 A resource is an Orbit model with `#[derive(OrbitModel)]` and `#[derive(IgniteResource)]`. The model also derives `Serialize`. The derive writes the form, the list and the queries. Its `#[ignite(table = ...)]` must name the table of the model's `#[orbit(table = ...)]`, which is checked at compile time. Each writable field needs `#[orbit(fillable)]`, because Orbit refuses to insert or update a column that is not fillable. Each field's type sets its input and its check:
@@ -241,7 +247,7 @@ ignite user delete editor@example.com
 - The last enabled super-admin cannot be disabled, and a disabled super-admin does not count as one who keeps the panel open, so the role cannot be removed from the last enabled super-admin either.
 - `ignite user password` reads the new password the way `ignite user create` does: asked for twice in a terminal, or from standard input with `--password-stdin`. It ends the user's sessions, as the panel's change-password form does for other devices.
 - `ignite user delete` deletes a user. The last enabled super-admin cannot be deleted. An app's resource deletes a user with `users::delete_user(&db, id)`.
-- Deleting a user deletes their session rows too, through the foreign key on `sessions.user_id`. The sign-in throttle rows are keyed by email and address rather than by user, and they expire after one minute, so they need no cleanup.
+- Deleting a user deletes their session rows and their picture row too, through the foreign keys, and removes their picture file from the storage directory after the delete commits. The sign-in throttle rows are keyed by email and address rather than by user, and they expire after one minute, so they need no cleanup.
 
 ### User lifecycle callbacks
 

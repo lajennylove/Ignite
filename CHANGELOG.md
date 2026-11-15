@@ -58,6 +58,17 @@ All notable changes to Ignite are listed here. The format follows
 
 ### Changed
 
+- **Breaking:** profile pictures are files on disk, not database blobs, as WordPress keeps
+  its uploads. They are written to `avatars/<user id>.<png|jpg|webp>` in the panel's storage
+  directory: `storage` in the working directory, or the path given to the new
+  `Ignite::storage_dir`. The `user_avatars` table of the migration `20261111000000_profile`
+  now has `path` (relative to the storage directory) and `mime` columns instead of the
+  MySQL-only `data MEDIUMBLOB`, so the migration has no database-specific SQL. Replacing a
+  picture with one of another type, removing it, and deleting a user (`users::delete_user`,
+  `ignite user delete`) remove the old file. `users::flush_storage_dir` restores the default
+  directory. **Existing installs:** the migration is not run again on a database that has
+  it, and no data migration is provided; move each `user_avatars.data` blob to its file and
+  change the table to the new columns by hand before upgrading.
 - **Breaking:** `FieldKind` and `FieldKindDef` have new variants, so an exhaustive `match`
   on them needs new arms.
 - **Breaking:** `AuthzError` has a new variant, `CannotDeleteLastSuperAdmin`.

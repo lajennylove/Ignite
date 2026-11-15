@@ -369,27 +369,31 @@ pub async fn disable_user(db: &Database, email: &str) -> Result<bool, AuthzError
 }
 
 /// Deletes the user with `email`, with [`users::delete_user`], so the app's deleted callbacks
-/// run in the same transaction. Refuses to delete the last enabled super-admin.
+/// run in the same transaction and the user's picture file is removed after it commits.
+/// Refuses to delete the last enabled super-admin.
 pub async fn delete_user(db: &Database, email: &str) -> Result<(), AuthzError> {
     let user = find_user(db, email).await?;
-    db.transaction(async |tx| {
-        // The same lock as `remove_role`, so two changes to the super-admins cannot both pass.
-        raw::execute(
-            &mut *tx,
-            "SELECT id FROM roles WHERE name = ? FOR UPDATE",
-            &[SUPER_ADMIN.into()],
-        )
+    let picture = db
+        .transaction(async |tx| {
+            // The same lock as `remove_role`, so two changes to the super-admins cannot both pass.
+            raw::execute(
+                &mut *tx,
+                "SELECT id FROM roles WHERE name = ? FOR UPDATE",
+                &[SUPER_ADMIN.into()],
+            )
+            .await?;
+            if user.disabled_at.is_none()
+                && is_super_admin(&mut *tx, user.id).await?
+                && enabled_super_admins_besides(&mut *tx, user.id).await? == 0
+            {
+                return Err(AuthzError::CannotDeleteLastSuperAdmin);
+            }
+            let (_, picture) = users::delete_in(tx, user.id).await?;
+            Ok(picture)
+        })
         .await?;
-        if user.disabled_at.is_none()
-            && is_super_admin(&mut *tx, user.id).await?
-            && enabled_super_admins_besides(&mut *tx, user.id).await? == 0
-        {
-            return Err(AuthzError::CannotDeleteLastSuperAdmin);
-        }
-        users::delete_in(tx, user.id).await?;
-        Ok(())
-    })
-    .await
+    users::remove_picture_of_deleted(picture).await;
+    Ok(())
 }
 
 /// Enables the user with `email` again. Returns `false` when the user was already enabled.

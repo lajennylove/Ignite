@@ -140,6 +140,7 @@ pub struct Ignite {
     mailer: Arc<dyn Mailer>,
     app_url: Option<String>,
     user_callbacks: UserCallbacks,
+    storage: PathBuf,
 }
 
 impl Ignite {
@@ -205,6 +206,7 @@ impl Ignite {
             mailer: Arc::new(NotConfigured),
             app_url,
             user_callbacks: UserCallbacks::default(),
+            storage: PathBuf::from(users::DEFAULT_STORAGE_DIR),
         }
     }
 
@@ -265,6 +267,22 @@ impl Ignite {
     /// panics when a file above is missing, and names the one that is.
     pub fn views_dir(mut self, path: impl Into<PathBuf>) -> Self {
         self.views = Some(path.into());
+        self
+    }
+
+    /// Keeps the panel's files, such as the users' profile pictures (in its `avatars` folder),
+    /// in `path` instead of `storage` in the working directory, as Laravel keeps them in
+    /// `storage/`. The folders are created when the first file is written. The database keeps
+    /// each file's path relative to this directory, so the directory can move.
+    ///
+    /// The directory is process-wide, as the user callbacks are, because
+    /// [`users::delete_user`] and the command line remove a deleted user's picture with only a
+    /// [`Database`](orbit_orm::Database): it takes effect when [`fairing`](Self::fairing) or
+    /// [`run_cli`](Self::run_cli) is called, and the most recently configured `Ignite`'s
+    /// directory is the one used. [`users::flush_storage_dir`] restores the default. The stock
+    /// `ignite` binary uses the default.
+    pub fn storage_dir(mut self, path: impl Into<PathBuf>) -> Self {
+        self.storage = path.into();
         self
     }
 
@@ -371,7 +389,8 @@ impl Ignite {
     /// ```
     ///
     /// The callbacks are process-wide: this call makes this builder's callbacks the ones that
-    /// run in the process, replacing any set before.
+    /// run in the process, replacing any set before. So does its
+    /// [`storage_dir`](Self::storage_dir).
     ///
     /// [`Ignite::new`] loads `.env` and needs `DATABASE_URL`. The commands are the ones of
     /// [`crate::cli`]; the resources and other settings of the builder are not used.
@@ -390,6 +409,7 @@ impl Ignite {
         I: IntoIterator<Item = String>,
     {
         users::install_callbacks(self.user_callbacks);
+        users::install_storage_dir(self.storage);
         crate::cli::run(&args.into_iter().collect::<Vec<_>>())
     }
 
@@ -417,9 +437,11 @@ impl Ignite {
             mailer,
             app_url,
             user_callbacks,
+            storage,
         } = self;
         // Users created or deleted from now on run the app's callbacks.
         users::install_callbacks(user_callbacks);
+        users::install_storage_dir(storage);
         // The panel registers its own assets, so an app adds nothing for its styling.
         crate::assets::register(&mount);
         register_views(views.as_deref());
