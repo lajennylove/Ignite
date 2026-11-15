@@ -69,6 +69,16 @@ All notable changes to Ignite are listed here. The format follows
   directory. **Existing installs:** the migration is not run again on a database that has
   it, and no data migration is provided; move each `user_avatars.data` blob to its file and
   change the table to the new columns by hand before upgrading.
+- The panel's nine migrations are written with Orbit's schema builder, in
+  `ignite-panel/src/migrations/`, instead of the MySQL `up.sql` and `down.sql` files in
+  `ignite-panel/migrations/`, which are gone. `ignite migrate` and `migrate:rollback` now run
+  them on SQLite and PostgreSQL as well as MySQL and MariaDB (`ignite-panel` features `sqlite`
+  and `postgres`). The names, and the names of their indexes, uniques and foreign keys, are
+  unchanged, so an existing install's history matches and nothing runs twice; on MySQL and
+  MariaDB they build the same tables as before. On SQLite the `sessions_user_fk` key of
+  `20261114000000_account_lifecycle` is not created, because SQLite cannot add a foreign key
+  to an existing table. The panel's runtime queries, and `ignite migrate:status`, still need
+  MySQL or MariaDB.
 - **Breaking:** `FieldKind` and `FieldKindDef` have new variants, so an exhaustive `match`
   on them needs new arms.
 - **Breaking:** `AuthzError` has a new variant, `CannotDeleteLastSuperAdmin`.

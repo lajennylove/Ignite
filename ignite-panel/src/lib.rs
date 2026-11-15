@@ -15,6 +15,7 @@ mod embedded;
 mod erased;
 mod ignite;
 pub mod mail;
+mod migrations;
 mod password_reset;
 mod profile;
 mod proxy;
@@ -75,22 +76,10 @@ pub async fn register_runtime_permissions(
     Ok(())
 }
 
-/// The panel's migrations, embedded in the crate at build time. Each name is a folder in
-/// `migrations/`. A new migration is added here, in order, as well as in that folder: Orbit
-/// embeds the files by name, and a missing folder is a build error.
+/// The panel's migrations, written with Orbit's schema builder in `src/migrations/`, one
+/// module each. They render the SQL of the connected database when they run.
 fn migrator() -> Result<Migrator, OrbitError> {
-    orbit_orm::migrations!(
-        "migrations",
-        "20261108000000_create_users",
-        "20261108010000_create_sessions",
-        "20261108020000_create_login_throttles",
-        "20261110000000_add_user_theme",
-        "20261111000000_profile",
-        "20261112000000_login_throttles_window_index",
-        "20261113000000_roles_permissions",
-        "20261114000000_account_lifecycle",
-        "20261115000000_password_reset_tokens",
-    )
+    Migrator::new(migrations::all())
 }
 
 /// The table that the applied migrations are recorded in. It is Diesel's table: the rows that
@@ -137,9 +126,9 @@ pub async fn migration_status(db: &Database) -> Result<Vec<(String, bool)>, Orbi
         .collect())
 }
 
-/// Reverts the most recently applied batch of the panel's migrations, running each `down.sql`
-/// in reverse order, and returns the names it reverted, last first. A batch is the set of
-/// migrations that one `migrate` run applied. The history that Diesel recorded is batch 0, so
+/// Reverts the most recently applied batch of the panel's migrations, running the down
+/// statements of each in reverse order, and returns the names it reverted, last first. A batch
+/// is the set of migrations that one `migrate` run applied. The history that Diesel recorded is batch 0, so
 /// the rollback that reaches it reverts those migrations too. Other migrations in the same
 /// database are not touched. Returns nothing when no migration of the panel is applied.
 pub async fn rollback(db: &Database) -> Result<Vec<String>, OrbitError> {

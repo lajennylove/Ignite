@@ -8,7 +8,7 @@ use chrono::{Duration, NaiveDateTime, Utc};
 use orbit_orm::{Database, Error, Executor, Model, Operator, OrbitModel};
 use rand_core::{OsRng, RngCore};
 
-/// A row of the `sessions` table. See `migrations/20261108010000_create_sessions`.
+/// A row of the `sessions` table. See `src/migrations/create_sessions.rs`.
 #[derive(Debug, Clone, OrbitModel)]
 #[orbit(table = "sessions", primary_key = "id")]
 #[allow(dead_code)]

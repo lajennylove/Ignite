@@ -16,7 +16,7 @@ pub(crate) const LIMIT: i64 = 5;
 /// The length of a window, in seconds.
 pub(crate) const WINDOW_SECONDS: i64 = 60;
 
-/// A row of the `login_throttles` table. See `migrations/20261108020000_create_login_throttles`.
+/// A row of the `login_throttles` table. See `src/migrations/create_login_throttles.rs`.
 #[derive(Debug, Clone, OrbitModel)]
 #[orbit(table = "login_throttles", primary_key = "throttle_key")]
 #[allow(dead_code)]

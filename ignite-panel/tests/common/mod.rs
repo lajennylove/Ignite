@@ -286,14 +286,18 @@ pub fn database_url() -> String {
         .expect("set DATABASE_URL to the test database, such as mysql://user@localhost/ignite_test")
 }
 
+/// The SQL that installs ran before the panel's migrations moved to the schema builder, one
+/// folder per migration with `up.sql` and `down.sql`. The tests build old databases from it.
+pub const OLD_MIGRATIONS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/migrations/");
+
 /// Puts the test database into the state where exactly `applied` are applied: every panel
-/// migration is rolled back, the `applied` ones run their `up.sql`, and Orbit's table records
-/// them as one batch. The remaining migrations are left for `migrate` to run. Hold the guard
-/// from `reset` while calling this.
+/// migration is rolled back, the `applied` ones run their old `up.sql` (from
+/// [`OLD_MIGRATIONS`]), and Orbit's table records them as one batch. The remaining migrations
+/// are left for `migrate` to run. Hold the guard from `reset` while calling this.
 pub fn rewind_to(applied: &[&str]) {
     let t = test_db();
     t.run(async { while !rollback(&t.db).await.expect("rollback").is_empty() {} });
-    let root = concat!(env!("CARGO_MANIFEST_DIR"), "/migrations/");
+    let root = OLD_MIGRATIONS;
     for name in applied {
         let up = std::fs::read_to_string(format!("{root}{name}/up.sql")).expect("read up.sql");
         t.exec(&up);

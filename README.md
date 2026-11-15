@@ -75,7 +75,7 @@ ignite migrate:status
 
 lists each migration as `Applied` or `Pending`.
 
-To undo the last batch, run `ignite migrate:rollback`. A batch is the set of migrations that one `ignite migrate` applied, so a run reverts all of them, last first, each with its `down.sql`. After a `migrate` that applied one migration, a rollback reverts that one. It is not one step per run: when a batch has several migrations, one run reverts all of them. It says so in its output, and changes nothing else.
+To undo the last batch, run `ignite migrate:rollback`. A batch is the set of migrations that one `ignite migrate` applied, so a run reverts all of them, last first, each with its down migration. After a `migrate` that applied one migration, a rollback reverts that one. It is not one step per run: when a batch has several migrations, one run reverts all of them. It says so in its output, and changes nothing else.
 
 **Batch 0.** The panel records its migrations in the `__diesel_schema_migrations` table. A database that was migrated before the move to Orbit has its earlier migrations there as batch 0. They are not run again. A rollback that reaches batch 0 reverts those migrations too, which drops the panel's tables. Back up the database before you roll back that far.
 
@@ -83,7 +83,7 @@ To undo the last batch, run `ignite migrate:rollback`. A batch is the set of mig
 
 1. Read the error. Fix its cause, such as a duplicate value or a missing column the migration needs.
 2. Run `ignite migrate:status` to see which migrations are recorded as applied.
-3. Run `ignite migrate` again. A migration that was only partly applied can need its partial change removed first. Check the database by hand, and use `ignite migrate:rollback` when the last migration is the one that failed and its `down.sql` undoes what it did.
+3. Run `ignite migrate` again. A migration that was only partly applied can need its partial change removed first. Check the database by hand, and use `ignite migrate:rollback` when the last migration is the one that failed and its down migration undoes what it did.
 
 Take a database backup before each deploy that migrates.
 

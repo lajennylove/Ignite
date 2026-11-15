@@ -22,7 +22,7 @@ use rocket::tokio::fs;
 
 use crate::sessions;
 
-/// A row of the `users` table. See `migrations/20261108000000_create_users`.
+/// A row of the `users` table. See `src/migrations/create_users.rs`.
 #[derive(Debug, Clone, OrbitModel)]
 #[orbit(table = "users")]
 pub struct User {
@@ -55,7 +55,7 @@ pub struct User {
 
 /// A row of the `user_avatars` table, one for each user who has a profile picture: the path
 /// of its file, relative to the storage directory, and its type. See
-/// `migrations/20261111000000_profile`.
+/// `src/migrations/profile.rs`.
 #[derive(Debug, Clone, OrbitModel)]
 #[orbit(table = "user_avatars", primary_key = "user_id")]
 #[allow(dead_code)]

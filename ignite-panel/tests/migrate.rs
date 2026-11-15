@@ -235,9 +235,10 @@ fn rollback_reverts_the_last_batch_and_migrate_restores_it() {
 
 /// Turns the database into one that Diesel had migrated up to the roles migration: Orbit's
 /// table is dropped, Diesel's history lists the six migrations before roles, and their tables
-/// exist. The roles, account lifecycle and password reset migrations are still to run.
+/// exist, built from the SQL those installs ran. The roles, account lifecycle and password
+/// reset migrations are still to run.
 fn make_diesel_database(conn: &TestDb) {
-    let root = concat!(env!("CARGO_MANIFEST_DIR"), "/migrations/");
+    let root = common::OLD_MIGRATIONS;
     // Undo the whole panel first, so the schema is empty before the old one is built.
     rollback_everything();
     conn.exec("DROP TABLE IF EXISTS __diesel_schema_migrations");

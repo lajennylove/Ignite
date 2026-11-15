@@ -48,7 +48,7 @@ const SENT_MESSAGE: &str =
 /// The answer to a reset whose link is wrong, used, or too old.
 const INVALID_LINK: &str = "This password reset link is invalid or has expired. Request a new one.";
 
-/// A reset link, one row for each email. See `migrations/20261115000000_password_reset_tokens`.
+/// A reset link, one row for each email. See `src/migrations/password_reset_tokens.rs`.
 #[derive(Debug, Clone, OrbitModel)]
 #[orbit(table = "password_reset_tokens", primary_key = "email")]
 #[allow(dead_code)]
