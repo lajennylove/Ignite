@@ -286,6 +286,42 @@ fn a_picture_of_another_type_replaces_the_file() {
 }
 
 #[test]
+fn a_failed_save_keeps_the_earlier_picture() {
+    let _guard = reset();
+    let client = signed_in(None);
+    let id = test_user_id();
+    upload(&client, PNG);
+    let file = storage_dir().join(format!("avatars/{id}.png"));
+
+    // The row cannot be written while its `mime` column is missing, so the transaction fails.
+    let conn = common::test_db();
+    conn.exec("ALTER TABLE user_avatars CHANGE mime mime_gone VARCHAR(32) NOT NULL");
+    let other_png: Vec<u8> = [PNG, b"another picture"].concat();
+    let token = common::csrf_token(&client);
+    let (header, body) = picture_upload(&token, &other_png);
+    let response = client
+        .post("/admin/profile/avatar")
+        .header(header)
+        .body(body)
+        .dispatch();
+    conn.exec("ALTER TABLE user_avatars CHANGE mime_gone mime VARCHAR(32) NOT NULL");
+    assert_eq!(response.status(), Status::InternalServerError);
+
+    assert_eq!(
+        std::fs::read(&file).expect("the earlier picture is kept"),
+        PNG,
+        "the earlier file keeps its bytes"
+    );
+    let names: Vec<_> = std::fs::read_dir(storage_dir().join("avatars"))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .collect();
+    assert_eq!(names, [format!("{id}.png")], "no temporary file is left");
+    let served = client.get("/admin/profile/avatar?v=2").dispatch();
+    assert_eq!(served.into_bytes().unwrap(), PNG);
+}
+
+#[test]
 fn a_stored_path_outside_the_storage_directory_is_not_served() {
     let _guard = reset();
     let client = signed_in(None);

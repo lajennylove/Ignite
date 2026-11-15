@@ -171,10 +171,15 @@ pub async fn email_taken<'a>(
 ///
 /// The picture is a file in the storage directory (see
 /// [`Ignite::storage_dir`](crate::Ignite::storage_dir)), `avatars/<id>.<extension>`; the
-/// `user_avatars` row keeps that path, relative to the directory, and the type. The file is
-/// written under a temporary name and renamed into place, then the row and
-/// [`User::avatar_mime`] are written in one transaction. When the transaction fails, the new
-/// file is removed. After it commits, an earlier file with another extension is removed.
+/// `user_avatars` row keeps that path, relative to the directory, and the type. The picture
+/// is first written to a temporary file in the `avatars` folder. Then the row and
+/// [`User::avatar_mime`] are written in one transaction. When the transaction fails, only the
+/// temporary file is removed, so the earlier picture is kept. After the commit, the temporary
+/// file is renamed into place and an earlier file with another extension is removed. If that
+/// rename fails, the error is logged and returned and the temporary file is removed; the row
+/// already names the new file, so the panel serves the earlier picture when it had the same
+/// extension, and otherwise finds none (404), until the user saves one again. A crash between the write and
+/// the rename can leave a `.tmp` file in the folder.
 pub async fn set_avatar(db: &Database, id: i64, mime: &str, data: &[u8]) -> Result<(), Error> {
     let extension = crate::profile::picture_extension(mime).ok_or_else(|| {
         io_error(io::Error::new(
@@ -191,12 +196,6 @@ pub async fn set_avatar(db: &Database, id: i64, mime: &str, data: &[u8]) -> Resu
         let _ = fs::remove_file(&temporary).await;
         return Err(io_error(error));
     }
-    let file = storage.join(&path);
-    if let Err(error) = fs::rename(&temporary, &file).await {
-        let _ = fs::remove_file(&temporary).await;
-        return Err(io_error(error));
-    }
-
     let saved = db
         .transaction(async |tx| {
             let earlier = avatar_path(&mut *tx, id).await?;
@@ -217,18 +216,26 @@ pub async fn set_avatar(db: &Database, id: i64, mime: &str, data: &[u8]) -> Resu
             Ok::<_, Error>(earlier)
         })
         .await;
-    match saved {
-        Ok(earlier) => {
-            if let Some(earlier) = earlier.filter(|earlier| *earlier != path) {
-                remove_avatar_file(&earlier).await;
-            }
-            Ok(())
-        }
+    let earlier = match saved {
+        Ok(earlier) => earlier,
         Err(error) => {
-            remove_avatar_file(&path).await;
-            Err(error)
+            let _ = fs::remove_file(&temporary).await;
+            return Err(error);
         }
+    };
+    let file = storage.join(&path);
+    if let Err(error) = fs::rename(&temporary, &file).await {
+        rocket::warn!(
+            "ignite: could not move the picture into place at {}: {error}",
+            file.display()
+        );
+        let _ = fs::remove_file(&temporary).await;
+        return Err(io_error(error));
     }
+    if let Some(earlier) = earlier.filter(|earlier| *earlier != path) {
+        remove_avatar_file(&earlier).await;
+    }
+    Ok(())
 }
 
 /// Removes the profile picture of the user with `id`. The initials show again. The row and
@@ -267,6 +274,9 @@ pub async fn avatar(db: &Database, id: i64) -> Result<Option<(String, Vec<u8>)>,
         return Ok(None);
     };
     let Some(file) = storage_file(&path) else {
+        rocket::warn!(
+            "ignite: not serving the picture at {path}: it is outside the storage directory"
+        );
         return Ok(None);
     };
     match fs::read(&file).await {
