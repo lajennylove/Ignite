@@ -1030,7 +1030,7 @@ dependencies = [
 
 [[package]]
 name = "ignite-core"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "argon2",
  "chrono",
@@ -1044,7 +1044,7 @@ dependencies = [
 
 [[package]]
 name = "ignite-macros"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "chrono",
  "ignite-core",
@@ -1058,7 +1058,7 @@ dependencies = [
 
 [[package]]
 name = "ignite-panel"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "argon2",
  "base64 0.22.1",
@@ -1551,9 +1551,9 @@ dependencies = [
 
 [[package]]
 name = "propel_compiler"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac8bfd6a0880741db4664ff927c5651ee37b31c7801017216b0ea39a720f8be2"
+checksum = "8b9f71ae6e6bd657f9f78cf0ddb105aee2e348527b15f016ed0d914da0b9fecd"
 dependencies = [
  "propel_parser",
  "propel_runtime",
@@ -1561,9 +1561,9 @@ dependencies = [
 
 [[package]]
 name = "propel_parser"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "280c219a47569e0432b45517049cad75a257684c92d89df0aae1c39d5663c79a"
+checksum = "11c95501a484ac7ed95dadd1587f336a8ec90db28fc907c4e4c4bc2d3e7d3daa"
 dependencies = [
  "pest",
  "pest_derive",
@@ -1571,9 +1571,9 @@ dependencies = [
 
 [[package]]
 name = "propel_rocket"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f5c79e327358ef2eedf67f4ac1581a08e8e4e092faf1fd837c9ecb9b4b1202a1"
+checksum = "19461bc14a8a969fb682ad985189eb9aa1fb6695b73f5b752d9d905708ddf553"
 dependencies = [
  "propel_runtime",
  "rocket",
@@ -1582,9 +1582,9 @@ dependencies = [
 
 [[package]]
 name = "propel_runtime"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "98f6762153a9f2e1e765430adb7cd62807fc30c4fb6a11d197b9f37bc90a097a"
+checksum = "fb314b2e2251c13a60afd670b73fd365d4376f76f894a000caa1a3d592e4be49"
 dependencies = [
  "propel_parser",
  "serde",

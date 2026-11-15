@@ -1,6 +1,6 @@
 [package]
 name = "ignite-panel"
-version = "0.3.0"
+version = "0.4.0"
 license = "MIT"
 description = "The Ignite admin panel for Rocket.rs, built on Propel views and Orbit."
 repository = "https://github.com/lajennylove/Ignite"
@@ -14,10 +14,10 @@ postgres = ["orbit-orm/postgres"]
 sqlite = ["orbit-orm/sqlite"]
 
 [dependencies]
-ignite-core = { version = "0.3.0", path = "../ignite-core" }
+ignite-core = { version = "0.4.0", path = "../ignite-core" }
 rocket = "0.5.2"
-propel_rocket = "0.2.0"
-propel_runtime = "0.2.0"
+propel_rocket = "0.3.0"
+propel_runtime = "0.3.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 form_urlencoded = "1"
@@ -33,7 +33,7 @@ dotenvy = "0.15"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 
 [build-dependencies]
-propel_compiler = "0.2.0"
+propel_compiler = "0.3.0"
 
 # Rocket reports TLS only when its `tls` feature is on, so the tests that configure TLS need it.
 [dev-dependencies]

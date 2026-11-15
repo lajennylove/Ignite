@@ -4,7 +4,12 @@ All notable changes to Ignite are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.0] - 2026-11-15
+
+### Known limitations
+
+- The admin panel's runtime queries (user create, update and delete, sessions and sign-in) run on MariaDB and MySQL only. Migrations and `migrate:status` work on SQLite, MySQL, MariaDB and PostgreSQL. PostgreSQL and SQLite support for the runtime queries follows in a later release.
+
 
 ### Added
 
@@ -95,7 +100,7 @@ All notable changes to Ignite are listed here. The format follows
   has a customised `layouts/app.propel`. Edit the files under `themes/ignite` to change
   the look.
 
-## [0.3.0] - unreleased
+## [0.3.0] - 2026-11-14
 
 0.3.0 is a breaking release. Read the migration notes first.
 
