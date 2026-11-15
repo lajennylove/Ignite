@@ -1150,6 +1150,7 @@ version = "0.37.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b1f111c8c41e7c61a49cd34e44c7619462967221a6443b0ec299e0ac30cfb9b1"
 dependencies = [
+ "cc",
  "pkg-config",
  "vcpkg",
 ]
@@ -1331,9 +1332,9 @@ dependencies = [
 
 [[package]]
 name = "orbit-orm"
-version = "0.1.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c04a1491c0638c597d0853d5b0259f52d28ee06710a955ee2f064e4077db29d5"
+checksum = "eb3a957516cd0901567d0b87b35d6b3fc6287062cd83d0a102a979567a2f6a24"
 dependencies = [
  "chrono",
  "orbit-macros",

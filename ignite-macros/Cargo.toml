@@ -17,6 +17,6 @@ syn = { version = "2", features = ["full"] }
 [dev-dependencies]
 trybuild = "1"
 ignite-core = { path = "../ignite-core" }
-orbit-orm = "0.1.0"
+orbit-orm = "0.3.0"
 serde = { version = "1", features = ["derive"] }
 chrono = { version = "0.4", features = ["serde"] }
