@@ -1,6 +1,6 @@
 [package]
 name = "ignite-macros"
-version = "0.4.0"
+version = "0.5.0"
 license = "MIT"
 description = "Derive macro for Ignite: writes an admin resource from an Orbit model."
 repository = "https://github.com/lajennylove/Ignite"
@@ -17,6 +17,6 @@ syn = { version = "2", features = ["full"] }
 [dev-dependencies]
 trybuild = "1"
 ignite-core = { path = "../ignite-core" }
-orbit-orm = "0.3.0"
+orbit-orm = "0.4.0"
 serde = { version = "1", features = ["derive"] }
 chrono = { version = "0.4", features = ["serde"] }

@@ -1030,7 +1030,7 @@ dependencies = [
 
 [[package]]
 name = "ignite-core"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "argon2",
  "chrono",
@@ -1044,7 +1044,7 @@ dependencies = [
 
 [[package]]
 name = "ignite-macros"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "chrono",
  "ignite-core",
@@ -1058,7 +1058,7 @@ dependencies = [
 
 [[package]]
 name = "ignite-panel"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "argon2",
  "base64 0.22.1",
@@ -1332,9 +1332,9 @@ dependencies = [
 
 [[package]]
 name = "orbit-orm"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eb3a957516cd0901567d0b87b35d6b3fc6287062cd83d0a102a979567a2f6a24"
+checksum = "f87ba72ef90aef312017c508c36c5253f6e117660c37b573275dfcf11a9ac842"
 dependencies = [
  "chrono",
  "orbit-macros",

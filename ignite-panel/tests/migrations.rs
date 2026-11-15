@@ -564,6 +564,8 @@ fn the_migrations_run_and_roll_back_on_sqlite() {
         eprintln!("skipped: set IGNITE_TEST_SQLITE_URL to run the migrations on SQLite");
         return;
     };
+    // The other SQLite test uses the same database file, so the two must not overlap.
+    let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let rt = runtime();
     let db = rt
         .block_on(Database::connect(&url))

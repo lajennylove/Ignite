@@ -125,11 +125,15 @@ pub async fn migration_status(db: &Database) -> Result<Vec<(String, bool)>, Orbi
         .collect())
 }
 
-/// Reverts the most recently applied batch of the panel's migrations, running the down
-/// statements of each in reverse order, and returns the names it reverted, last first. A batch
-/// is the set of migrations that one `migrate` run applied. The history that Diesel recorded
-/// is batch 0, so the rollback that reaches it reverts those migrations too. Other migrations
-/// in the same database are not touched. Returns nothing when no migration of the panel is applied.
+/// Reverts the most recently applied batch, running the down statements of each migration in
+/// reverse order, and returns the names it reverted, last first. A batch is the set of
+/// migrations that one run applied, and one rollback reverses the whole run, as Laravel's
+/// `migrate:rollback` does. The history that Diesel recorded is batch 0, so the rollback that
+/// reaches it reverts those migrations too. The batch is the latest one in the database's
+/// migrations table, which an app's own migrations can share: when an app records its
+/// migrations and the panel's as one batch, the app's migrator rolls the whole run back. When
+/// the latest batch holds a migration that is not the panel's, this reverts nothing and returns
+/// [`orbit_orm::Error::UnknownMigration`]. Returns nothing when no migration is applied.
 pub async fn rollback(db: &Database) -> Result<Vec<String>, OrbitError> {
     let migrator = migrator()?;
     migrator.rollback(db).await

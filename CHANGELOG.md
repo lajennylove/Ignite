@@ -4,6 +4,31 @@ All notable changes to Ignite are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-11-15
+
+### Known limitations
+
+- The admin panel's runtime queries (user create, update and delete, sessions and sign-in) run on MariaDB and MySQL only. Migrations and `migrate:status` work on SQLite, MySQL, MariaDB and PostgreSQL. PostgreSQL and SQLite support for the runtime queries follows in a later release.
+
+### Added
+
+- Ignite builds on `orbit-orm` 0.4.0, so an app's own migrations can use its new
+  `long_text` and `medium_text` columns beside the panel's.
+
+### Changed
+
+- **Breaking:** Ignite depends on `orbit-orm` 0.4.0 instead of 0.3.0. The `Database` that
+  `ignite-core` re-exports, and that `IgniteResource`, the migration functions, the user
+  functions and the lifecycle callbacks take, is now `orbit_orm` 0.4's, as are the
+  `Transaction` the callbacks are given and the `orbit_orm::Error` these functions return. An
+  app moves its own `orbit-orm` dependency to 0.4 with it, since the two versions' types do
+  not mix. Ignite's own API is otherwise unchanged.
+- The documentation of `rollback` is corrected: it reverts the latest batch of the
+  database's migrations table, which an app's own migrations can share, and one rollback
+  reverses the whole run, as Laravel's does. When that batch holds a migration that is not
+  the panel's, it reverts nothing and returns `orbit_orm::Error::UnknownMigration`. It said
+  before that other migrations in the same database are not touched.
+
 ## [0.4.0] - 2026-11-15
 
 ### Known limitations
