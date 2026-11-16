@@ -70,6 +70,9 @@ pub(crate) struct Registry {
     pub(crate) runtime_permissions: Mutex<HashSet<String>>,
     /// The brand the app set: the name, the logo and the favicon (see [`Ignite::brand_name`]).
     pub(crate) brand: Brand,
+    /// The navigation groups in the order the sidebar shows them (see
+    /// [`Ignite::navigation_groups`]).
+    pub(crate) navigation_groups: Vec<String>,
 }
 
 impl Registry {
@@ -145,6 +148,7 @@ pub struct Ignite {
     user_callbacks: UserCallbacks,
     storage: PathBuf,
     brand: Brand,
+    navigation_groups: Vec<String>,
 }
 
 impl Ignite {
@@ -212,6 +216,7 @@ impl Ignite {
             user_callbacks: UserCallbacks::default(),
             storage: PathBuf::from(users::DEFAULT_STORAGE_DIR),
             brand: Brand::default(),
+            navigation_groups: Vec::new(),
         }
     }
 
@@ -463,6 +468,27 @@ impl Ignite {
         self
     }
 
+    /// Orders the navigation groups, as Filament's panel `navigationGroups`: the sidebar shows
+    /// the groups in this order, each under its name as a heading, after the resources that
+    /// have no group. A resource joins a group with its
+    /// [`NAVIGATION_GROUP`](ignite_core::IgniteResource::NAVIGATION_GROUP) (or a runtime
+    /// resource's `navigation_group`). A group no resource uses shows nothing, and a group that
+    /// is not listed here comes after the listed ones. Each call adds to the list, as in
+    /// Filament.
+    ///
+    /// ```ignore
+    /// Ignite::new().navigation_groups(["Content", "Shop", "Settings"])
+    /// ```
+    pub fn navigation_groups<I, S>(mut self, groups: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.navigation_groups
+            .extend(groups.into_iter().map(Into::into));
+        self
+    }
+
     /// Changes the URL prefix of the panel. The default is `/admin`.
     pub fn mount(mut self, path: &str) -> Self {
         self.mount = path.trim_end_matches('/').to_string();
@@ -489,6 +515,7 @@ impl Ignite {
             user_callbacks,
             storage,
             brand,
+            navigation_groups,
         } = self;
         // Users created or deleted from now on run the app's callbacks.
         users::install_callbacks(user_callbacks);
@@ -518,6 +545,7 @@ impl Ignite {
                 app_url,
                 runtime_permissions: Mutex::new(HashSet::new()),
                 brand,
+                navigation_groups,
             };
             Ok(rocket
                 .manage(db)

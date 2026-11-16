@@ -41,6 +41,7 @@ use serde_json::Value;
 use crate::authz::Action;
 use crate::brand::BrandView;
 use crate::ignite::Registry;
+use crate::navigation::{arrange, Entry};
 use crate::session::AdminUser;
 use crate::theme::Icon;
 
@@ -58,7 +59,12 @@ pub(crate) struct Layout {
     pub(crate) profile_url: String,
     pub(crate) logout_everywhere_url: String,
     pub(crate) csrf_token: String,
+    /// Every entry of the sidebar, in the order shown, without the group headings. The `ignite`
+    /// theme reads `nav_sections`; `nav` stays for themes that list the entries as before.
     pub(crate) nav: Vec<NavGroup>,
+    /// The sidebar in sections: the entries without a navigation group first, without a
+    /// heading, then one section per group, under its heading.
+    pub(crate) nav_sections: Vec<NavSection>,
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
     /// The CSS of the active admin theme's colour tokens, or empty when it has none. The
@@ -78,6 +84,15 @@ pub(crate) struct NavGroup {
     pub(crate) has_add: bool,
     pub(crate) add_url: String,
     pub(crate) active: bool,
+}
+
+/// A section of the sidebar: a navigation group's entries under its heading, or the entries
+/// without a group, which have no heading (`has_heading` false).
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct NavSection {
+    pub(crate) has_heading: bool,
+    pub(crate) heading: String,
+    pub(crate) items: Vec<NavGroup>,
 }
 
 /// The initials of a name, for the avatar: "Ada Lovelace" gives "AL".
@@ -103,33 +118,56 @@ impl Layout {
         // The menu's icons and the colour tokens come from the active admin theme.
         let admin_theme = crate::theme::active();
         // A resource is listed only when the user may view its records, and its "Add new"
-        // link only when the user may create one, as Filament's navigation does.
-        let nav = match user {
-            Some(user) => std::iter::once(NavGroup {
-                title: "Dashboard".to_string(),
-                icon: admin_theme.theme.icon(Icon::Dashboard),
-                url: registry.mount.clone(),
-                has_add: false,
-                add_url: String::new(),
-                active: section.is_empty(),
-            })
-            .chain(
-                registry
+        // link only when the user may create one, as Filament's navigation does. The entries
+        // are placed by their navigation group and sort (see `crate::navigation`).
+        let nav_sections: Vec<NavSection> = match user {
+            Some(user) => {
+                let entries = registry
                     .all()
                     .into_iter()
                     .filter(|r| user.may(r.slug(), Action::ViewAny))
-                    .map(|r| NavGroup {
-                        title: r.title().to_string(),
-                        icon: admin_theme.theme.icon(Icon::Resource),
-                        url: format!("{}/{}", registry.mount, r.slug()),
-                        has_add: user.may(r.slug(), Action::Create),
-                        add_url: format!("{}/{}/new", registry.mount, r.slug()),
-                        active: section == r.slug(),
-                    }),
-            )
-            .collect(),
+                    .map(|r| Entry {
+                        label: r.navigation_label().to_string(),
+                        group: r.navigation_group().map(str::to_string),
+                        sort: r.navigation_sort(),
+                        item: NavGroup {
+                            title: r.navigation_label().to_string(),
+                            icon: admin_theme.theme.icon(Icon::Resource),
+                            url: format!("{}/{}", registry.mount, r.slug()),
+                            has_add: user.may(r.slug(), Action::Create),
+                            add_url: format!("{}/{}/new", registry.mount, r.slug()),
+                            active: section == r.slug(),
+                        },
+                    })
+                    .collect();
+                let mut sections = arrange(entries, &registry.navigation_groups);
+                // The dashboard is the first entry, before every group, as Filament's is.
+                sections[0].items.insert(
+                    0,
+                    NavGroup {
+                        title: "Dashboard".to_string(),
+                        icon: admin_theme.theme.icon(Icon::Dashboard),
+                        url: registry.mount.clone(),
+                        has_add: false,
+                        add_url: String::new(),
+                        active: section.is_empty(),
+                    },
+                );
+                sections
+                    .into_iter()
+                    .map(|section| NavSection {
+                        has_heading: section.heading.is_some(),
+                        heading: section.heading.unwrap_or_default(),
+                        items: section.items,
+                    })
+                    .collect()
+            }
             None => Vec::new(),
         };
+        let nav = nav_sections
+            .iter()
+            .flat_map(|section| section.items.iter().cloned())
+            .collect();
         Layout {
             home_url: registry.mount.clone(),
             signed_in: user.is_some(),
@@ -149,6 +187,7 @@ impl Layout {
             profile_url: format!("{}/profile", registry.mount),
             logout_everywhere_url: format!("{}/logout-everywhere", registry.mount),
             nav,
+            nav_sections,
             csrf_token,
             has_flash: flash.is_some(),
             flash: flash.unwrap_or_default(),
@@ -174,6 +213,7 @@ pub(crate) struct DashboardPage {
     pub(crate) logout_everywhere_url: String,
     pub(crate) csrf_token: String,
     pub(crate) nav: Vec<NavGroup>,
+    pub(crate) nav_sections: Vec<NavSection>,
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
     pub(crate) theme_style: String,
@@ -255,6 +295,7 @@ pub(crate) struct LoginPage {
     pub(crate) logout_everywhere_url: String,
     pub(crate) csrf_token: String,
     pub(crate) nav: Vec<NavGroup>,
+    pub(crate) nav_sections: Vec<NavSection>,
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
     pub(crate) theme_style: String,
@@ -284,6 +325,7 @@ pub(crate) struct ForgotPage {
     pub(crate) logout_everywhere_url: String,
     pub(crate) csrf_token: String,
     pub(crate) nav: Vec<NavGroup>,
+    pub(crate) nav_sections: Vec<NavSection>,
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
     pub(crate) theme_style: String,
@@ -312,6 +354,7 @@ pub(crate) struct ResetPage {
     pub(crate) logout_everywhere_url: String,
     pub(crate) csrf_token: String,
     pub(crate) nav: Vec<NavGroup>,
+    pub(crate) nav_sections: Vec<NavSection>,
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
     pub(crate) theme_style: String,
@@ -340,6 +383,7 @@ pub(crate) struct ProfilePage {
     pub(crate) logout_everywhere_url: String,
     pub(crate) csrf_token: String,
     pub(crate) nav: Vec<NavGroup>,
+    pub(crate) nav_sections: Vec<NavSection>,
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
     pub(crate) theme_style: String,
@@ -369,6 +413,7 @@ pub(crate) struct IndexPage {
     pub(crate) logout_everywhere_url: String,
     pub(crate) csrf_token: String,
     pub(crate) nav: Vec<NavGroup>,
+    pub(crate) nav_sections: Vec<NavSection>,
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
     pub(crate) theme_style: String,
@@ -439,6 +484,7 @@ pub(crate) struct FormPage {
     pub(crate) logout_everywhere_url: String,
     pub(crate) csrf_token: String,
     pub(crate) nav: Vec<NavGroup>,
+    pub(crate) nav_sections: Vec<NavSection>,
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
     pub(crate) theme_style: String,

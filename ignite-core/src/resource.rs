@@ -48,6 +48,18 @@ pub trait IgniteResource: Send + Sync + 'static {
     const SINGULAR: &'static str = "Record";
     /// Rows per page on the list view.
     const PER_PAGE: i64 = 20;
+    /// The label of the resource's navigation entry, as Filament's `$navigationLabel`. The
+    /// default, `None`, is the [`TITLE`](Self::TITLE).
+    const NAVIGATION_LABEL: Option<&'static str> = None;
+    /// The navigation group the resource is listed under, as Filament's `$navigationGroup`:
+    /// the group's name, shown as a heading in the sidebar. The panel's `navigation_groups`
+    /// orders the groups. The default, `None`, lists the resource before the groups, as
+    /// Filament lists ungrouped items first.
+    const NAVIGATION_GROUP: Option<&'static str> = None;
+    /// The resource's place in the navigation, as Filament's `$navigationSort`: a lower number
+    /// comes first. The default, `None`, comes before any number. In a group, resources with
+    /// the same place are listed by label; without a group, in the order they were added.
+    const NAVIGATION_SORT: Option<i32> = None;
 
     /// Stat cards for the dashboard, in display order. The default is none.
     /// Override it to show counts, such as the total number of rows.

@@ -21,6 +21,9 @@ use syn::{
 ///   compile error.
 /// - `#[ignite(title = "Widgets")]`: the heading and nav label. Defaults to the table name, capitalized.
 /// - `#[ignite(singular = "Widget")]`: the name of one record, for "New Widget". Defaults to the title without a trailing `s`.
+/// - `#[ignite(navigation_label = "All widgets")]`: the label of the resource's navigation entry, as Filament's `$navigationLabel`. Defaults to the title.
+/// - `#[ignite(navigation_group = "Shop")]`: the navigation group the entry is listed under, as Filament's `$navigationGroup`. Defaults to none: the entry is listed before the groups.
+/// - `#[ignite(navigation_sort = 2)]`: the entry's place, as Filament's `$navigationSort`: lower first. Defaults to none, which comes before any number.
 ///
 /// Field attributes:
 /// - `primary_key`: the key column. Defaults to a field named `id`.
@@ -197,7 +200,7 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
         }
     };
 
-    let (table, title, singular, latest) = struct_attrs(input)?;
+    let (table, title, singular, latest, navigation) = struct_attrs(input)?;
     let table_name = table
         .segments
         .last()
@@ -230,6 +233,8 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
         Some(spec) => latest_records_tokens(spec, &fields, &title, name)?,
         None => quote! { ::core::option::Option::None },
     };
+
+    let navigation_consts = navigation.consts();
 
     let form_fields: Vec<&Field> = fields.iter().filter(|f| f.ident != pk_ident).collect();
     let input_name = format_ident!("{}Input", name);
@@ -424,6 +429,7 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
             const SLUG: &'static str = #table_name;
             const TITLE: &'static str = #title;
             const SINGULAR: &'static str = #singular;
+            #navigation_consts
 
             fn fields() -> &'static [::ignite_core::Field] {
                 &[#(#field_defs),*]
@@ -617,22 +623,49 @@ struct LatestSpec {
     columns: Vec<(String, Span)>,
 }
 
-/// What the struct-level attributes give: the table, the title, the singular name, and
-/// the dashboard table.
+/// The navigation attributes of the struct, as Filament's resource properties. Each one left
+/// out keeps the trait's default.
+#[derive(Default)]
+struct Navigation {
+    label: Option<String>,
+    group: Option<String>,
+    sort: Option<i32>,
+}
+
+impl Navigation {
+    /// The `NAVIGATION_*` constants of the attributes that were given.
+    fn consts(&self) -> TokenStream2 {
+        let label = self.label.as_ref().map(|label| {
+            quote! { const NAVIGATION_LABEL: ::core::option::Option<&'static str> = ::core::option::Option::Some(#label); }
+        });
+        let group = self.group.as_ref().map(|group| {
+            quote! { const NAVIGATION_GROUP: ::core::option::Option<&'static str> = ::core::option::Option::Some(#group); }
+        });
+        let sort = self.sort.map(|sort| {
+            quote! { const NAVIGATION_SORT: ::core::option::Option<i32> = ::core::option::Option::Some(#sort); }
+        });
+        quote! { #label #group #sort }
+    }
+}
+
+/// What the struct-level attributes give: the table, the title, the singular name, the
+/// dashboard table, and the navigation.
 type StructAttrs = (
     syn::Path,
     Option<String>,
     Option<String>,
     Option<LatestSpec>,
+    Navigation,
 );
 
-/// Reads `#[ignite(...)]` on the struct: the table, the title, the singular name, and
-/// the dashboard table.
+/// Reads `#[ignite(...)]` on the struct: the table, the title, the singular name, the
+/// dashboard table, and the navigation.
 fn struct_attrs(input: &DeriveInput) -> syn::Result<StructAttrs> {
     let mut table = None;
     let mut title = None;
     let mut singular = None;
     let mut latest = None;
+    let mut navigation = Navigation::default();
     for attr in input.attrs.iter().filter(|a| a.path().is_ident("ignite")) {
         attr.parse_nested_meta(|meta| {
             if meta.path.is_ident("table") {
@@ -647,9 +680,18 @@ fn struct_attrs(input: &DeriveInput) -> syn::Result<StructAttrs> {
             } else if meta.path.is_ident("latest_records") {
                 latest = Some(latest_spec(&meta)?);
                 Ok(())
+            } else if meta.path.is_ident("navigation_label") {
+                navigation.label = Some(meta.value()?.parse::<LitStr>()?.value());
+                Ok(())
+            } else if meta.path.is_ident("navigation_group") {
+                navigation.group = Some(meta.value()?.parse::<LitStr>()?.value());
+                Ok(())
+            } else if meta.path.is_ident("navigation_sort") {
+                navigation.sort = Some(sort_value(&meta.value()?.parse::<syn::Expr>()?)?);
+                Ok(())
             } else {
                 Err(meta.error(
-                    "unknown ignite attribute on the struct; expected `table`, `title`, `singular` or `latest_records`",
+                    "unknown ignite attribute on the struct; expected `table`, `title`, `singular`, `latest_records`, `navigation_label`, `navigation_group` or `navigation_sort`",
                 ))
             }
         })?;
@@ -660,7 +702,37 @@ fn struct_attrs(input: &DeriveInput) -> syn::Result<StructAttrs> {
             "IgniteResource needs #[ignite(table = <table name>)]",
         )
     })?;
-    Ok((table, title, singular, latest))
+    Ok((table, title, singular, latest, navigation))
+}
+
+/// The `i32` of a `navigation_sort` value: an integer literal, or a negative one such as `-1`.
+fn sort_value(expr: &syn::Expr) -> syn::Result<i32> {
+    match expr {
+        syn::Expr::Lit(syn::ExprLit {
+            lit: syn::Lit::Int(int),
+            ..
+        }) => int.base10_parse::<i32>(),
+        syn::Expr::Unary(syn::ExprUnary {
+            op: syn::UnOp::Neg(_),
+            expr: inner,
+            ..
+        }) => match inner.as_ref() {
+            syn::Expr::Lit(syn::ExprLit {
+                lit: syn::Lit::Int(int),
+                ..
+            }) => format!("-{}", int.base10_digits())
+                .parse::<i32>()
+                .map_err(|_| syn::Error::new_spanned(expr, "navigation_sort must fit in an i32")),
+            _ => Err(syn::Error::new_spanned(
+                expr,
+                "navigation_sort takes a whole number",
+            )),
+        },
+        _ => Err(syn::Error::new_spanned(
+            expr,
+            "navigation_sort takes a whole number",
+        )),
+    }
 }
 
 /// Reads `latest_records(limit = 5, columns = "name,email", title = "...")`.

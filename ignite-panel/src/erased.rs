@@ -20,6 +20,12 @@ pub(crate) trait Erased: Send + Sync {
     fn title(&self) -> &str;
     fn singular(&self) -> &str;
     fn per_page(&self) -> i64;
+    /// The label of the navigation entry: the navigation label, or the title.
+    fn navigation_label(&self) -> &str;
+    /// The navigation group the resource is listed under, if any.
+    fn navigation_group(&self) -> Option<&str>;
+    /// The resource's place in the navigation, if set: lower first.
+    fn navigation_sort(&self) -> Option<i32>;
     /// The form fields, owned, so static and runtime resources render the same way.
     fn fields(&self) -> &[FieldDef];
     /// The list columns, owned.
@@ -103,6 +109,18 @@ impl<R: IgniteResource> Erased for Adapter<R> {
 
     fn per_page(&self) -> i64 {
         R::PER_PAGE
+    }
+
+    fn navigation_label(&self) -> &str {
+        R::NAVIGATION_LABEL.unwrap_or(R::TITLE)
+    }
+
+    fn navigation_group(&self) -> Option<&str> {
+        R::NAVIGATION_GROUP
+    }
+
+    fn navigation_sort(&self) -> Option<i32> {
+        R::NAVIGATION_SORT
     }
 
     fn fields(&self) -> &[FieldDef] {
@@ -415,6 +433,18 @@ impl Erased for RuntimeAdapter {
 
     fn per_page(&self) -> i64 {
         self.0.resource().per_page
+    }
+
+    fn navigation_label(&self) -> &str {
+        self.0.navigation_label()
+    }
+
+    fn navigation_group(&self) -> Option<&str> {
+        self.0.navigation_group()
+    }
+
+    fn navigation_sort(&self) -> Option<i32> {
+        self.0.navigation_sort()
     }
 
     fn fields(&self) -> &[FieldDef] {

@@ -7,7 +7,8 @@
   </a>
   <nav class="flex flex-col gap-1 px-4 pb-6" aria-label="Main">
     <p class="ig-caption mt-2">Menu</p>
-    @foreach (group in nav)
+    @foreach (section in nav_sections)@if (section.has_heading)<p class="ig-caption mt-5">{{ $section.heading }}</p>
+    @endif@foreach (group in section.items)
       @if (group.active)
         <a class="ig-nav-link ig-nav-link-active" href="{{ $group.url }}" aria-current="page"><i class="ti {{ $group.icon }} text-lg"></i>{{ $group.title }}</a>
       @else
@@ -16,7 +17,7 @@
       @if (group.has_add)
         <a class="ig-nav-link py-1.5 pl-11 text-[13px]" href="{{ $group.add_url }}">Add new</a>
       @endif
-    @endforeach
+    @endforeach@endforeach
   </nav>
 </aside>
 @endif

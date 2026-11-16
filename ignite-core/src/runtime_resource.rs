@@ -391,6 +391,15 @@ pub struct RuntimeResource {
     pub columns: Vec<ColumnDef>,
     /// Where the rows live.
     pub data: Arc<dyn RuntimeData>,
+    /// The label of the navigation entry, as Filament's `$navigationLabel`. `None`, the
+    /// default, is the [`title`](Self::title).
+    pub navigation_label: Option<String>,
+    /// The navigation group the resource is listed under, as Filament's `$navigationGroup`.
+    /// See [`IgniteResource::NAVIGATION_GROUP`](crate::IgniteResource::NAVIGATION_GROUP).
+    pub navigation_group: Option<String>,
+    /// The resource's place in the navigation, as Filament's `$navigationSort`: lower first.
+    /// See [`IgniteResource::NAVIGATION_SORT`](crate::IgniteResource::NAVIGATION_SORT).
+    pub navigation_sort: Option<i32>,
 }
 
 impl fmt::Debug for RuntimeResource {
@@ -402,6 +411,9 @@ impl fmt::Debug for RuntimeResource {
             .field("per_page", &self.per_page)
             .field("fields", &self.fields)
             .field("columns", &self.columns)
+            .field("navigation_label", &self.navigation_label)
+            .field("navigation_group", &self.navigation_group)
+            .field("navigation_sort", &self.navigation_sort)
             .finish_non_exhaustive()
     }
 }
@@ -422,6 +434,9 @@ impl RuntimeResource {
             fields: Vec::new(),
             columns: Vec::new(),
             data: Arc::new(data),
+            navigation_label: None,
+            navigation_group: None,
+            navigation_sort: None,
         }
     }
 
@@ -440,6 +455,24 @@ impl RuntimeResource {
     /// Sets the rows per page of the list view.
     pub fn per_page(mut self, per_page: i64) -> Self {
         self.per_page = per_page;
+        self
+    }
+
+    /// Sets the label of the navigation entry, as Filament's `navigationLabel`.
+    pub fn navigation_label(mut self, label: impl Into<String>) -> Self {
+        self.navigation_label = Some(label.into());
+        self
+    }
+
+    /// Lists the resource under the navigation group `group`, as Filament's `navigationGroup`.
+    pub fn navigation_group(mut self, group: impl Into<String>) -> Self {
+        self.navigation_group = Some(group.into());
+        self
+    }
+
+    /// Sets the resource's place in the navigation, as Filament's `navigationSort`: lower first.
+    pub fn navigation_sort(mut self, sort: i32) -> Self {
+        self.navigation_sort = Some(sort);
         self
     }
 }
@@ -602,6 +635,24 @@ impl RegisteredResource {
     /// The name of one record.
     pub fn singular(&self) -> &str {
         &self.resource.singular
+    }
+
+    /// The label of the navigation entry: the navigation label, or the title.
+    pub fn navigation_label(&self) -> &str {
+        self.resource
+            .navigation_label
+            .as_deref()
+            .unwrap_or(&self.resource.title)
+    }
+
+    /// The navigation group the resource is listed under, if any.
+    pub fn navigation_group(&self) -> Option<&str> {
+        self.resource.navigation_group.as_deref()
+    }
+
+    /// The resource's place in the navigation, if set.
+    pub fn navigation_sort(&self) -> Option<i32> {
+        self.resource.navigation_sort
     }
 
     /// The form fields, in display order.

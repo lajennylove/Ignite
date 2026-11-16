@@ -17,6 +17,7 @@ mod erased;
 mod ignite;
 pub mod mail;
 mod migrations;
+mod navigation;
 mod password_reset;
 mod profile;
 mod proxy;
