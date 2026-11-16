@@ -29,6 +29,11 @@
 //! layout places them where its look needs them:
 //!
 //! - `title`: the page's title, for the `<title>` element.
+//! - `ignite_brand_name`: the brand name, which ends the `<title>` element. Without it the
+//!   layout prints `Ignite`.
+//! - `ignite_favicon`: the favicon links (the panel's `partials.favicon`). Without it the
+//!   layout links Ignite's icons, so a view that has none of the panel's values, such as an
+//!   app's own page, can extend the layout.
 //! - `content`: the screen itself.
 //! - `ignite_html`: attributes of the `<html>` element (the light or dark mode).
 //! - `ignite_head`: the theme's colour tokens, as a `<style>` element, when it has any.
@@ -36,6 +41,15 @@
 //! - `ignite_column`: classes of the column beside the navigation.
 //! - `ignite_bar`: the top bar.
 //! - `ignite_flash`: the flash message.
+//!
+//! Besides each page's own values, every page has the values of the look: `brand` (the
+//! brand's `name`, `has_logo`, `logo`, `logo_height`, `has_mark`, `has_favicon` and `favicon`,
+//! set with [`Ignite::brand_name`](crate::Ignite::brand_name) and the methods beside it),
+//! `nav_sections` (the sidebar in sections, each with `has_heading`, `heading` and `items`, as
+//! [`Ignite::navigation_groups`](crate::Ignite::navigation_groups) orders them) and `nav` (the
+//! same entries in one list). Each entry has `title`, `url`, `active`, `has_add`, `add_url`,
+//! `icon` (the theme's icon) and `has_icon_class` and `icon_class` (the resource's own
+//! icon, its `NAVIGATION_ICON`).
 //!
 //! A theme's own views come from [`AdminTheme::view`], so a theme can ship them in its binary,
 //! and the same method can replace any view of the panel by name. A replaced page must keep

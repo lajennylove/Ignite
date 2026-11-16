@@ -147,7 +147,13 @@ fn a_logo_height_that_is_not_a_length_is_refused() {
 
 #[derive(Debug, Clone, OrbitModel, Serialize, IgniteResource)]
 #[orbit(table = "nav_posts")]
-#[ignite(table = nav_posts, title = "Posts", navigation_group = "Content", navigation_sort = 2)]
+#[ignite(
+    table = nav_posts,
+    title = "Posts",
+    navigation_group = "Content",
+    navigation_sort = 2,
+    navigation_icon = "dashicons dashicons-admin-post"
+)]
 pub struct Post {
     id: i32,
     #[orbit(fillable)]
@@ -206,6 +212,11 @@ fn the_derive_sets_the_navigation_constants() {
     assert_eq!(<Tag as IgniteResource>::NAVIGATION_LABEL, Some("Labels"));
     assert_eq!(<Log as IgniteResource>::NAVIGATION_SORT, Some(-1));
     assert_eq!(<Order as IgniteResource>::NAVIGATION_SORT, None);
+    assert_eq!(
+        <Post as IgniteResource>::NAVIGATION_ICON,
+        Some("dashicons dashicons-admin-post")
+    );
+    assert_eq!(<Order as IgniteResource>::NAVIGATION_ICON, None);
 }
 
 /// The panel of the navigation tests: `Widgets` (no group) and the resources above.
@@ -242,9 +253,14 @@ fn heading(name: &str) -> String {
     format!(r#"<p class="ig-caption mt-5">{name}</p>"#)
 }
 
-/// A navigation link that ends with `label`.
+/// A navigation link that ends with `label`, after its icon.
 fn link(label: &str) -> String {
-    format!("</i>{label}</a>")
+    format!("></i>{label}</a>")
+}
+
+/// A navigation link that ends with `label`, after the resource's own icon.
+fn link_with_icon(classes: &str, label: &str) -> String {
+    format!(r#"<span class="{classes}" aria-hidden="true"></span>{label}</a>"#)
 }
 
 #[test]
@@ -280,7 +296,10 @@ fn resources_sort_by_navigation_sort_then_label_inside_a_group() {
     let content = at(nav, &heading("Content"));
     let pages = at(nav, &link("Pages"));
     let labels = at(nav, &link("Labels"));
-    let posts = at(nav, &link("Posts"));
+    let posts = at(
+        nav,
+        &link_with_icon("dashicons dashicons-admin-post", "Posts"),
+    );
     assert!(
         content < pages && pages < labels && labels < posts,
         "Pages (1), then Labels and Posts (2) by label:\n{nav}"
@@ -341,7 +360,8 @@ fn a_runtime_resource_takes_its_place_in_a_group() {
         RuntimeResource::new("nav-notes", "Notes", "Note", NoRows)
             .navigation_group("Content")
             .navigation_sort(0)
-            .navigation_label("Sticky notes"),
+            .navigation_label("Sticky notes")
+            .navigation_icon("dashicons dashicons-sticky"),
     )
     .expect("register");
     let client = signed_in_with(with_groups);
@@ -349,6 +369,36 @@ fn a_runtime_resource_takes_its_place_in_a_group() {
     unregister_runtime("nav-notes").expect("unregister");
     let nav = navigation(&html);
     let content = at(nav, &heading("Content"));
-    let notes = at(nav, &link("Sticky notes"));
+    let notes = at(
+        nav,
+        &link_with_icon("dashicons dashicons-sticky", "Sticky notes"),
+    );
     assert!(content < notes && notes < at(nav, &link("Pages")), "{nav}");
+}
+
+#[test]
+fn the_icon_span_appears_only_for_a_resource_that_sets_one() {
+    let _guard = reset();
+    let client = signed_in_with(with_groups);
+    let html = page(&client, "/admin/nav_posts/new");
+    let nav = navigation(&html);
+    // The active entry shows the resource's icon too.
+    assert!(
+        nav.contains(r#"aria-current="page"><span class="dashicons dashicons-admin-post" aria-hidden="true"></span>Posts</a>"#),
+        "{nav}"
+    );
+    assert_eq!(
+        nav.matches("<span ").count(),
+        1,
+        "only Posts sets an icon:\n{nav}"
+    );
+    // The others keep the admin theme's icon.
+    assert!(nav.contains(r#"<i class="ti ti-table text-lg"></i>Orders</a>"#));
+    assert!(nav.contains(r#"<i class="ti ti-layout-dashboard text-lg"></i>Dashboard</a>"#));
+    assert!(!nav.contains(r#"<i class="ti ti-table text-lg"></i>Posts</a>"#));
+
+    // Without icons, no span at all.
+    let plain = signed_in(None);
+    let html = page(&plain, "/admin");
+    assert!(!navigation(&html).contains("<span "));
 }

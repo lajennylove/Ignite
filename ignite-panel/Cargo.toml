@@ -1,6 +1,6 @@
 [package]
 name = "ignite-panel"
-version = "0.5.0"
+version = "0.6.0"
 license = "MIT"
 description = "The Ignite admin panel for Rocket.rs, built on Propel views and Orbit."
 repository = "https://github.com/lajennylove/Ignite"
@@ -14,7 +14,7 @@ postgres = ["orbit-orm/postgres"]
 sqlite = ["orbit-orm/sqlite"]
 
 [dependencies]
-ignite-core = { version = "0.5.0", path = "../ignite-core" }
+ignite-core = { version = "0.6.0", path = "../ignite-core" }
 rocket = "0.5.2"
 propel_rocket = "0.3.0"
 propel_runtime = "0.3.0"

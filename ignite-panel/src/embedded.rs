@@ -26,6 +26,10 @@ pub(crate) const VIEWS: &[(&str, &str)] = &[
         include_str!("../views/ignite/layouts/app.propel"),
     ),
     (
+        "partials.favicon",
+        include_str!("../views/ignite/partials/favicon.propel"),
+    ),
+    (
         "partials.field",
         include_str!("../views/ignite/partials/field.propel"),
     ),

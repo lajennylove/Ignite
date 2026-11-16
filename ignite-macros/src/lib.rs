@@ -24,6 +24,7 @@ use syn::{
 /// - `#[ignite(navigation_label = "All widgets")]`: the label of the resource's navigation entry, as Filament's `$navigationLabel`. Defaults to the title.
 /// - `#[ignite(navigation_group = "Shop")]`: the navigation group the entry is listed under, as Filament's `$navigationGroup`. Defaults to none: the entry is listed before the groups.
 /// - `#[ignite(navigation_sort = 2)]`: the entry's place, as Filament's `$navigationSort`: lower first. Defaults to none, which comes before any number.
+/// - `#[ignite(navigation_icon = "dashicons dashicons-admin-post")]`: the CSS classes of the entry's icon, as Filament's `$navigationIcon`, from a stylesheet the app loads (Ignite ships no icon font). Defaults to the admin theme's icon.
 ///
 /// Field attributes:
 /// - `primary_key`: the key column. Defaults to a field named `id`.
@@ -630,6 +631,7 @@ struct Navigation {
     label: Option<String>,
     group: Option<String>,
     sort: Option<i32>,
+    icon: Option<String>,
 }
 
 impl Navigation {
@@ -644,7 +646,10 @@ impl Navigation {
         let sort = self.sort.map(|sort| {
             quote! { const NAVIGATION_SORT: ::core::option::Option<i32> = ::core::option::Option::Some(#sort); }
         });
-        quote! { #label #group #sort }
+        let icon = self.icon.as_ref().map(|icon| {
+            quote! { const NAVIGATION_ICON: ::core::option::Option<&'static str> = ::core::option::Option::Some(#icon); }
+        });
+        quote! { #label #group #sort #icon }
     }
 }
 
@@ -686,12 +691,15 @@ fn struct_attrs(input: &DeriveInput) -> syn::Result<StructAttrs> {
             } else if meta.path.is_ident("navigation_group") {
                 navigation.group = Some(meta.value()?.parse::<LitStr>()?.value());
                 Ok(())
+            } else if meta.path.is_ident("navigation_icon") {
+                navigation.icon = Some(meta.value()?.parse::<LitStr>()?.value());
+                Ok(())
             } else if meta.path.is_ident("navigation_sort") {
                 navigation.sort = Some(sort_value(&meta.value()?.parse::<syn::Expr>()?)?);
                 Ok(())
             } else {
                 Err(meta.error(
-                    "unknown ignite attribute on the struct; expected `table`, `title`, `singular`, `latest_records`, `navigation_label`, `navigation_group` or `navigation_sort`",
+                    "unknown ignite attribute on the struct; expected `table`, `title`, `singular`, `latest_records`, `navigation_label`, `navigation_group`, `navigation_sort` or `navigation_icon`",
                 ))
             }
         })?;

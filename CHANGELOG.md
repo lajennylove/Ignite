@@ -9,6 +9,13 @@ All notable changes to Ignite are listed here. The format follows
 ### Known limitations
 
 - The admin panel's runtime queries (user create, update and delete, sessions and sign-in) still run on MariaDB and MySQL only, so the panel's policy tests run on MariaDB. Migrations and `migrate:status` work on SQLite, MySQL, MariaDB and PostgreSQL.
+- A release build renders the compiled `ignite` layout, which has no place for an app's own
+  stylesheet, so the classes of `navigation_icon` render without their font there until the
+  panel has an option to add one.
+- One `brand_logo` serves the sidebar and the sign-in bar, as Filament's `brandLogo` does;
+  there is no dark-mode logo (`darkModeBrandLogo`) yet, and the navigation groups are
+  headings, not collapsible, and have no icons or labels of their own (Filament's
+  `NavigationGroup` objects).
 
 ### Added
 
@@ -31,6 +38,28 @@ All notable changes to Ignite are listed here. The format follows
   answers 403. The navigation, the dashboard and the New button follow `view_any` and `create`,
   and each record's Edit and Delete buttons follow `update` and `delete` for that record. A
   policy that fails answers 500. The panel has no detail page, so nothing asks `view` yet.
+- Brand options on the panel, as Filament's panel: `Ignite::brand_name`, `brand_logo`,
+  `brand_logo_height` and `favicon`. The name shows at the top of the sidebar and in the
+  sign-in bar, and ends each page title (`Posts · <name>`); a logo shows there in place of the
+  name, with the name as its alternative text, at `brand_logo_height` (default `1.5rem`, as
+  Filament's); the favicon replaces Ignite's favicon and touch icon. Without them the pages
+  render exactly as before: the Ignite mark beside "Ignite", and Ignite's icons.
+- Navigation options, as Filament's resources and panel: `IgniteResource` has
+  `NAVIGATION_GROUP`, `NAVIGATION_SORT`, `NAVIGATION_LABEL` and `NAVIGATION_ICON` (defaults
+  `None`), the derive takes `#[ignite(navigation_group = "...", navigation_sort = 1,
+  navigation_label = "...", navigation_icon = "...")]`, `RuntimeResource` has the fields and
+  builder methods of the same names (and `RegisteredResource` the getters), and
+  `Ignite::navigation_groups` orders the groups. The sidebar lists the dashboard and the
+  resources without a group first, then each group under its name as a heading: the listed
+  groups in order, then the others. Inside a group, resources sort by `navigation_sort`
+  (lower first; none before any number), then by label. Ungrouped resources keep the order
+  they were added in unless they set a sort.
+- `navigation_icon` is one or more CSS classes, rendered as
+  `<span class="..." aria-hidden="true"></span>` before the label in place of the admin
+  theme's icon. Ignite ships no icon font: the app supplies the stylesheet.
+- These options are compiled into the panel's views (every page has `brand` and
+  `nav_sections`; `nav` stays, in the new order), so they work in a release build, where an
+  app's copy of the views is not read.
 
 ### Changed
 
@@ -40,6 +69,16 @@ All notable changes to Ignite are listed here. The format follows
   one more read on those two routes.
 - The list's Edit and Delete buttons are decided per record (`row.can_update` and
   `row.can_delete` in `views/ignite/index.propel`). Without a policy they show as before.
+- `RuntimeResource` has four more public fields (`navigation_label`, `navigation_group`,
+  `navigation_sort`, `navigation_icon`). Code that builds it with `RuntimeResource::new` is
+  unchanged; code that builds it with a struct literal adds them (`None`).
+- The views read `brand` and `nav_sections`: the sidebar's and sign-in bar's brand and menu
+  (`themes/ignite/partials/nav.propel` and `topbar.propel`), and each panel page fills two
+  new sections of the layout, `ignite_brand_name` (the end of the title) and `ignite_favicon`
+  (the new `partials/favicon.propel`). The layout itself still reads no page values: without
+  these sections it prints `Ignite` and Ignite's icons, so an app's own view that extends it
+  renders as before. A copy of the views made before this release (`views_dir` or
+  `IGNITE_VIEWS_DIR`) still renders, without the new options.
 
 ## [0.5.0] - 2026-11-15
 

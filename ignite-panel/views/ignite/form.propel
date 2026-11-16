@@ -1,5 +1,9 @@
 @extends('ignite::layouts.app')
 
+@section('ignite_brand_name'){{ $brand.name }}@endsection
+
+@section('ignite_favicon')@include('ignite::partials.favicon')@endsection
+
 @section('ignite_head')@if (theme_style)<style>{!! $theme_style !!}</style>@endif@endsection
 
 @section('ignite_html')data-theme="{{ $theme }}"@endsection

@@ -80,6 +80,11 @@ pub(crate) struct NavGroup {
     pub(crate) title: String,
     /// The active admin theme's icon for the entry.
     pub(crate) icon: String,
+    /// Whether the resource set its own icon (`NAVIGATION_ICON`), which then replaces the
+    /// theme's.
+    pub(crate) has_icon_class: bool,
+    /// The CSS classes of the resource's own icon.
+    pub(crate) icon_class: String,
     pub(crate) url: String,
     pub(crate) has_add: bool,
     pub(crate) add_url: String,
@@ -133,6 +138,8 @@ impl Layout {
                         item: NavGroup {
                             title: r.navigation_label().to_string(),
                             icon: admin_theme.theme.icon(Icon::Resource),
+                            has_icon_class: r.navigation_icon().is_some(),
+                            icon_class: r.navigation_icon().unwrap_or_default().to_string(),
                             url: format!("{}/{}", registry.mount, r.slug()),
                             has_add: user.may(r.slug(), Action::Create),
                             add_url: format!("{}/{}/new", registry.mount, r.slug()),
@@ -147,6 +154,8 @@ impl Layout {
                     NavGroup {
                         title: "Dashboard".to_string(),
                         icon: admin_theme.theme.icon(Icon::Dashboard),
+                        has_icon_class: false,
+                        icon_class: String::new(),
                         url: registry.mount.clone(),
                         has_add: false,
                         add_url: String::new(),

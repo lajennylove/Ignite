@@ -1,0 +1,5 @@
+{{-- The favicon links of a panel page, which it puts in the layout's ignite_favicon section: the app's favicon (Ignite::favicon), or Ignite's icons. The layout itself reads no page values, so an app's own view can extend it; without the section it links Ignite's icons. --}}@if (brand.has_favicon)<link rel="icon" href="{{ $brand.favicon }}">
+@else<link rel="icon" href="{{ asset('ui::resources/images/favicon.ico') }}" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="{{ asset('ui::resources/images/favicon-32.png') }}">
+<link rel="apple-touch-icon" href="{{ asset('ui::resources/images/apple-touch-icon.png') }}">
+@endif

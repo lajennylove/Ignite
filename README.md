@@ -199,6 +199,41 @@ unregister_runtime("books")?;
 
 The panel serves it at `/admin/<slug>` with the same list, forms, checks and delete action as a static resource, and shows it in the navigation, from the next request on. Ignite assumes no table layout: `RuntimeData` decides where the rows live. A row needs a numeric `id`. A slug that is not valid is refused with `RuntimeError::InvalidSlug`, and a slug that a static resource, another runtime resource or a panel page (such as `login`) uses with `RuntimeError::SlugTaken`; `unregister_runtime` of a slug that is not registered returns `RuntimeError::NotRegistered`. On edit, an optional field sent blank comes to `RuntimeData::update` as `null`, and one the form did not send and a blank password are left out of the row, as for a derived resource. Call `ignite_panel::register_runtime_permissions(&db, "books").await?` right after `register_runtime` (it refuses a slug that is not registered), so its five permissions exist at once and a role can be granted them; without the call, the panel creates them on the next signed-in request. They stay when the resource is removed. A unique-index violation shows as "<label> is already taken." only when the index is named `{slug}_{field}_unique`, as for a static resource; a `RuntimeData` that stores values elsewhere should check uniqueness itself. A runtime resource has no dashboard cards or table yet.
 
+## Brand and navigation
+
+The panel's brand and its sidebar are options of the panel and of each resource, as Filament's panel and resources set them. They are compiled into the panel's views, so they work in a release build too; an app does not copy the views to change them.
+
+```rust
+Ignite::new()
+    .brand_name("Mission Control")
+    .brand_logo("/images/logo.webp")
+    .brand_logo_height("2rem")
+    .favicon("/images/favicon.png")
+    .navigation_groups(["Content", "Settings"])
+    .resource::<Posts>()
+```
+
+- `brand_name` (Filament's `brandName`) is the text at the top of the sidebar and in the sign-in bar, and the end of each page title (`Posts · Mission Control`). The default is `Ignite` beside the Ignite mark; a name set here shows without the mark.
+- `brand_logo` (`brandLogo`) is the path or URL of an image, shown in the sidebar and the sign-in bar in place of the name, with the name as its alternative text, as in Filament. `brand_logo_height` (`brandLogoHeight`) is a CSS length; the default is Filament's `1.5rem`.
+- `favicon` (`favicon`) is the path or URL of the icon. It replaces Ignite's favicon and touch icon.
+- The app serves the image files. Without these calls the pages look exactly as before.
+
+A resource places itself in the sidebar with struct attributes, as Filament's `$navigationGroup`, `$navigationSort`, `$navigationLabel` and `$navigationIcon`:
+
+```rust
+#[ignite(
+    table = posts,
+    navigation_group = "Content",
+    navigation_sort = 1,
+    navigation_label = "All posts",
+    navigation_icon = "dashicons dashicons-admin-post"
+)]
+```
+
+A resource implemented by hand sets `NAVIGATION_GROUP`, `NAVIGATION_SORT`, `NAVIGATION_LABEL` and `NAVIGATION_ICON`, and a `RuntimeResource` the methods of the same names. The sidebar lists the dashboard and the resources without a group first, as they were listed before, then each group under its name as a heading: the groups in the order of `navigation_groups` (each call adds to the list, as in Filament), then any group not listed there. Inside a group, resources are sorted by `navigation_sort`, lower first, then by label; a resource without a sort comes before those with one. `navigation_label` changes the sidebar's text only; the pages keep the resource's title.
+
+`navigation_icon` is one or more CSS classes. The panel renders `<span class="..." aria-hidden="true"></span>` before the label, in place of the admin theme's icon; a resource without one keeps the theme's icon and gets no span. Ignite ships no icon font for these classes: the app supplies the stylesheet that defines them (Dashicons, Font Awesome or its own). In a debug build, an admin theme's layout or a views directory can link it. A release build renders the compiled `ignite` layout, which has no place yet for an app's own stylesheet, so there the classes render without the font until such an option exists.
+
 ## Roles and permissions
 
 The panel follows Filament and its standard plugin, Filament Shield (built on Spatie laravel-permission). Each resource has five abilities, named after its slug:

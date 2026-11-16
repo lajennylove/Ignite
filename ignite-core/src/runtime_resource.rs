@@ -400,6 +400,9 @@ pub struct RuntimeResource {
     /// The resource's place in the navigation, as Filament's `$navigationSort`: lower first.
     /// See [`IgniteResource::NAVIGATION_SORT`](crate::IgniteResource::NAVIGATION_SORT).
     pub navigation_sort: Option<i32>,
+    /// The CSS classes of the navigation entry's icon, as Filament's `$navigationIcon`.
+    /// See [`IgniteResource::NAVIGATION_ICON`](crate::IgniteResource::NAVIGATION_ICON).
+    pub navigation_icon: Option<String>,
 }
 
 impl fmt::Debug for RuntimeResource {
@@ -414,6 +417,7 @@ impl fmt::Debug for RuntimeResource {
             .field("navigation_label", &self.navigation_label)
             .field("navigation_group", &self.navigation_group)
             .field("navigation_sort", &self.navigation_sort)
+            .field("navigation_icon", &self.navigation_icon)
             .finish_non_exhaustive()
     }
 }
@@ -437,6 +441,7 @@ impl RuntimeResource {
             navigation_label: None,
             navigation_group: None,
             navigation_sort: None,
+            navigation_icon: None,
         }
     }
 
@@ -473,6 +478,14 @@ impl RuntimeResource {
     /// Sets the resource's place in the navigation, as Filament's `navigationSort`: lower first.
     pub fn navigation_sort(mut self, sort: i32) -> Self {
         self.navigation_sort = Some(sort);
+        self
+    }
+
+    /// Sets the icon of the navigation entry, as Filament's `navigationIcon`: one or more CSS
+    /// classes from a stylesheet the app loads, such as `"dashicons dashicons-admin-post"`.
+    /// See [`IgniteResource::NAVIGATION_ICON`](crate::IgniteResource::NAVIGATION_ICON).
+    pub fn navigation_icon(mut self, classes: impl Into<String>) -> Self {
+        self.navigation_icon = Some(classes.into());
         self
     }
 }
@@ -653,6 +666,11 @@ impl RegisteredResource {
     /// The resource's place in the navigation, if set.
     pub fn navigation_sort(&self) -> Option<i32> {
         self.resource.navigation_sort
+    }
+
+    /// The CSS classes of the navigation entry's icon, if set.
+    pub fn navigation_icon(&self) -> Option<&str> {
+        self.resource.navigation_icon.as_deref()
     }
 
     /// The form fields, in display order.

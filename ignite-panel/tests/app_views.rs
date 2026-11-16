@@ -52,6 +52,10 @@ fn an_app_view_extending_the_layout_is_styled_with_no_extra_step() {
     );
     assert!(body.contains(".js\""), "and its script");
     assert!(
+        body.contains("favicon.ico") && body.contains("· Ignite</title>"),
+        "the layout's own favicon and brand, without the panel's values"
+    );
+    assert!(
         !body.contains("Sign out"),
         "no panel navigation without the panel's context"
     );

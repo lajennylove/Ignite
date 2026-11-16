@@ -3,9 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>@yield('title') · {{ $brand.name }}</title>
-@if (brand.has_favicon)<link rel="icon" href="{{ $brand.favicon }}">
-@else<link rel="icon" href="{{ asset('ui::resources/images/favicon.ico') }}" sizes="any">
+<title>@yield('title') · @yield('ignite_brand_name', 'Ignite')</title>
+@hasSection('ignite_favicon')@yield('ignite_favicon')@endif@sectionMissing('ignite_favicon')<link rel="icon" href="{{ asset('ui::resources/images/favicon.ico') }}" sizes="any">
 <link rel="icon" type="image/png" sizes="32x32" href="{{ asset('ui::resources/images/favicon-32.png') }}">
 <link rel="apple-touch-icon" href="{{ asset('ui::resources/images/apple-touch-icon.png') }}">
 @endif@vite(['ui::resources/css/app.css', 'ui::resources/js/app.js'])
