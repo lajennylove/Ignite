@@ -369,9 +369,11 @@ pub(crate) struct IndexPage {
     pub(crate) new_url: String,
     /// Whether the user may create a record: shows the "New" button.
     pub(crate) can_create: bool,
-    /// Whether the user may update a record: shows each row's "Edit" button.
+    /// Whether the user may update records. Each row's "Edit" button also needs the
+    /// resource's policy to allow it for that record: see [`RowView::can_update`].
     pub(crate) can_update: bool,
-    /// Whether the user may delete a record: shows each row's "Delete" button.
+    /// Whether the user may delete records. Each row's "Delete" button also needs the
+    /// resource's policy: see [`RowView::can_delete`].
     pub(crate) can_delete: bool,
     pub(crate) search: String,
     pub(crate) columns: Vec<ColumnHead>,
@@ -399,6 +401,11 @@ pub(crate) struct RowView {
     pub(crate) cells: Vec<CellView>,
     pub(crate) edit_url: String,
     pub(crate) delete_url: String,
+    /// Whether the record shows its Edit button: the user holds the ability and the
+    /// resource's policy allows the update of this record.
+    pub(crate) can_update: bool,
+    /// Whether the record shows its Delete button, as `can_update` for the delete.
+    pub(crate) can_delete: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]

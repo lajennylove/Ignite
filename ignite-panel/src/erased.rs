@@ -6,8 +6,8 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use ignite_core::{
-    ColumnDef, Database, FieldDef, FieldErrors, FieldKindDef, FormInput, IgniteResource,
-    LatestRecords, ListQuery, RegisteredResource, Row, StatWidget,
+    ActingUser, ColumnDef, Database, FieldDef, FieldErrors, FieldKindDef, FormInput,
+    IgniteResource, LatestRecords, ListQuery, RegisteredResource, Row, StatWidget,
 };
 use orbit_orm::Error;
 use serde::Serialize;
@@ -25,29 +25,43 @@ pub(crate) trait Erased: Send + Sync {
     /// The list columns, owned.
     fn columns(&self) -> &[ColumnDef];
     /// One page of records as JSON, and the total count.
-    async fn list(&self, db: &Database, query: &ListQuery) -> Result<(Vec<Value>, i64), Error>;
-    async fn find(&self, db: &Database, id: i64) -> Result<Option<Value>, Error>;
+    /// The resource's queries are given the signed-in `user`: they call its `*_for` methods.
+    async fn list(
+        &self,
+        db: &Database,
+        user: &ActingUser,
+        query: &ListQuery,
+    ) -> Result<(Vec<Value>, i64), Error>;
+    async fn find(&self, db: &Database, user: &ActingUser, id: i64)
+        -> Result<Option<Value>, Error>;
     /// `Err(errors)` when the form does not validate; the database is not touched then.
     async fn create(
         &self,
         db: &Database,
+        user: &ActingUser,
         form: &FormInput,
     ) -> Result<Result<Value, FieldErrors>, Error>;
     async fn update(
         &self,
         db: &Database,
+        user: &ActingUser,
         id: i64,
         form: &FormInput,
     ) -> Result<Result<Value, FieldErrors>, Error>;
-    async fn delete(&self, db: &Database, id: i64) -> Result<u64, Error>;
+    async fn delete(&self, db: &Database, user: &ActingUser, id: i64) -> Result<u64, Error>;
     /// The dashboard cards this resource provides.
     async fn widgets(&self, db: &Database) -> Result<Vec<StatWidget>, Error>;
     /// The dashboard table this resource declares, if any.
     fn latest_records(&self) -> Option<LatestRecords>;
     /// The newest records as JSON, up to `limit`.
     async fn latest(&self, db: &Database, limit: i64) -> Result<Vec<Value>, Error>;
-    /// The choices of a lookup field, as `(value, label)` pairs.
-    async fn options(&self, db: &Database, field: &str) -> Result<Vec<(String, String)>, Error>;
+    /// The choices of a lookup field for `user`, as `(value, label)` pairs.
+    async fn options(
+        &self,
+        db: &Database,
+        user: &ActingUser,
+        field: &str,
+    ) -> Result<Vec<(String, String)>, Error>;
 }
 
 /// Wraps an [`IgniteResource`] type as an [`Erased`] value. Its fields and columns are
@@ -99,8 +113,13 @@ impl<R: IgniteResource> Erased for Adapter<R> {
         &self.columns
     }
 
-    async fn list(&self, db: &Database, query: &ListQuery) -> Result<(Vec<Value>, i64), Error> {
-        let page = R::list(db, query).await?;
+    async fn list(
+        &self,
+        db: &Database,
+        user: &ActingUser,
+        query: &ListQuery,
+    ) -> Result<(Vec<Value>, i64), Error> {
+        let page = R::list_for(db, user, query).await?;
         let rows = page
             .rows
             .into_iter()
@@ -109,17 +128,23 @@ impl<R: IgniteResource> Erased for Adapter<R> {
         Ok((rows, page.total))
     }
 
-    async fn find(&self, db: &Database, id: i64) -> Result<Option<Value>, Error> {
-        R::find(db, id).await?.map(to_json).transpose()
+    async fn find(
+        &self,
+        db: &Database,
+        user: &ActingUser,
+        id: i64,
+    ) -> Result<Option<Value>, Error> {
+        R::find_for(db, user, id).await?.map(to_json).transpose()
     }
 
     async fn create(
         &self,
         db: &Database,
+        user: &ActingUser,
         form: &FormInput,
     ) -> Result<Result<Value, FieldErrors>, Error> {
-        match checked::<R>(db, &self.fields, form, R::validate(form)).await? {
-            Ok(input) => match R::create(db, input).await {
+        match checked::<R>(db, user, &self.fields, form, R::validate(form)).await? {
+            Ok(input) => match R::create_for(db, user, input).await {
                 Ok(record) => to_json(record).map(Ok),
                 Err(error) => unique_violation(error, R::SLUG, &static_keys::<R>()).map(Err),
             },
@@ -130,11 +155,12 @@ impl<R: IgniteResource> Erased for Adapter<R> {
     async fn update(
         &self,
         db: &Database,
+        user: &ActingUser,
         id: i64,
         form: &FormInput,
     ) -> Result<Result<Value, FieldErrors>, Error> {
-        match checked::<R>(db, &self.fields, form, R::validate_update(form)).await? {
-            Ok(input) => match R::update(db, id, input).await {
+        match checked::<R>(db, user, &self.fields, form, R::validate_update(form)).await? {
+            Ok(input) => match R::update_for(db, user, id, input).await {
                 Ok(record) => to_json(record).map(Ok),
                 Err(error) => unique_violation(error, R::SLUG, &static_keys::<R>()).map(Err),
             },
@@ -142,8 +168,8 @@ impl<R: IgniteResource> Erased for Adapter<R> {
         }
     }
 
-    async fn delete(&self, db: &Database, id: i64) -> Result<u64, Error> {
-        R::delete(db, id).await
+    async fn delete(&self, db: &Database, user: &ActingUser, id: i64) -> Result<u64, Error> {
+        R::delete_for(db, user, id).await
     }
 
     async fn widgets(&self, db: &Database) -> Result<Vec<StatWidget>, Error> {
@@ -162,8 +188,13 @@ impl<R: IgniteResource> Erased for Adapter<R> {
             .collect()
     }
 
-    async fn options(&self, db: &Database, field: &str) -> Result<Vec<(String, String)>, Error> {
-        R::options(db, field).await
+    async fn options(
+        &self,
+        db: &Database,
+        user: &ActingUser,
+        field: &str,
+    ) -> Result<Vec<(String, String)>, Error> {
+        R::options_for(db, user, field).await
     }
 }
 
@@ -173,12 +204,16 @@ impl<R: IgniteResource> Erased for Adapter<R> {
 /// keeps it. The database is read only for the fields the form submits.
 async fn checked<R: IgniteResource>(
     db: &Database,
+    user: &ActingUser,
     fields: &[FieldDef],
     form: &FormInput,
     validated: Result<R::Input, FieldErrors>,
 ) -> Result<Result<R::Input, FieldErrors>, Error> {
     let errors = validated.as_ref().err().cloned().unwrap_or_default();
-    let errors = lookup_errors(fields, form, errors, |field| R::options(db, field)).await?;
+    let errors = lookup_errors(fields, form, errors, |field| {
+        R::options_for(db, user, field)
+    })
+    .await?;
     let errors = media_errors(db, fields, form, errors).await?;
     Ok(if errors.is_empty() {
         validated
@@ -315,6 +350,7 @@ impl RuntimeAdapter {
     async fn checked(
         &self,
         db: &Database,
+        user: &ActingUser,
         form: &FormInput,
         creating: bool,
     ) -> Result<Result<Row, FieldErrors>, Error> {
@@ -326,7 +362,10 @@ impl RuntimeAdapter {
         let errors = validated.as_ref().err().cloned().unwrap_or_default();
         let fields = self.0.fields();
         let data = &self.0.resource().data;
-        let errors = lookup_errors(fields, form, errors, |field| data.options(db, field)).await?;
+        let errors = lookup_errors(fields, form, errors, |field| {
+            data.options_for(db, user, field)
+        })
+        .await?;
         let errors = media_errors(db, fields, form, errors).await?;
         Ok(if errors.is_empty() {
             validated
@@ -386,20 +425,30 @@ impl Erased for RuntimeAdapter {
         self.0.columns()
     }
 
-    async fn list(&self, db: &Database, query: &ListQuery) -> Result<(Vec<Value>, i64), Error> {
-        let page = self.0.resource().data.list(db, query).await?;
+    async fn list(
+        &self,
+        db: &Database,
+        user: &ActingUser,
+        query: &ListQuery,
+    ) -> Result<(Vec<Value>, i64), Error> {
+        let page = self.0.resource().data.list_for(db, user, query).await?;
         Ok((
             page.rows.into_iter().map(Value::Object).collect(),
             page.total,
         ))
     }
 
-    async fn find(&self, db: &Database, id: i64) -> Result<Option<Value>, Error> {
+    async fn find(
+        &self,
+        db: &Database,
+        user: &ActingUser,
+        id: i64,
+    ) -> Result<Option<Value>, Error> {
         Ok(self
             .0
             .resource()
             .data
-            .find(db, id)
+            .find_for(db, user, id)
             .await?
             .map(Value::Object))
     }
@@ -407,26 +456,30 @@ impl Erased for RuntimeAdapter {
     async fn create(
         &self,
         db: &Database,
+        user: &ActingUser,
         form: &FormInput,
     ) -> Result<Result<Value, FieldErrors>, Error> {
-        let validated = self.checked(db, form, true).await?;
+        let validated = self.checked(db, user, form, true).await?;
         let data = &self.0.resource().data;
-        self.save(validated, |row| data.create(db, row)).await
+        self.save(validated, |row| data.create_for(db, user, row))
+            .await
     }
 
     async fn update(
         &self,
         db: &Database,
+        user: &ActingUser,
         id: i64,
         form: &FormInput,
     ) -> Result<Result<Value, FieldErrors>, Error> {
-        let validated = self.checked(db, form, false).await?;
+        let validated = self.checked(db, user, form, false).await?;
         let data = &self.0.resource().data;
-        self.save(validated, |row| data.update(db, id, row)).await
+        self.save(validated, |row| data.update_for(db, user, id, row))
+            .await
     }
 
-    async fn delete(&self, db: &Database, id: i64) -> Result<u64, Error> {
-        self.0.resource().data.delete(db, id).await
+    async fn delete(&self, db: &Database, user: &ActingUser, id: i64) -> Result<u64, Error> {
+        self.0.resource().data.delete_for(db, user, id).await
     }
 
     /// A runtime resource has no dashboard cards.
@@ -443,8 +496,13 @@ impl Erased for RuntimeAdapter {
         Ok(Vec::new())
     }
 
-    async fn options(&self, db: &Database, field: &str) -> Result<Vec<(String, String)>, Error> {
-        self.0.resource().data.options(db, field).await
+    async fn options(
+        &self,
+        db: &Database,
+        user: &ActingUser,
+        field: &str,
+    ) -> Result<Vec<(String, String)>, Error> {
+        self.0.resource().data.options_for(db, user, field).await
     }
 }
 

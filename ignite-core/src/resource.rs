@@ -7,6 +7,7 @@ use serde::Serialize;
 
 use crate::field::{Column, Field};
 use crate::form::{FieldErrors, FormInput};
+use crate::policy::ActingUser;
 use crate::query::{ListQuery, Page};
 use crate::widget::{LatestRecords, StatWidget};
 
@@ -123,5 +124,76 @@ pub trait IgniteResource: Send + Sync + 'static {
     /// on edit, such as a password that keeps its stored value.
     fn validate_update(form: &FormInput) -> Result<Self::Input, FieldErrors> {
         Self::validate(form)
+    }
+
+    /// [`list`](Self::list) for the signed-in `user`: the panel's list calls it. Restrict the
+    /// rows to the user here, as a Filament resource does in `getEloquentQuery()`. The default
+    /// is [`list`](Self::list), for every user.
+    fn list_for(
+        db: &Database,
+        user: &ActingUser,
+        query: &ListQuery,
+    ) -> impl Future<Output = Result<Page<Self::Record>, Error>> + Send {
+        let _ = user;
+        Self::list(db, query)
+    }
+
+    /// [`find`](Self::find) for the signed-in `user`: the panel finds the record of the edit
+    /// form, of its save and of the delete action with it. Return `None` for a row the user's
+    /// list leaves out, so the panel answers 404. The default is [`find`](Self::find).
+    fn find_for(
+        db: &Database,
+        user: &ActingUser,
+        id: i64,
+    ) -> impl Future<Output = Result<Option<Self::Record>, Error>> + Send {
+        let _ = user;
+        Self::find(db, id)
+    }
+
+    /// [`create`](Self::create) for the signed-in `user`. The default is
+    /// [`create`](Self::create).
+    fn create_for(
+        db: &Database,
+        user: &ActingUser,
+        input: Self::Input,
+    ) -> impl Future<Output = Result<Self::Record, Error>> + Send {
+        let _ = user;
+        Self::create(db, input)
+    }
+
+    /// [`update`](Self::update) for the signed-in `user`. The panel calls it only after
+    /// [`find_for`](Self::find_for) found the row and the [`Policy`](crate::Policy) allowed the
+    /// update. The default is [`update`](Self::update).
+    fn update_for(
+        db: &Database,
+        user: &ActingUser,
+        id: i64,
+        input: Self::Input,
+    ) -> impl Future<Output = Result<Self::Record, Error>> + Send {
+        let _ = user;
+        Self::update(db, id, input)
+    }
+
+    /// [`delete`](Self::delete) for the signed-in `user`. The panel calls it only after
+    /// [`find_for`](Self::find_for) found the row and the [`Policy`](crate::Policy) allowed the
+    /// delete. The default is [`delete`](Self::delete).
+    fn delete_for(
+        db: &Database,
+        user: &ActingUser,
+        id: i64,
+    ) -> impl Future<Output = Result<u64, Error>> + Send {
+        let _ = user;
+        Self::delete(db, id)
+    }
+
+    /// [`options`](Self::options) for the signed-in `user`: the choices the form shows and
+    /// checks a submitted value against. The default is [`options`](Self::options).
+    fn options_for(
+        db: &Database,
+        user: &ActingUser,
+        field: &str,
+    ) -> impl Future<Output = Result<Vec<(String, String)>, Error>> + Send {
+        let _ = user;
+        Self::options(db, field)
     }
 }

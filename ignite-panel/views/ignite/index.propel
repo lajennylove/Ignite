@@ -61,10 +61,10 @@
                 <td>{{ $cell.text }}</td>
               @endforeach
               <td class="whitespace-nowrap text-right">
-                @if (can_update)
+                @if (row.can_update)
                   <a class="ig-btn ig-btn-ghost px-3 py-1" href="{{ $row.edit_url }}">Edit</a>
                 @endif
-                @if (can_delete)
+                @if (row.can_delete)
                   <form class="inline" method="post" action="{{ $row.delete_url }}" data-confirm="Delete this record? This cannot be undone.">
                     <input type="hidden" name="_token" value="{{ $csrf_token }}">
                     <button type="submit" class="ig-btn ig-btn-danger px-3 py-1">Delete</button>

@@ -4,6 +4,43 @@ All notable changes to Ignite are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Known limitations
+
+- The admin panel's runtime queries (user create, update and delete, sessions and sign-in) still run on MariaDB and MySQL only, so the panel's policy tests run on MariaDB. Migrations and `migrate:status` work on SQLite, MySQL, MariaDB and PostgreSQL.
+
+### Added
+
+- The acting user: `ignite_core::ActingUser`, the signed-in user (id, name, email, `can`,
+  `is_super_admin`) that the panel passes to a resource's queries, as Laravel's
+  `auth()->user()`. `AdminUser::acting_user` returns it to an app's own routes.
+- User-aware queries, with defaults: `RuntimeData` and `IgniteResource` have `list_for`,
+  `find_for`, `create_for`, `update_for`, `delete_for` and `options_for`, given the acting
+  user. The panel calls them; by default each calls the method without the user. A resource
+  restricts its list and records to the user in `list_for` and `find_for`, as a Filament
+  resource does in `getEloquentQuery()`: a record that `find_for` does not return is 404 on
+  the edit form, its save and the delete. `options_for` gives the user's choices of a select,
+  and a value outside them is refused.
+- Policies: the `Policy` trait (`view_any`, `view`, `create`, `update`, `delete`, given the
+  database, the acting user and, for `view`, `update` and `delete`, the record), with
+  `register_policy`, `unregister_policy` and `policy`, keyed by the resource's slug, for static
+  and runtime resources, as Laravel's `Gate::policy`. Each method allows by default. An action
+  needs the user's ability and the policy's answer, as a Filament Shield policy checks the
+  permission first; a super-admin passes every policy, as Shield's super admin does. A refusal
+  answers 403. The navigation, the dashboard and the New button follow `view_any` and `create`,
+  and each record's Edit and Delete buttons follow `update` and `delete` for that record. A
+  policy that fails answers 500. The panel has no detail page, so nothing asks `view` yet.
+
+### Changed
+
+- The edit form's save and the delete action find the record with `find_for` before they
+  write, so a record the user's query does not find, or one that does not exist, is 404 before
+  the write is tried. A resource without a policy or user-aware queries behaves as before, with
+  one more read on those two routes.
+- The list's Edit and Delete buttons are decided per record (`row.can_update` and
+  `row.can_delete` in `views/ignite/index.propel`). Without a policy they show as before.
+
 ## [0.5.0] - 2026-11-15
 
 ### Known limitations

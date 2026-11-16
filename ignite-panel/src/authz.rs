@@ -8,6 +8,10 @@
 //! - A user has the abilities of their roles. A role holds permissions, and a user holds
 //!   roles, in the tables `roles`, `permissions`, `role_permission` and `role_user`.
 //! - The role `super-admin` passes every check.
+//! - A resource can also have a [`Policy`](ignite_core::Policy), registered with
+//!   [`ignite_core::register_policy`], which decides each action for the user and the record
+//!   after the ability, as a Laravel policy does. The resource's queries are given the
+//!   signed-in [`ActingUser`], so they can restrict its records to the user.
 //!
 //! The `ignite` command manages roles: see [`crate::cli`]. The routes check the abilities
 //! on the server, and the navigation and buttons show only what the user may do.
@@ -16,6 +20,7 @@ use std::collections::HashSet;
 use std::fmt;
 use std::sync::Arc;
 
+use ignite_core::{ActingUser, Row};
 use orbit_orm::{raw, Database, Error, Executor, Model, OrbitModel};
 
 use crate::erased::Erased;
@@ -86,9 +91,45 @@ pub(crate) struct Abilities {
 }
 
 impl Abilities {
-    /// Whether the user holds the ability `name`, or is a super-admin.
-    pub(crate) fn allows(&self, name: &str) -> bool {
-        self.super_admin || self.names.contains(name)
+    /// The acting user with these abilities, whose [`ActingUser::can`] checks them.
+    pub(crate) fn acting_user(self, user: &users::User) -> ActingUser {
+        self.names.into_iter().fold(
+            ActingUser::new(user.id, user.name.clone(), user.email.clone())
+                .with_super_admin(self.super_admin),
+            ActingUser::with_ability,
+        )
+    }
+}
+
+/// Whether the [`Policy`](ignite_core::Policy) of the resource at `slug` lets `user` do
+/// `action`, on `record` for the actions on one record (`view`, `update` and `delete`). A
+/// resource without a policy allows, so its abilities alone decide, and a super-admin passes
+/// without asking, as Filament Shield's super admin passes before any policy. The caller checks
+/// the ability first. A record that is not a JSON object is given to the policy as an empty
+/// row.
+pub(crate) async fn policy_allows(
+    db: &Database,
+    slug: &str,
+    user: &ActingUser,
+    action: Action,
+    record: Option<&serde_json::Value>,
+) -> Result<bool, Error> {
+    if user.is_super_admin() {
+        return Ok(true);
+    }
+    let Some(policy) = ignite_core::policy(slug) else {
+        return Ok(true);
+    };
+    let empty = Row::new();
+    let record = record
+        .and_then(serde_json::Value::as_object)
+        .unwrap_or(&empty);
+    match action {
+        Action::ViewAny => policy.view_any(db, user).await,
+        Action::View => policy.view(db, user, record).await,
+        Action::Create => policy.create(db, user).await,
+        Action::Update => policy.update(db, user, record).await,
+        Action::Delete => policy.delete(db, user, record).await,
     }
 }
 

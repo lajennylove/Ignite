@@ -28,6 +28,7 @@ use serde_json::{Map, Value};
 
 use crate::field::{self as check, Block, Column, Field, FieldKind};
 use crate::form::{FieldErrors, FormInput};
+use crate::policy::ActingUser;
 use crate::query::{ListQuery, Page};
 
 /// One record of a runtime resource: its values by key, as JSON. A row the panel lists or
@@ -43,7 +44,9 @@ pub type RuntimeFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, Error>> + 
 /// values in a meta table.
 ///
 /// The methods mirror the queries of [`IgniteResource`](crate::IgniteResource), with
-/// [`Row`]s for records and for validated input.
+/// [`Row`]s for records and for validated input. The panel calls the `*_for` methods, which
+/// are given the signed-in [`ActingUser`]; by default each calls its method without the user,
+/// so a source that does not depend on the user implements only those.
 pub trait RuntimeData: Send + Sync + 'static {
     /// Returns one page of rows that match `query`. The sort key, when there is one, is a
     /// sortable column of the resource.
@@ -77,6 +80,88 @@ pub trait RuntimeData: Send + Sync + 'static {
     ) -> RuntimeFuture<'a, Vec<(String, String)>> {
         let _ = (db, field);
         Box::pin(async { Ok(Vec::new()) })
+    }
+
+    /// [`list`](Self::list) for the signed-in `user`: the panel's list calls it. Restrict the
+    /// rows to the user here, as a Filament resource does in `getEloquentQuery()`, such as an
+    /// author who sees only their own posts. The total counts the same rows. The default is
+    /// [`list`](Self::list), for every user.
+    fn list_for<'a>(
+        &'a self,
+        db: &'a Database,
+        user: &'a ActingUser,
+        query: &'a ListQuery,
+    ) -> RuntimeFuture<'a, Page<Row>> {
+        let _ = user;
+        self.list(db, query)
+    }
+
+    /// [`find`](Self::find) for the signed-in `user`: the panel finds the record of the edit
+    /// form, of its save and of the delete action with it. Return `None` for a row the user's
+    /// list leaves out, so the panel answers 404, as Filament resolves a record through
+    /// `getEloquentQuery()`. The default is [`find`](Self::find), for every user.
+    fn find_for<'a>(
+        &'a self,
+        db: &'a Database,
+        user: &'a ActingUser,
+        id: i64,
+    ) -> RuntimeFuture<'a, Option<Row>> {
+        let _ = user;
+        self.find(db, id)
+    }
+
+    /// [`create`](Self::create) for the signed-in `user`, such as to make them the author.
+    /// The default is [`create`](Self::create).
+    fn create_for<'a>(
+        &'a self,
+        db: &'a Database,
+        user: &'a ActingUser,
+        input: Row,
+    ) -> RuntimeFuture<'a, Row> {
+        let _ = user;
+        self.create(db, input)
+    }
+
+    /// [`update`](Self::update) for the signed-in `user`, such as to keep a status the user
+    /// may not set. The panel calls it only after [`find_for`](Self::find_for) found the row
+    /// and the [`Policy`](crate::Policy) allowed the update. The default is
+    /// [`update`](Self::update).
+    fn update_for<'a>(
+        &'a self,
+        db: &'a Database,
+        user: &'a ActingUser,
+        id: i64,
+        input: Row,
+    ) -> RuntimeFuture<'a, Row> {
+        let _ = user;
+        self.update(db, id, input)
+    }
+
+    /// [`delete`](Self::delete) for the signed-in `user`. The panel calls it only after
+    /// [`find_for`](Self::find_for) found the row and the [`Policy`](crate::Policy) allowed
+    /// the delete. The default is [`delete`](Self::delete).
+    fn delete_for<'a>(
+        &'a self,
+        db: &'a Database,
+        user: &'a ActingUser,
+        id: i64,
+    ) -> RuntimeFuture<'a, u64> {
+        let _ = user;
+        self.delete(db, id)
+    }
+
+    /// [`options`](Self::options) for the signed-in `user`: the panel fills the form's
+    /// selects with these choices and checks a submitted value against them, so a choice left
+    /// out cannot be saved, as a Filament select whose options depend on the user. The default
+    /// is [`options`](Self::options).
+    fn options_for<'a>(
+        &'a self,
+        db: &'a Database,
+        user: &'a ActingUser,
+        field: &'a str,
+    ) -> RuntimeFuture<'a, Vec<(String, String)>> {
+        let _ = user;
+        self.options(db, field)
     }
 }
 

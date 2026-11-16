@@ -10,6 +10,7 @@ pub mod field;
 pub mod form;
 pub mod media;
 pub mod password;
+pub mod policy;
 pub mod query;
 pub mod resource;
 pub mod runtime_resource;
@@ -24,6 +25,7 @@ pub use ignite_macros::IgniteResource;
 pub use media::{media_library, register_media_library, MediaItem, MediaLibrary};
 pub use orbit_orm::Database;
 pub use password::{hash_password, verify_password};
+pub use policy::{policy, register_policy, unregister_policy, ActingUser, Policy};
 pub use query::{escape_like, Direction, ListQuery, Page};
 pub use resource::{table_name_is, IgniteResource};
 pub use runtime_resource::{

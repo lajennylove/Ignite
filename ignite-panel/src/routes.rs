@@ -8,7 +8,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 
 use ignite_core::{
-    ColumnDef, Database, Direction, FieldDef, FieldErrors, FormInput, LatestRecords, ListQuery,
+    ActingUser, ColumnDef, Database, Direction, FieldDef, FieldErrors, FormInput, LatestRecords,
+    ListQuery,
 };
 use orbit_orm::Error as OrbitError;
 use propel_rocket::PropelView;
@@ -134,9 +135,14 @@ async fn dashboard(
         if let Some(declared) = resource.latest_records() {
             let limit = declared.limit.max(1);
             let records = resource.latest(database, limit).await.map_err(db_status)?;
-            let lookups = lookup_choices(database, resource.as_ref(), declared.columns)
-                .await
-                .map_err(db_status)?;
+            let lookups = lookup_choices(
+                database,
+                session.acting_user(),
+                resource.as_ref(),
+                declared.columns,
+            )
+            .await
+            .map_err(db_status)?;
             tables.push((declared, resource.columns(), records, lookups));
         }
     }
@@ -798,11 +804,19 @@ async fn index(
     };
 
     let keys: Vec<&str> = columns.iter().map(|c| c.key.as_str()).collect();
-    let (records, total) = resource.list(db.inner(), &query).await.map_err(db_status)?;
-    let lookups = lookup_choices(db.inner(), resource.as_ref(), &keys)
+    let user = session.acting_user();
+    let (records, total) = resource
+        .list(db.inner(), user, &query)
+        .await
+        .map_err(db_status)?;
+    let lookups = lookup_choices(db.inner(), user, resource.as_ref(), &keys)
         .await
         .map_err(db_status)?;
 
+    // The Edit and Delete buttons of each record need the ability and the policy's answer for
+    // that record, as Filament shows a record's actions only when its policy allows them.
+    let can_update = session.may(slug, Action::Update);
+    let can_delete = session.may(slug, Action::Delete);
     let mut rows = Vec::with_capacity(records.len());
     for record in &records {
         let id = record_id(record)?;
@@ -815,6 +829,10 @@ async fn index(
                 .collect(),
             edit_url: format!("{index_url}/{id}/edit"),
             delete_url: format!("{index_url}/{id}/delete"),
+            can_update: can_update
+                && record_allowed(db, slug, &session, Action::Update, record).await?,
+            can_delete: can_delete
+                && record_allowed(db, slug, &session, Action::Delete, record).await?,
         });
     }
 
@@ -863,8 +881,8 @@ async fn index(
         singular: resource.singular().to_string(),
         new_url: format!("{index_url}/new"),
         can_create: session.may(slug, Action::Create),
-        can_update: session.may(slug, Action::Update),
-        can_delete: session.may(slug, Action::Delete),
+        can_update,
+        can_delete,
         index_url: index_url.clone(),
         search: search.clone(),
         columns: heads,
@@ -896,7 +914,7 @@ async fn new_form(
     authorize(registry, &session, slug, Action::Create)?;
     let resource = registry.find(slug).ok_or(Status::NotFound)?;
     let index_url = format!("{}/{}", registry.mount, resource.slug());
-    let choices = form_choices(db, &resource, &FormInput::default()).await?;
+    let choices = form_choices(db, &session, &resource, &FormInput::default()).await?;
     let editor = editor_for(resource.fields());
     let layout = Layout::new(
         registry,
@@ -955,7 +973,7 @@ async fn create(
     check_csrf(cookies, &registry.secret, form.get("_token"))?;
 
     let outcome = resource
-        .create(db.inner(), &form)
+        .create(db.inner(), session.acting_user(), &form)
         .await
         .map_err(db_status)?;
 
@@ -965,7 +983,7 @@ async fn create(
             Ok(Reply::Redirect(Box::new(Redirect::to(index_url))))
         }
         Err(errors) => {
-            let choices = form_choices(db, &resource, &form).await?;
+            let choices = form_choices(db, &session, &resource, &form).await?;
             Ok(form_page(
                 registry,
                 &session,
@@ -996,10 +1014,9 @@ async fn edit_form(
     let resource = registry.find(slug).ok_or(Status::NotFound)?;
     let index_url = format!("{}/{}", registry.mount, resource.slug());
 
-    let record = resource.find(db.inner(), id).await.map_err(db_status)?;
-    let record = record.ok_or(Status::NotFound)?;
+    let record = authorize_record(db, &session, &resource, id, Action::Update).await?;
     let form = record_form(resource.fields(), &record);
-    let choices = form_choices(db, &resource, &form).await?;
+    let choices = form_choices(db, &session, &resource, &form).await?;
     let editor = editor_for(resource.fields());
 
     let layout = Layout::new(
@@ -1054,9 +1071,10 @@ async fn update(
     let index_url = format!("{}/{}", registry.mount, resource.slug());
     let form = read_form(body).await?;
     check_csrf(cookies, &registry.secret, form.get("_token"))?;
+    authorize_record(db, &session, &resource, id, Action::Update).await?;
 
     let outcome = resource
-        .update(db.inner(), id, &form)
+        .update(db.inner(), session.acting_user(), id, &form)
         .await
         .map_err(db_status)?;
 
@@ -1066,7 +1084,7 @@ async fn update(
             Ok(Reply::Redirect(Box::new(Redirect::to(index_url))))
         }
         Err(errors) => {
-            let choices = form_choices(db, &resource, &form).await?;
+            let choices = form_choices(db, &session, &resource, &form).await?;
             Ok(form_page(
                 registry,
                 &session,
@@ -1100,7 +1118,11 @@ async fn destroy(
     let resource = registry.find(slug).ok_or(Status::NotFound)?;
     let index_url = format!("{}/{}", registry.mount, resource.slug());
 
-    let deleted = resource.delete(db.inner(), id).await.map_err(db_status)?;
+    authorize_record(db, &session, &resource, id, Action::Delete).await?;
+    let deleted = resource
+        .delete(db.inner(), session.acting_user(), id)
+        .await
+        .map_err(db_status)?;
     if deleted == 0 {
         return Err(Status::NotFound);
     }
@@ -1172,6 +1194,52 @@ fn authorize(
     } else {
         Err(Status::Forbidden)
     }
+}
+
+/// Finds the record `id` of `resource` for the signed-in user and refuses an action on it that
+/// the resource's policy does not allow, as Filament resolves a record through the resource's
+/// query and then asks its policy: 404 when the user's query does not find it, and 403 when the
+/// policy refuses. The caller has checked the ability with [`authorize`]. Returns the record.
+async fn authorize_record(
+    db: &State<Database>,
+    session: &AdminUser,
+    resource: &Arc<dyn Erased>,
+    id: i64,
+    action: Action,
+) -> Result<Value, Status> {
+    let record = resource
+        .find(db.inner(), session.acting_user(), id)
+        .await
+        .map_err(db_status)?
+        .ok_or(Status::NotFound)?;
+    if record_allowed(db, resource.slug(), session, action, &record).await? {
+        Ok(record)
+    } else {
+        Err(Status::Forbidden)
+    }
+}
+
+/// Whether the policy of the resource at `slug` lets the signed-in user do `action` on
+/// `record`. A failed policy is a server error.
+async fn record_allowed(
+    db: &State<Database>,
+    slug: &str,
+    session: &AdminUser,
+    action: Action,
+    record: &Value,
+) -> Result<bool, Status> {
+    crate::authz::policy_allows(
+        db.inner(),
+        slug,
+        session.acting_user(),
+        action,
+        Some(record),
+    )
+    .await
+    .map_err(|error| {
+        rocket::error!("ignite: the policy of `{slug}` failed: {error}");
+        Status::InternalServerError
+    })
 }
 
 /// Whether `error` is the unique index of the `users` email, which a second save of the same
@@ -1302,13 +1370,17 @@ fn field_names(resource: &dyn Erased) -> Vec<&str> {
 /// them. A field that is not a lookup is skipped, so a list loads only what it shows.
 async fn lookup_choices(
     db: &Database,
+    user: &ActingUser,
     resource: &dyn Erased,
     names: &[&str],
 ) -> Result<HashMap<String, Vec<(String, String)>>, OrbitError> {
     let mut choices = HashMap::new();
     for field in resource.fields() {
         if field.kind.loads_options() && names.contains(&field.name.as_str()) {
-            choices.insert(field.name.clone(), resource.options(db, &field.name).await?);
+            choices.insert(
+                field.name.clone(),
+                resource.options(db, user, &field.name).await?,
+            );
         }
     }
     Ok(choices)
@@ -1318,11 +1390,13 @@ async fn lookup_choices(
 /// database, and the media library's items for the ids its media fields hold in `form`.
 async fn form_choices(
     db: &State<Database>,
+    session: &AdminUser,
     resource: &Arc<dyn Erased>,
     form: &FormInput,
 ) -> Result<FormChoices, Status> {
     let lookups = lookup_choices(
         db.inner(),
+        session.acting_user(),
         resource.as_ref(),
         &field_names(resource.as_ref()),
     )

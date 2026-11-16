@@ -2,9 +2,12 @@
 //! table, and its signed cookie holds only the row's id, so the server can end a
 //! session at any time. Flash messages live in their own signed cookie.
 
+use std::collections::HashSet;
+
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use base64::Engine;
 use hmac::{Hmac, Mac};
+use ignite_core::ActingUser;
 use rand_core::{OsRng, RngCore};
 use rocket::catch;
 use rocket::http::{Cookie, CookieJar, SameSite, Status};
@@ -264,28 +267,34 @@ pub(crate) fn take_flash(cookies: &CookieJar<'_>, key: &[u8]) -> Option<String> 
 /// mount to the login page.
 #[derive(Debug, Clone)]
 pub struct AdminUser {
-    user_id: i64,
-    name: String,
-    email: String,
+    acting: ActingUser,
     theme: String,
     has_avatar: bool,
-    abilities: Abilities,
+    /// The abilities, such as `books.viewAny`, that the user holds but a resource's policy
+    /// refuses: its `view_any` and `create`, which need no record, asked once per request.
+    refused: HashSet<String>,
 }
 
 impl AdminUser {
     /// The signed-in user's id.
     pub fn user_id(&self) -> i64 {
-        self.user_id
+        self.acting.id()
     }
 
     /// The signed-in user's name, as the panel's top bar shows it.
     pub fn name(&self) -> &str {
-        &self.name
+        self.acting.name()
     }
 
     /// The signed-in user's email.
     pub fn email(&self) -> &str {
-        &self.email
+        self.acting.email()
+    }
+
+    /// The signed-in user as the resources' queries and policies are given it, as Laravel's
+    /// `auth()->user()`.
+    pub fn acting_user(&self) -> &ActingUser {
+        &self.acting
     }
 
     /// The theme the user chose, "light" or "dark".
@@ -301,13 +310,43 @@ impl AdminUser {
     /// Whether the user may do `ability`, such as `reports.view`. Reads the abilities
     /// the user's roles grant, loaded with the sign-in. A super-admin may do everything.
     pub fn can(&self, ability: &str) -> bool {
-        self.abilities.allows(ability)
+        self.acting.can(ability)
     }
 
-    /// Whether the user may do `action` on the resource at `slug`.
+    /// Whether the user may do `action` on the resource at `slug`: they hold the ability and,
+    /// for `viewAny` and `create`, the resource's policy allows it. The actions on one record
+    /// ask the policy with the record (see `authz::policy_allows`).
     pub(crate) fn may(&self, slug: &str, action: Action) -> bool {
-        self.can(&authz::ability(slug, action))
+        let ability = authz::ability(slug, action);
+        self.can(&ability) && !self.refused.contains(&ability)
     }
+}
+
+/// The abilities of `user` that a resource's policy refuses: `<slug>.viewAny` and
+/// `<slug>.create` of each resource with a policy whose `view_any` or `create` says no. Only
+/// the abilities the user holds are asked, and a super-admin is asked nothing.
+async fn policy_refusals(
+    registry: &Registry,
+    db: &Database,
+    user: &ActingUser,
+) -> Result<HashSet<String>, orbit_orm::Error> {
+    let mut refused = HashSet::new();
+    if user.is_super_admin() {
+        return Ok(refused);
+    }
+    for resource in registry.all() {
+        let slug = resource.slug();
+        if ignite_core::policy(slug).is_none() {
+            continue;
+        }
+        for action in [Action::ViewAny, Action::Create] {
+            let ability = authz::ability(slug, action);
+            if user.can(&ability) && !authz::policy_allows(db, slug, user, action, None).await? {
+                refused.insert(ability);
+            }
+        }
+    }
+    Ok(refused)
 }
 
 #[rocket::async_trait]
@@ -333,14 +372,23 @@ impl<'r> FromRequest<'r> for AdminUser {
             // A database outage is not a sign-out, so it must not reach the 401 catcher,
             // which redirects to the login page.
             Lookup::Unavailable => Outcome::Error((Status::InternalServerError, ())),
-            Lookup::Found((user, abilities)) => Outcome::Success(AdminUser {
-                user_id: user.id,
-                name: user.name,
-                email: user.email,
-                theme: user.theme,
-                has_avatar: user.avatar_mime.is_some(),
-                abilities,
-            }),
+            Lookup::Found((user, abilities)) => {
+                let acting = abilities.acting_user(&user);
+                // A failed policy is an outage too: the user is still signed in.
+                let refused = match policy_refusals(registry, db, &acting).await {
+                    Ok(refused) => refused,
+                    Err(error) => {
+                        rocket::error!("ignite: a resource policy failed: {error}");
+                        return Outcome::Error((Status::InternalServerError, ()));
+                    }
+                };
+                Outcome::Success(AdminUser {
+                    acting,
+                    theme: user.theme,
+                    has_avatar: user.avatar_mime.is_some(),
+                    refused,
+                })
+            }
         }
     }
 }

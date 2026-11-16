@@ -232,6 +232,30 @@ ignite user role remove editor@example.com editors
 
 The panel does not edit roles yet. Use the command.
 
+### Policies and the acting user
+
+An ability opens a resource to a role. Which records a user sees, and what they may do with each one, is decided per user and per record, as a Filament resource does with `getEloquentQuery()` and a Laravel policy:
+
+- The panel passes the signed-in user, an `ActingUser` (id, name, email, `can(ability)`, `is_super_admin()`), to the resource's queries: the `list_for`, `find_for`, `create_for`, `update_for`, `delete_for` and `options_for` methods of `RuntimeData` and `IgniteResource`. Override `list_for` and `find_for` to restrict the records to the user, such as an author who sees only their own posts. A record that `find_for` does not return is 404 on the edit form, its save and the delete. `options_for` gives the user's choices of a select, so a choice left out cannot be saved. By default each one calls the method without the user, so a resource that does not override them behaves as before.
+- A `Policy` decides `view_any`, `view`, `create`, `update` and `delete` for the user and, for the last three, the record. Register it for the resource's slug with `register_policy("posts", PostPolicy)`, as `Gate::policy` does; `unregister_policy` removes it. Each method allows by default. An action needs the ability and the policy, as a policy that Filament Shield generates checks the permission first; a super-admin passes every policy. A refusal is 403, and the navigation entry, the New button and each record's Edit and Delete buttons show only what the policy allows. The panel has no detail page yet, so nothing asks `view`.
+
+```rust
+use ignite_core::{register_policy, ActingUser, Database, Policy, Row, RuntimeFuture};
+
+struct PostPolicy;
+
+impl Policy for PostPolicy {
+    fn update<'a>(&'a self, _: &'a Database, user: &'a ActingUser, post: &'a Row) -> RuntimeFuture<'a, bool> {
+        let own = post.get("author_id").and_then(|id| id.as_i64()) == Some(user.id());
+        Box::pin(async move { Ok(own) })
+    }
+}
+
+register_policy("posts", PostPolicy);
+```
+
+An app route gets the same user from the guard: `admin_user.acting_user()`.
+
 ## Account lifecycle
 
 Manage a user's account with the `ignite` command:
