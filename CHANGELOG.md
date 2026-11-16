@@ -4,6 +4,21 @@ All notable changes to Ignite are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - (not yet released)
+
+### Added
+
+- App stylesheets: `Ignite::stylesheet(url)` adds a `<link rel="stylesheet">` at the end of
+  the head of every panel page, signed-in and sign-in pages, after the panel's own CSS, as
+  Filament registers an app's CSS with `FilamentAsset::register`. Each call adds one, in
+  order. The URL is escaped in the `href`. The links are in the compiled views, so a release
+  build loads the font of a `navigation_icon` (such as Dashicons). The layout yields them in
+  a new `ignite_stylesheets` section. By default there is none, and the pages are unchanged.
+
+### Fixed
+
+- The 0.6.0 limitation that a release build had no place for an app's own stylesheet.
+
 ## [0.6.0] - 2026-11-16
 
 ### Known limitations

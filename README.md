@@ -232,9 +232,20 @@ A resource places itself in the sidebar with struct attributes, as Filament's `$
 
 A resource implemented by hand sets `NAVIGATION_GROUP`, `NAVIGATION_SORT`, `NAVIGATION_LABEL` and `NAVIGATION_ICON`, and a `RuntimeResource` the methods of the same names. The sidebar lists the dashboard and the resources without a group first, as they were listed before, then each group under its name as a heading: the groups in the order of `navigation_groups` (each call adds to the list, as in Filament), then any group not listed there. Inside a group, resources are sorted by `navigation_sort`, lower first, then by label; a resource without a sort comes before those with one. `navigation_label` changes the sidebar's text only; the pages keep the resource's title.
 
-`navigation_icon` is one or more CSS classes. The panel renders `<span class="..." aria-hidden="true"></span>` before the label, in place of the admin theme's icon; a resource without one keeps the theme's icon and gets no span. Ignite ships no icon font for these classes: the app supplies the stylesheet that defines them (Dashicons, Font Awesome or its own). In a debug build, an admin theme's layout or a views directory can link it. A release build renders the compiled `ignite` layout, which has no place yet for an app's own stylesheet, so there the classes render without the font until such an option exists.
+`navigation_icon` is one or more CSS classes. The panel renders `<span class="..." aria-hidden="true"></span>` before the label, in place of the admin theme's icon; a resource without one keeps the theme's icon and gets no span. Ignite ships no icon font for these classes: the app supplies the stylesheet that defines them (Dashicons, Font Awesome or its own). In a debug build, an admin theme's layout or a views directory can link it. In a release build, add it with `stylesheet` (below).
 
-## Roles and permissions
+### Stylesheets
+
+`stylesheet` adds an app stylesheet to every page of the panel, signed-in and sign-in pages alike, as Filament registers an app's CSS with `FilamentAsset::register`. Each call adds one, in order. The layout links them at the end of the head, after the panel's own CSS, so their rules can change the panel's look. The links are compiled into the panel's views, so they work in a release build.
+
+```rust
+Ignite::new()
+    .stylesheet("/mc-includes/css/dashicons.min.css")
+    .stylesheet("/mc-admin/css/admin.css")
+```
+
+The value is the path or URL of the file, printed escaped in the link's `href`; the app serves the file. Without the call the pages link only the panel's CSS, as before. An admin theme's layout that has its own head yields the `ignite_stylesheets` section to show them.
+
 
 The panel follows Filament and its standard plugin, Filament Shield (built on Spatie laravel-permission). Each resource has five abilities, named after its slug:
 

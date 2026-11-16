@@ -1,6 +1,6 @@
 [package]
 name = "ignite-core"
-version = "0.6.0"
+version = "0.6.1"
 license = "MIT"
 description = "Core types for Ignite, the admin panel for Rocket.rs: resources, fields, forms and runtime resources."
 repository = "https://github.com/lajennylove/Ignite"
@@ -9,7 +9,7 @@ edition = "2021"
 [dependencies]
 orbit-orm = "0.4.0"
 serde = { version = "1", features = ["derive"] }
-ignite-macros = { version = "0.6.0", path = "../ignite-macros" }
+ignite-macros = { version = "0.6.1", path = "../ignite-macros" }
 argon2 = "0.5"
 chrono = "0.4"
 serde_json = "1"
