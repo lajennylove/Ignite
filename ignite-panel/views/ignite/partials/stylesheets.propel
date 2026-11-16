@@ -1,0 +1,2 @@
+{{-- The app's stylesheets on a panel page (Ignite::stylesheet), which it puts in the layout's ignite_stylesheets section, at the end of the head. None by default. --}}@foreach (url in brand.stylesheets)<link rel="stylesheet" href="{{ $url }}">
+@endforeach

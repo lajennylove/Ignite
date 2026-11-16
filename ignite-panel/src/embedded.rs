@@ -110,6 +110,10 @@ pub(crate) const VIEWS: &[(&str, &str)] = &[
         include_str!("../views/ignite/partials/nav.propel"),
     ),
     (
+        "partials.stylesheets",
+        include_str!("../views/ignite/partials/stylesheets.propel"),
+    ),
+    (
         "partials.topbar",
         include_str!("../views/ignite/partials/topbar.propel"),
     ),

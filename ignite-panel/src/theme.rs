@@ -37,14 +37,17 @@
 //! - `content`: the screen itself.
 //! - `ignite_html`: attributes of the `<html>` element (the light or dark mode).
 //! - `ignite_head`: the theme's colour tokens, as a `<style>` element, when it has any.
+//! - `ignite_stylesheets`: the app's stylesheet links (the panel's `partials.stylesheets`,
+//!   set with [`Ignite::stylesheet`](crate::Ignite::stylesheet)), at the end of the head,
+//!   after the theme's CSS. Empty by default.
 //! - `ignite_aside`: the navigation, on signed-in pages.
 //! - `ignite_column`: classes of the column beside the navigation.
 //! - `ignite_bar`: the top bar.
 //! - `ignite_flash`: the flash message.
 //!
 //! Besides each page's own values, every page has the values of the look: `brand` (the
-//! brand's `name`, `has_logo`, `logo`, `logo_height`, `has_mark`, `has_favicon` and `favicon`,
-//! set with [`Ignite::brand_name`](crate::Ignite::brand_name) and the methods beside it),
+//! brand's `name`, `has_logo`, `logo`, `logo_height`, `has_mark`, `has_favicon`, `favicon` and
+//! `stylesheets`, set with [`Ignite::brand_name`](crate::Ignite::brand_name) and the methods beside it),
 //! `nav_sections` (the sidebar in sections, each with `has_heading`, `heading` and `items`, as
 //! [`Ignite::navigation_groups`](crate::Ignite::navigation_groups) orders them) and `nav` (the
 //! same entries in one list). Each entry has `title`, `url`, `active`, `has_add`, `add_url`,

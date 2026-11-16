@@ -1,5 +1,6 @@
 //! The panel's brand: the name, the logo and the favicon, as Filament's panel sets them with
-//! `brandName`, `brandLogo`, `brandLogoHeight` and `favicon`. The app sets them on the
+//! `brandName`, `brandLogo`, `brandLogoHeight` and `favicon`, and the app's stylesheets, as
+//! Filament registers an app's CSS with `FilamentAsset::register`. The app sets them on the
 //! [`Ignite`](crate::Ignite) builder; the views read them from every page's `brand` value, so
 //! the compiled views of a release build show them too.
 
@@ -18,6 +19,8 @@ pub(crate) struct Brand {
     pub(crate) logo: Option<String>,
     pub(crate) logo_height: Option<String>,
     pub(crate) favicon: Option<String>,
+    /// The app's stylesheets, in the order the app added them.
+    pub(crate) stylesheets: Vec<String>,
 }
 
 /// The brand as the views read it, as `brand.name` and so on. Propel reads a path, not a
@@ -40,6 +43,9 @@ pub(crate) struct BrandView {
     pub(crate) has_favicon: bool,
     /// The path or URL of the app's favicon.
     pub(crate) favicon: String,
+    /// The paths or URLs of the app's stylesheets, in order. The layout links each one at the
+    /// end of the head, after the panel's own CSS. Empty by default.
+    pub(crate) stylesheets: Vec<String>,
 }
 
 impl BrandView {
@@ -59,6 +65,7 @@ impl BrandView {
             has_mark: brand.name.is_none() && brand.logo.is_none(),
             has_favicon: brand.favicon.is_some(),
             favicon: brand.favicon.clone().unwrap_or_default(),
+            stylesheets: brand.stylesheets.clone(),
         }
     }
 }
@@ -87,6 +94,7 @@ mod tests {
         assert!(view.has_mark);
         assert!(!view.has_logo);
         assert!(!view.has_favicon);
+        assert!(view.stylesheets.is_empty());
     }
 
     #[test]

@@ -8,7 +8,7 @@
 <link rel="icon" type="image/png" sizes="32x32" href="{{ asset('ui::resources/images/favicon-32.png') }}">
 <link rel="apple-touch-icon" href="{{ asset('ui::resources/images/apple-touch-icon.png') }}">
 @endif@vite(['ui::resources/css/app.css', 'ui::resources/js/app.js'])
-@yield('ignite_head')</head>
+@yield('ignite_head')@yield('ignite_stylesheets')</head>
 <body class="min-h-screen bg-page font-sans text-text antialiased">
 @yield('ignite_aside')
 <div class="flex min-h-screen min-w-0 flex-col @yield('ignite_column')">

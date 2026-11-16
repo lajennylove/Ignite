@@ -1,6 +1,6 @@
 //! The panel's brand and navigation options, as Filament's panel and resources set them: the
-//! brand name, logo and favicon, the navigation groups, the sort and the icons. Runs against
-//! the `ignite_test` database. Run it with `--release` too: a release build renders the views
+//! brand name, logo and favicon, the app's stylesheets, the navigation groups, the sort and the
+//! icons. Runs against the `ignite_test` database. Run it with `--release` too: a release build renders the views
 //! compiled into the panel, so the options must be in them.
 
 mod common;
@@ -132,6 +132,100 @@ fn brand_text_is_escaped() {
     let html = page(&client, "/admin");
     assert!(html.contains("&lt;b&gt;Acme&lt;/b&gt; &amp; Co"), "{html}");
     assert!(!html.contains("<b>Acme</b>"));
+}
+
+/// The head of a page: the text between `<head>` and `</head>`.
+fn head(html: &str) -> &str {
+    let start = html.find("<head>").expect("a head");
+    let end = html.find("</head>").expect("the end of the head");
+    &html[start..end]
+}
+
+#[test]
+fn a_stylesheet_appears_in_the_head_of_every_page() {
+    let _guard = reset();
+    let link = r#"<link rel="stylesheet" href="/mc-includes/css/dashicons.min.css">"#;
+    let configure = |ignite: Ignite| ignite.stylesheet("/mc-includes/css/dashicons.min.css");
+
+    let client = signed_in_with(configure);
+    for path in [
+        "/admin",
+        "/admin/widgets",
+        "/admin/widgets/new",
+        "/admin/profile",
+    ] {
+        let html = page(&client, path);
+        let head = head(&html);
+        assert!(head.contains(link), "{path}: {html}");
+        assert!(
+            at(head, link) > at(head, r#"<link rel="stylesheet" href="/admin/build/"#),
+            "{path}: the app's stylesheet comes after the panel's CSS"
+        );
+        assert!(
+            head.ends_with(&format!("{link}\n")),
+            "{path}: the link is at the end of the head: {head}"
+        );
+    }
+
+    let guest = client_with(configure);
+    for path in ["/admin/login", "/admin/password/forgot"] {
+        let html = page(&guest, path);
+        assert!(head(&html).contains(link), "{path}: {html}");
+    }
+}
+
+#[test]
+fn stylesheets_keep_the_order_they_were_added_in() {
+    let _guard = reset();
+    let client = signed_in_with(|ignite| {
+        ignite
+            .stylesheet("/css/first.css")
+            .stylesheet("https://cdn.example.com/second.css")
+            .stylesheet("/css/third.css")
+    });
+    let html = page(&client, "/admin");
+    let head = head(&html);
+    let first = at(head, r#"<link rel="stylesheet" href="/css/first.css">"#);
+    let second = at(
+        head,
+        r#"<link rel="stylesheet" href="https://cdn.example.com/second.css">"#,
+    );
+    let third = at(head, r#"<link rel="stylesheet" href="/css/third.css">"#);
+    assert!(first < second && second < third, "{head}");
+}
+
+#[test]
+fn a_stylesheet_url_is_escaped() {
+    let _guard = reset();
+    let client =
+        signed_in_with(|ignite| ignite.stylesheet(r#"/css/a.css"><script>alert(1)</script>"#));
+    let html = page(&client, "/admin");
+    assert!(
+        head(&html).contains(
+            r#"<link rel="stylesheet" href="/css/a.css&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;">"#
+        ),
+        "{html}"
+    );
+    assert!(!html.contains("<script>alert(1)"));
+}
+
+#[test]
+fn no_stylesheet_is_linked_by_default() {
+    let _guard = reset();
+    let only_the_panels = |html: &str| {
+        let head = head(html);
+        assert_eq!(
+            head.matches(r#"rel="stylesheet""#).count(),
+            1,
+            "only the panel's own CSS: {head}"
+        );
+    };
+    let client = signed_in(None);
+    only_the_panels(&page(&client, "/admin"));
+    only_the_panels(&page(&client, "/admin/widgets"));
+
+    let guest = client_with(|ignite| ignite);
+    only_the_panels(&page(&guest, "/admin/login"));
 }
 
 #[test]

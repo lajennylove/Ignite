@@ -4,6 +4,8 @@
 
 @section('ignite_favicon')@include('ignite::partials.favicon')@endsection
 
+@section('ignite_stylesheets')@include('ignite::partials.stylesheets')@endsection
+
 @section('ignite_head')@if (theme_style)<style>{!! $theme_style !!}</style>@endif@endsection
 
 @section('ignite_bar')

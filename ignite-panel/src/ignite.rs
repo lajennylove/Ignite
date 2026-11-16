@@ -468,6 +468,26 @@ impl Ignite {
         self
     }
 
+    /// Adds a stylesheet to every page of the panel, as Filament registers an app's CSS with
+    /// `FilamentAsset::register` and prints it at the end of the head: the path or URL of the
+    /// file, such as `/mc-includes/css/dashicons.css`. The layout links it after the panel's
+    /// own CSS, so its rules can change the panel's look, on the signed-in pages and on the
+    /// sign-in pages. Each call adds one stylesheet, in order. The app serves the file. The
+    /// default is none.
+    ///
+    /// The URL is printed in the `href` attribute and escaped there, as every value of the
+    /// views is.
+    ///
+    /// ```ignore
+    /// Ignite::new()
+    ///     .stylesheet("/mc-includes/css/dashicons.min.css")
+    ///     .stylesheet("/mc-admin/css/admin.css")
+    /// ```
+    pub fn stylesheet(mut self, url: impl Into<String>) -> Self {
+        self.brand.stylesheets.push(url.into());
+        self
+    }
+
     /// Orders the navigation groups, as Filament's panel `navigationGroups`: the sidebar shows
     /// the groups in this order, each under its name as a heading, after the resources that
     /// have no group. A resource joins a group with its
