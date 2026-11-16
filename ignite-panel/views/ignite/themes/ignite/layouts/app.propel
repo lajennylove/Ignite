@@ -3,11 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>@yield('title') · Ignite</title>
-<link rel="icon" href="{{ asset('ui::resources/images/favicon.ico') }}" sizes="any">
+<title>@yield('title') · {{ $brand.name }}</title>
+@if (brand.has_favicon)<link rel="icon" href="{{ $brand.favicon }}">
+@else<link rel="icon" href="{{ asset('ui::resources/images/favicon.ico') }}" sizes="any">
 <link rel="icon" type="image/png" sizes="32x32" href="{{ asset('ui::resources/images/favicon-32.png') }}">
 <link rel="apple-touch-icon" href="{{ asset('ui::resources/images/apple-touch-icon.png') }}">
-@vite(['ui::resources/css/app.css', 'ui::resources/js/app.js'])
+@endif@vite(['ui::resources/css/app.css', 'ui::resources/js/app.js'])
 @yield('ignite_head')</head>
 <body class="min-h-screen bg-page font-sans text-text antialiased">
 @yield('ignite_aside')

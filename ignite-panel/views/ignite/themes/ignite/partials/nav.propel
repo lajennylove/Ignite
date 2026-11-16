@@ -2,8 +2,8 @@
 <input id="ig-nav" type="checkbox" class="peer sr-only">
 <aside class="fixed inset-y-0 left-0 z-30 flex w-[270px] -translate-x-full flex-col overflow-y-auto border-r border-border bg-surface transition-transform duration-300 peer-checked:translate-x-0 xl:translate-x-0">
   <a class="flex items-center gap-2.5 px-6 py-6 font-semibold text-heading no-underline" href="{{ $home_url }}">
-    <img src="{{ asset('ui::resources/images/ignite-mark.png') }}" alt="" class="h-9 w-auto">
-    <span class="text-xl">Ignite</span>
+    @if (brand.has_mark)<img src="{{ asset('ui::resources/images/ignite-mark.png') }}" alt="" class="h-9 w-auto">
+    @endif@if (brand.has_logo)<img src="{{ $brand.logo }}" alt="{{ $brand.name }}" class="w-auto" style="height: {{ $brand.logo_height }}">@else<span class="text-xl">{{ $brand.name }}</span>@endif
   </a>
   <nav class="flex flex-col gap-1 px-4 pb-6" aria-label="Main">
     <p class="ig-caption mt-2">Menu</p>

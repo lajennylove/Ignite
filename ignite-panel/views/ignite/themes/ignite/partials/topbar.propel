@@ -14,8 +14,8 @@
     </div>
   @else
     <a class="flex items-center gap-2 font-semibold text-heading no-underline" href="{{ $home_url }}">
-      <img src="{{ asset('ui::resources/images/ignite-mark.png') }}" alt="" class="h-9 w-auto">
-      Ignite
+      @if (brand.has_mark)<img src="{{ asset('ui::resources/images/ignite-mark.png') }}" alt="" class="h-9 w-auto">
+      @endif@if (brand.has_logo)<img src="{{ $brand.logo }}" alt="{{ $brand.name }}" class="w-auto" style="height: {{ $brand.logo_height }}">@else{{ $brand.name }}@endif
     </a>
   @endif
 </div>

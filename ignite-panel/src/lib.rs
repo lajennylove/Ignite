@@ -9,6 +9,7 @@
 
 mod assets;
 pub mod authz;
+mod brand;
 pub mod cli;
 mod csrf;
 mod embedded;

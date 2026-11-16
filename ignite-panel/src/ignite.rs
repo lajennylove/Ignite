@@ -10,6 +10,7 @@ use rocket::catchers;
 use rocket::fairing::{self, AdHoc, Fairing, Info, Kind};
 use rocket::{Build, Request, Response, Rocket};
 
+use crate::brand::{self, Brand};
 use crate::erased::{Adapter, Erased, RuntimeAdapter};
 use crate::mail::{Mailer, NotConfigured};
 use crate::proxy::TrustedProxies;
@@ -67,6 +68,8 @@ pub(crate) struct Registry {
     pub(crate) app_url: Option<String>,
     /// The slugs of the runtime resources whose permission rows this panel has registered.
     pub(crate) runtime_permissions: Mutex<HashSet<String>>,
+    /// The brand the app set: the name, the logo and the favicon (see [`Ignite::brand_name`]).
+    pub(crate) brand: Brand,
 }
 
 impl Registry {
@@ -141,6 +144,7 @@ pub struct Ignite {
     app_url: Option<String>,
     user_callbacks: UserCallbacks,
     storage: PathBuf,
+    brand: Brand,
 }
 
 impl Ignite {
@@ -207,6 +211,7 @@ impl Ignite {
             app_url,
             user_callbacks: UserCallbacks::default(),
             storage: PathBuf::from(users::DEFAULT_STORAGE_DIR),
+            brand: Brand::default(),
         }
     }
 
@@ -413,6 +418,51 @@ impl Ignite {
         crate::cli::run(&args.into_iter().collect::<Vec<_>>())
     }
 
+    /// Sets the brand name, as Filament's `brandName`: the text at the top of the navigation
+    /// and in the sign-in bar, and the end of every page title (`Users · <name>`). The default
+    /// is `Ignite`, shown beside the Ignite mark. A name set here shows without the mark; with
+    /// a [`brand_logo`](Self::brand_logo), the logo shows instead and the name is its
+    /// alternative text.
+    pub fn brand_name(mut self, name: impl Into<String>) -> Self {
+        self.brand.name = Some(name.into());
+        self
+    }
+
+    /// Sets the brand logo, as Filament's `brandLogo`: the path or URL of an image, such as
+    /// `/images/logo.webp`, shown at the top of the navigation and in the sign-in bar in place
+    /// of the brand name, with the name as its alternative text. The app serves the image. The
+    /// default is the Ignite mark beside the name.
+    pub fn brand_logo(mut self, url: impl Into<String>) -> Self {
+        self.brand.logo = Some(url.into());
+        self
+    }
+
+    /// Sets the height of the [`brand_logo`](Self::brand_logo), as Filament's
+    /// `brandLogoHeight`: a CSS length, such as `2rem` or `48px`. The default is `1.5rem`, as
+    /// in Filament. The width follows the image.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `height` is not a number followed by a unit or `%`, because the layout prints
+    /// it in a `style` attribute.
+    pub fn brand_logo_height(mut self, height: impl Into<String>) -> Self {
+        let height = height.into();
+        assert!(
+            brand::valid_height(&height),
+            "the brand logo height `{height}` is not a CSS length such as `2rem` or `48px`"
+        );
+        self.brand.logo_height = Some(height);
+        self
+    }
+
+    /// Sets the favicon, as Filament's `favicon`: the path or URL of the icon, such as
+    /// `/images/favicon.png`. The layout links it in place of Ignite's favicon and touch icon.
+    /// The app serves the file. The default is Ignite's icons.
+    pub fn favicon(mut self, url: impl Into<String>) -> Self {
+        self.brand.favicon = Some(url.into());
+        self
+    }
+
     /// Changes the URL prefix of the panel. The default is `/admin`.
     pub fn mount(mut self, path: &str) -> Self {
         self.mount = path.trim_end_matches('/').to_string();
@@ -438,6 +488,7 @@ impl Ignite {
             app_url,
             user_callbacks,
             storage,
+            brand,
         } = self;
         // Users created or deleted from now on run the app's callbacks.
         users::install_callbacks(user_callbacks);
@@ -466,6 +517,7 @@ impl Ignite {
                 mailer,
                 app_url,
                 runtime_permissions: Mutex::new(HashSet::new()),
+                brand,
             };
             Ok(rocket
                 .manage(db)

@@ -39,6 +39,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use crate::authz::Action;
+use crate::brand::BrandView;
 use crate::ignite::Registry;
 use crate::session::AdminUser;
 use crate::theme::Icon;
@@ -63,6 +64,8 @@ pub(crate) struct Layout {
     /// The CSS of the active admin theme's colour tokens, or empty when it has none. The
     /// layout prints it raw: the tokens are checked when the theme is registered.
     pub(crate) theme_style: String,
+    /// The panel's brand: its name, logo and favicon (see [`Ignite::brand_name`](crate::Ignite::brand_name)).
+    pub(crate) brand: BrandView,
 }
 
 /// One entry of the sidebar: a list, and a link to add a record when the resource has forms.
@@ -150,6 +153,7 @@ impl Layout {
             has_flash: flash.is_some(),
             flash: flash.unwrap_or_default(),
             theme_style: admin_theme.style.clone(),
+            brand: BrandView::new(&registry.brand),
         }
     }
 }
@@ -173,6 +177,7 @@ pub(crate) struct DashboardPage {
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
     pub(crate) theme_style: String,
+    pub(crate) brand: BrandView,
     pub(crate) title: &'static str,
     pub(crate) cards: Vec<CardView>,
     pub(crate) tables: Vec<LatestTable>,
@@ -253,6 +258,7 @@ pub(crate) struct LoginPage {
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
     pub(crate) theme_style: String,
+    pub(crate) brand: BrandView,
     pub(crate) title: &'static str,
     pub(crate) action: String,
     pub(crate) forgot_url: String,
@@ -281,6 +287,7 @@ pub(crate) struct ForgotPage {
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
     pub(crate) theme_style: String,
+    pub(crate) brand: BrandView,
     pub(crate) title: &'static str,
     pub(crate) action: String,
     pub(crate) login_url: String,
@@ -308,6 +315,7 @@ pub(crate) struct ResetPage {
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
     pub(crate) theme_style: String,
+    pub(crate) brand: BrandView,
     pub(crate) title: &'static str,
     pub(crate) action: String,
     pub(crate) token: String,
@@ -335,6 +343,7 @@ pub(crate) struct ProfilePage {
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
     pub(crate) theme_style: String,
+    pub(crate) brand: BrandView,
     pub(crate) title: &'static str,
     pub(crate) profile_action: String,
     pub(crate) profile_fields: Vec<FieldView>,
@@ -363,6 +372,7 @@ pub(crate) struct IndexPage {
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
     pub(crate) theme_style: String,
+    pub(crate) brand: BrandView,
     pub(crate) title: String,
     pub(crate) singular: String,
     pub(crate) index_url: String,
@@ -432,6 +442,7 @@ pub(crate) struct FormPage {
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
     pub(crate) theme_style: String,
+    pub(crate) brand: BrandView,
     pub(crate) title: String,
     pub(crate) singular: String,
     pub(crate) heading: String,

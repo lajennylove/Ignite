@@ -390,6 +390,21 @@ pub fn client_on(mount: Option<&str>, rocket: rocket::Rocket<rocket::Build>) -> 
     Client::tracked(rocket.attach(builder(mount).fairing())).expect("valid rocket")
 }
 
+/// A client for the panel with the `Widgets` resource, built further by `configure`, such as
+/// with a brand or navigation groups. Not signed in.
+pub fn client_with(configure: impl FnOnce(Ignite) -> Ignite) -> Client {
+    ensure_secret();
+    let ignite = configure(builder(None));
+    Client::tracked(rocket::build().attach(ignite.fairing())).expect("valid rocket")
+}
+
+/// A client from [`client_with`], signed in as the test user.
+pub fn signed_in_with(configure: impl FnOnce(Ignite) -> Ignite) -> Client {
+    let client = client_with(configure);
+    sign_in(&client, "/admin", EMAIL, PASSWORD);
+    client
+}
+
 /// A client for the panel whose mail goes to `mailer`. Keep a clone of the recorder to read
 /// the messages the panel sent.
 pub fn client_with_mailer(mount: Option<&str>, mailer: RecordingMailer) -> Client {
@@ -458,8 +473,14 @@ pub fn signed_in(mount: Option<&str>) -> Client {
 pub fn signed_in_as(mount: Option<&str>, email: &str, password: &str) -> Client {
     let client = client(mount);
     let base = mount.unwrap_or("/admin").trim_end_matches('/').to_string();
+    sign_in(&client, &base, email, password);
+    client
+}
+
+/// Signs `client` in at the panel mounted at `base`, as the user with `email` and `password`.
+fn sign_in(client: &Client, base: &str, email: &str, password: &str) {
     client.get(format!("{base}/login")).dispatch();
-    let body = with_token(&client, &format!("email={email}&password={password}"));
+    let body = with_token(client, &format!("email={email}&password={password}"));
     let status = client
         .post(format!("{base}/login"))
         .header(ContentType::Form)
@@ -467,5 +488,4 @@ pub fn signed_in_as(mount: Option<&str>, email: &str, password: &str) -> Client 
         .dispatch()
         .status();
     assert_eq!(status, Status::SeeOther, "test sign-in failed");
-    client
 }
