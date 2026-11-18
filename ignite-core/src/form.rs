@@ -40,6 +40,21 @@ impl FormInput {
             )
         })
     }
+
+    /// The form without the fields `names`, as if it had not sent them. The panel removes the
+    /// fields a [condition](crate::FieldConditions) hides before it checks and saves a form.
+    pub fn without<'n>(&self, names: impl IntoIterator<Item = &'n str>) -> FormInput {
+        let mut values = self.0.clone();
+        for name in names {
+            values.remove(name);
+        }
+        FormInput(values)
+    }
+
+    /// Sets the value of `name`.
+    pub(crate) fn insert(&mut self, name: String, value: String) {
+        self.0.insert(name, value);
+    }
 }
 
 /// Error messages for a form, keyed by field name. The panel shows each

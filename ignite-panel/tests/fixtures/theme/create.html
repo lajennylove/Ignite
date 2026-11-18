@@ -10,7 +10,7 @@
 <link rel="icon" type="image/png" sizes="32x32" href="/admin/build/resources/images/favicon-32.png">
 <link rel="apple-touch-icon" href="/admin/build/resources/images/apple-touch-icon.png">
 <link rel="stylesheet" href="/admin/build/assets/app-CS1XT9FU.css">
-<script type="module" src="/admin/build/assets/app-aLvpPEct.js"></script>
+<script type="module" src="/admin/build/assets/app-Doh2sRhG.js"></script>
 
 </head>
 <body class="min-h-screen bg-page font-sans text-text antialiased">
@@ -75,9 +75,11 @@
   <form class="ig-card grid max-w-2xl gap-5" method="post" action="/admin/widgets">
     <input type="hidden" name="_token" value="{csrf}">
 
-    
+    <div class="grid gap-5" data-ignite-fields>
       
-<div>
+      
+        
+<div data-ignite-field="name">
   
     <label class="ig-label" for="name">Name *</label>
     
@@ -87,9 +89,9 @@
   
 </div>
 
-    
       
-<div>
+        
+<div data-ignite-field="price">
   
     <label class="ig-label" for="price">Price *</label>
     
@@ -99,9 +101,9 @@
   
 </div>
 
-    
       
-<div>
+        
+<div data-ignite-field="note">
   
     <label class="ig-label" for="note">Note</label>
     
@@ -111,7 +113,8 @@
   
 </div>
 
-    
+      
+    </div>
 
     <div class="flex flex-wrap items-center gap-3">
       <button type="submit" class="ig-btn ig-btn-primary">Create</button>

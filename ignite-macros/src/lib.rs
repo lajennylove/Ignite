@@ -25,6 +25,7 @@ use syn::{
 /// - `#[ignite(navigation_group = "Shop")]`: the navigation group the entry is listed under, as Filament's `$navigationGroup`. Defaults to none: the entry is listed before the groups.
 /// - `#[ignite(navigation_sort = 2)]`: the entry's place, as Filament's `$navigationSort`: lower first. Defaults to none, which comes before any number.
 /// - `#[ignite(navigation_icon = "dashicons dashicons-admin-post")]`: the CSS classes of the entry's icon, as Filament's `$navigationIcon`, from a stylesheet the app loads (Ignite ships no icon font). Defaults to the admin theme's icon.
+/// - `#[ignite(conditions = post_conditions)]`: the conditions that show or hide the form's fields, and the live fields, as Filament's `visible()`, `hidden()` and `live()`: the path of a `fn() -> ignite_core::FieldConditions`. Defaults to none: every field shows. A field that a condition may hide should be an `Option`, so it is NULL on create and keeps its stored value on update.
 ///
 /// Field attributes:
 /// - `primary_key`: the key column. Defaults to a field named `id`.
@@ -201,7 +202,7 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
         }
     };
 
-    let (table, title, singular, latest, navigation) = struct_attrs(input)?;
+    let (table, title, singular, latest, navigation, conditions) = struct_attrs(input)?;
     let table_name = table
         .segments
         .last()
@@ -236,6 +237,13 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
     };
 
     let navigation_consts = navigation.consts();
+    let conditions_method = conditions.map(|path| {
+        quote! {
+            fn conditions() -> ::ignite_core::FieldConditions {
+                #path()
+            }
+        }
+    });
 
     let form_fields: Vec<&Field> = fields.iter().filter(|f| f.ident != pk_ident).collect();
     let input_name = format_ident!("{}Input", name);
@@ -479,6 +487,8 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
                 #latest_records
             }
 
+            #conditions_method
+
             async fn latest(
                 db: &::ignite_core::Database,
                 limit: i64,
@@ -654,23 +664,25 @@ impl Navigation {
 }
 
 /// What the struct-level attributes give: the table, the title, the singular name, the
-/// dashboard table, and the navigation.
+/// dashboard table, the navigation, and the path of the function that gives the conditions.
 type StructAttrs = (
     syn::Path,
     Option<String>,
     Option<String>,
     Option<LatestSpec>,
     Navigation,
+    Option<syn::Path>,
 );
 
 /// Reads `#[ignite(...)]` on the struct: the table, the title, the singular name, the
-/// dashboard table, and the navigation.
+/// dashboard table, the navigation and the conditions.
 fn struct_attrs(input: &DeriveInput) -> syn::Result<StructAttrs> {
     let mut table = None;
     let mut title = None;
     let mut singular = None;
     let mut latest = None;
     let mut navigation = Navigation::default();
+    let mut conditions = None;
     for attr in input.attrs.iter().filter(|a| a.path().is_ident("ignite")) {
         attr.parse_nested_meta(|meta| {
             if meta.path.is_ident("table") {
@@ -697,9 +709,12 @@ fn struct_attrs(input: &DeriveInput) -> syn::Result<StructAttrs> {
             } else if meta.path.is_ident("navigation_sort") {
                 navigation.sort = Some(sort_value(&meta.value()?.parse::<syn::Expr>()?)?);
                 Ok(())
+            } else if meta.path.is_ident("conditions") {
+                conditions = Some(meta.value()?.parse::<syn::Path>()?);
+                Ok(())
             } else {
                 Err(meta.error(
-                    "unknown ignite attribute on the struct; expected `table`, `title`, `singular`, `latest_records`, `navigation_label`, `navigation_group`, `navigation_sort` or `navigation_icon`",
+                    "unknown ignite attribute on the struct; expected `table`, `title`, `singular`, `latest_records`, `navigation_label`, `navigation_group`, `navigation_sort`, `navigation_icon` or `conditions`",
                 ))
             }
         })?;
@@ -710,7 +725,7 @@ fn struct_attrs(input: &DeriveInput) -> syn::Result<StructAttrs> {
             "IgniteResource needs #[ignite(table = <table name>)]",
         )
     })?;
-    Ok((table, title, singular, latest, navigation))
+    Ok((table, title, singular, latest, navigation, conditions))
 }
 
 /// The `i32` of a `navigation_sort` value: an integer literal, or a negative one such as `-1`.

@@ -1,7 +1,7 @@
 //! The view models the Propel templates read. Propel expressions can only read
 //! a path, so every condition, URL and label is computed here first.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use chrono::{DateTime, NaiveDate, NaiveDateTime};
 use propel_rocket::PropelView;
@@ -34,7 +34,7 @@ where
     PropelView::compiled(|assets| compiled(context, assets))
 }
 
-use ignite_core::{FieldDef, FieldErrors, FieldKindDef, FormInput, MediaItem};
+use ignite_core::{FieldConditions, FieldDef, FieldErrors, FieldKindDef, FormInput, MediaItem};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -505,6 +505,13 @@ pub(crate) struct FormPage {
     pub(crate) submit_label: &'static str,
     pub(crate) back_url: String,
     pub(crate) fields: Vec<FieldView>,
+    /// Whether a field is live: the form then sends its values to `live_url` when one changes,
+    /// and shows the fields the answer renders.
+    pub(crate) has_live: bool,
+    pub(crate) live_url: String,
+    /// The names of the fields the form shows, comma-separated, sent back as `_ignite_shown`
+    /// (see [`live_values`]).
+    pub(crate) shown_fields: String,
     /// Whether the form loads the app's editor script, for its wysiwyg fields.
     pub(crate) has_editor: bool,
     pub(crate) editor_script: String,
@@ -515,6 +522,8 @@ pub(crate) struct FieldView {
     pub(crate) name: String,
     pub(crate) label: String,
     pub(crate) required: bool,
+    /// Whether a change to the field shows the form's fields again (`data-ignite-live`).
+    pub(crate) live: bool,
     pub(crate) input_type: &'static str,
     pub(crate) is_textarea: bool,
     pub(crate) is_checkbox: bool,
@@ -754,6 +763,7 @@ impl FieldView {
             name: field.name.clone(),
             label: field.label.clone(),
             required: field.required,
+            live: false,
             input_type,
             is_textarea,
             is_checkbox,
@@ -992,6 +1002,57 @@ pub(crate) fn field_views_with(
             FieldView::new(f, form, errors, lookup, &choices.media)
         })
         .collect()
+}
+
+/// The fields of a resource's form that its conditions show, in display order: the fields
+/// of `hidden` are left out, and each live field is marked.
+pub(crate) fn form_field_views(
+    fields: &[FieldDef],
+    conditions: &FieldConditions,
+    hidden: &BTreeSet<String>,
+    form: &FormInput,
+    errors: &FieldErrors,
+    choices: &FormChoices,
+) -> Vec<FieldView> {
+    let shown: Vec<FieldDef> = fields
+        .iter()
+        .filter(|f| !hidden.contains(&f.name))
+        .cloned()
+        .collect();
+    let mut views = field_views_with(&shown, form, errors, choices);
+    for view in &mut views {
+        view.live = conditions.is_live(&view.name);
+    }
+    views
+}
+
+/// The values a form of a resource with live fields shows again. A form sends `_ignite_shown`,
+/// the names of the fields it showed: those take the value `form` sent, an unticked checkbox
+/// or a blank field included, and a field the form did not show takes its stored value in
+/// `record`, so a field that a change reveals on the edit form shows what is stored. Without
+/// `_ignite_shown`, the values are `form`'s.
+pub(crate) fn live_values(
+    fields: &[FieldDef],
+    record: Option<&Value>,
+    form: &FormInput,
+) -> FormInput {
+    let Some(shown) = form.get("_ignite_shown") else {
+        return form.clone();
+    };
+    let shown: Vec<&str> = shown.split(',').collect();
+    let stored = record.map(|record| record_form(fields, record));
+    let mut values = HashMap::new();
+    for field in fields {
+        let value = if shown.contains(&field.name.as_str()) {
+            form.get(&field.name)
+        } else {
+            stored.as_ref().and_then(|stored| stored.get(&field.name))
+        };
+        if let Some(value) = value {
+            values.insert(field.name.clone(), value.to_string());
+        }
+    }
+    FormInput::new(values)
 }
 
 /// The editor script a form loads: the registered one, when the form has a wysiwyg field.

@@ -1,13 +1,14 @@
 //! Type-erased access to a resource, so the routes can serve many resource
 //! types from one set of handlers.
 
+use std::collections::BTreeSet;
 use std::future::Future;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
 use ignite_core::{
-    ActingUser, ColumnDef, Database, FieldDef, FieldErrors, FieldKindDef, FormInput,
-    IgniteResource, LatestRecords, ListQuery, RegisteredResource, Row, StatWidget,
+    ActingUser, ColumnDef, Database, FieldConditions, FieldDef, FieldErrors, FieldKindDef,
+    FormInput, IgniteResource, LatestRecords, ListQuery, RegisteredResource, Row, StatWidget,
 };
 use orbit_orm::Error;
 use serde::Serialize;
@@ -32,6 +33,8 @@ pub(crate) trait Erased: Send + Sync {
     fn fields(&self) -> &[FieldDef];
     /// The list columns, owned.
     fn columns(&self) -> &[ColumnDef];
+    /// The conditions that show or hide the form's fields.
+    fn conditions(&self) -> &FieldConditions;
     /// One page of records as JSON, and the total count.
     /// The resource's queries are given the signed-in `user`: they call its `*_for` methods.
     async fn list(
@@ -42,12 +45,14 @@ pub(crate) trait Erased: Send + Sync {
     ) -> Result<(Vec<Value>, i64), Error>;
     async fn find(&self, db: &Database, user: &ActingUser, id: i64)
         -> Result<Option<Value>, Error>;
-    /// `Err(errors)` when the form does not validate; the database is not touched then.
+    /// `Err(errors)` when the form does not validate; the database is not touched then. The
+    /// fields of `hidden` are left out: they are not checked and not written.
     async fn create(
         &self,
         db: &Database,
         user: &ActingUser,
         form: &FormInput,
+        hidden: &BTreeSet<String>,
     ) -> Result<Result<Value, FieldErrors>, Error>;
     async fn update(
         &self,
@@ -55,6 +60,7 @@ pub(crate) trait Erased: Send + Sync {
         user: &ActingUser,
         id: i64,
         form: &FormInput,
+        hidden: &BTreeSet<String>,
     ) -> Result<Result<Value, FieldErrors>, Error>;
     async fn delete(&self, db: &Database, user: &ActingUser, id: i64) -> Result<u64, Error>;
     /// The dashboard cards this resource provides.
@@ -77,6 +83,7 @@ pub(crate) trait Erased: Send + Sync {
 pub(crate) struct Adapter<R> {
     fields: Vec<FieldDef>,
     columns: Vec<ColumnDef>,
+    conditions: FieldConditions,
     resource: PhantomData<fn() -> R>,
 }
 
@@ -85,9 +92,43 @@ impl<R: IgniteResource> Adapter<R> {
         Adapter {
             fields: R::fields().iter().copied().map(FieldDef::from).collect(),
             columns: R::columns().iter().copied().map(ColumnDef::from).collect(),
+            conditions: R::conditions(),
             resource: PhantomData,
         }
     }
+}
+
+/// The fields of `fields` that `hidden` does not hide.
+fn shown(fields: &[FieldDef], hidden: &BTreeSet<String>) -> Vec<FieldDef> {
+    fields
+        .iter()
+        .filter(|f| !hidden.contains(&f.name))
+        .cloned()
+        .collect()
+}
+
+/// A static resource's validation of a form without its `hidden` fields, without the errors
+/// of those fields, which the form does not show. A `validate` that refuses nothing but a
+/// hidden field is a server error: the resource must accept a field that may be hidden as
+/// missing (see [`IgniteResource::conditions`]).
+fn shown_errors<T>(
+    validated: Result<T, FieldErrors>,
+    hidden: &BTreeSet<String>,
+    slug: &str,
+) -> Result<Result<T, FieldErrors>, Error> {
+    let Err(mut errors) = validated else {
+        return Ok(validated);
+    };
+    errors.retain(|name, _| !hidden.contains(name));
+    if errors.is_empty() {
+        return Err(Error::Database(orbit_orm::__sqlx::Error::Protocol(
+            format!(
+                "the resource `{slug}` refused a field its conditions hide; \
+             make the field optional in `validate`"
+            ),
+        )));
+    }
+    Ok(Err(errors))
 }
 
 /// The error key and label of each static field, for [`unique_violation`].
@@ -137,6 +178,10 @@ impl<R: IgniteResource> Erased for Adapter<R> {
         &self.columns
     }
 
+    fn conditions(&self) -> &FieldConditions {
+        &self.conditions
+    }
+
     async fn list(
         &self,
         db: &Database,
@@ -166,8 +211,11 @@ impl<R: IgniteResource> Erased for Adapter<R> {
         db: &Database,
         user: &ActingUser,
         form: &FormInput,
+        hidden: &BTreeSet<String>,
     ) -> Result<Result<Value, FieldErrors>, Error> {
-        match checked::<R>(db, user, &self.fields, form, R::validate(form)).await? {
+        let form = form.without(hidden.iter().map(String::as_str));
+        let validated = shown_errors(R::validate(&form), hidden, R::SLUG)?;
+        match checked::<R>(db, user, &shown(&self.fields, hidden), &form, validated).await? {
             Ok(input) => match R::create_for(db, user, input).await {
                 Ok(record) => to_json(record).map(Ok),
                 Err(error) => unique_violation(error, R::SLUG, &static_keys::<R>()).map(Err),
@@ -182,8 +230,11 @@ impl<R: IgniteResource> Erased for Adapter<R> {
         user: &ActingUser,
         id: i64,
         form: &FormInput,
+        hidden: &BTreeSet<String>,
     ) -> Result<Result<Value, FieldErrors>, Error> {
-        match checked::<R>(db, user, &self.fields, form, R::validate_update(form)).await? {
+        let form = form.without(hidden.iter().map(String::as_str));
+        let validated = shown_errors(R::validate_update(&form), hidden, R::SLUG)?;
+        match checked::<R>(db, user, &shown(&self.fields, hidden), &form, validated).await? {
             Ok(input) => match R::update_for(db, user, id, input).await {
                 Ok(record) => to_json(record).map(Ok),
                 Err(error) => unique_violation(error, R::SLUG, &static_keys::<R>()).map(Err),
@@ -370,21 +421,23 @@ async fn media_errors(
 pub(crate) struct RuntimeAdapter(pub(crate) Arc<RegisteredResource>);
 
 impl RuntimeAdapter {
-    /// Validates `form` with the resource's definitions, then checks its lookup fields.
+    /// Validates `form` with the resource's definitions, then checks its lookup fields. The
+    /// fields of `hidden` are left out.
     async fn checked(
         &self,
         db: &Database,
         user: &ActingUser,
         form: &FormInput,
         creating: bool,
+        hidden: &BTreeSet<String>,
     ) -> Result<Result<Row, FieldErrors>, Error> {
         let validated = if creating {
-            self.0.validate(form)
+            self.0.validate_shown(form, hidden)
         } else {
-            self.0.validate_update(form)
+            self.0.validate_update_shown(form, hidden)
         };
         let errors = validated.as_ref().err().cloned().unwrap_or_default();
-        let fields = self.0.fields();
+        let fields = &shown(self.0.fields(), hidden);
         let data = &self.0.resource().data;
         let errors = lookup_errors(fields, form, errors, |field| {
             data.options_for(db, user, field)
@@ -465,6 +518,10 @@ impl Erased for RuntimeAdapter {
         self.0.columns()
     }
 
+    fn conditions(&self) -> &FieldConditions {
+        self.0.conditions()
+    }
+
     async fn list(
         &self,
         db: &Database,
@@ -498,8 +555,9 @@ impl Erased for RuntimeAdapter {
         db: &Database,
         user: &ActingUser,
         form: &FormInput,
+        hidden: &BTreeSet<String>,
     ) -> Result<Result<Value, FieldErrors>, Error> {
-        let validated = self.checked(db, user, form, true).await?;
+        let validated = self.checked(db, user, form, true, hidden).await?;
         let data = &self.0.resource().data;
         self.save(validated, |row| data.create_for(db, user, row))
             .await
@@ -511,8 +569,9 @@ impl Erased for RuntimeAdapter {
         user: &ActingUser,
         id: i64,
         form: &FormInput,
+        hidden: &BTreeSet<String>,
     ) -> Result<Result<Value, FieldErrors>, Error> {
-        let validated = self.checked(db, user, form, false).await?;
+        let validated = self.checked(db, user, form, false, hidden).await?;
         let data = &self.0.resource().data;
         self.save(validated, |row| data.update_for(db, user, id, row))
             .await

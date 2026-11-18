@@ -199,6 +199,22 @@ unregister_runtime("books")?;
 
 The panel serves it at `/admin/<slug>` with the same list, forms, checks and delete action as a static resource, and shows it in the navigation, from the next request on. Ignite assumes no table layout: `RuntimeData` decides where the rows live. A row needs a numeric `id`. A slug that is not valid is refused with `RuntimeError::InvalidSlug`, and a slug that a static resource, another runtime resource or a panel page (such as `login`) uses with `RuntimeError::SlugTaken`; `unregister_runtime` of a slug that is not registered returns `RuntimeError::NotRegistered`. On edit, an optional field sent blank comes to `RuntimeData::update` as `null`, and one the form did not send and a blank password are left out of the row, as for a derived resource. Call `ignite_panel::register_runtime_permissions(&db, "books").await?` right after `register_runtime` (it refuses a slug that is not registered), so its five permissions exist at once and a role can be granted them; without the call, the panel creates them on the next signed-in request. They stay when the resource is removed. A unique-index violation shows as "<label> is already taken." only when the index is named `{slug}_{field}_unique`, as for a static resource; a `RuntimeData` that stores values elsewhere should check uniqueness itself. A runtime resource has no dashboard cards or table yet.
 
+### Conditional fields
+
+A field can show only when a condition holds, as Filament's `visible()`, `hidden()`, `visibleOn()`, `hiddenOn()` and `live()`. A condition is a closure the server runs when it builds and when it saves the form, given a `FormContext`: `operation()` (`Operation::Create` or `Operation::Edit`), `record()` (the stored row, `None` on create), `user()` (the `ActingUser`) and `get(name)` (a field's current value, as Filament's `$get`). A hidden field is not rendered, not checked (a required one included) and not written: a request that sends it anyway leaves the stored value as it is. A field marked `live` sends the form to the server when it changes in the browser, and the panel's script shows the fields the server renders for the new values.
+
+```rust
+RuntimeResource::new("posts", "Posts", "Post", PostData)
+    .field(kind)
+    .field(company)
+    .live("kind")
+    .visible("company", |form| form.get("kind") == Some("business"))
+    .hidden_on("slug", &[Operation::Create])
+    .visible("featured", |form| form.user().can("posts.feature"));
+```
+
+A static resource returns the same `FieldConditions` from `IgniteResource::conditions`, and the derive takes `#[ignite(conditions = post_conditions)]`, a `fn() -> FieldConditions`. The panel removes a hidden field from the form before `validate`, so a field that may be hidden must be one `validate` accepts as missing, such as an `Option` field of the derive.
+
 ## Brand and navigation
 
 The panel's brand and its sidebar are options of the panel and of each resource, as Filament's panel and resources set them. They are compiled into the panel's views, so they work in a release build too; an app does not copy the views to change them.

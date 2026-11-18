@@ -17,7 +17,7 @@
 //! )?;
 //! ```
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
@@ -26,6 +26,7 @@ use std::sync::{Arc, PoisonError, RwLock};
 use orbit_orm::{Database, Error};
 use serde_json::{Map, Value};
 
+use crate::condition::{FieldConditions, FormContext, Operation};
 use crate::field::{self as check, Block, Column, Field, FieldKind};
 use crate::form::{FieldErrors, FormInput};
 use crate::policy::ActingUser;
@@ -403,6 +404,9 @@ pub struct RuntimeResource {
     /// The CSS classes of the navigation entry's icon, as Filament's `$navigationIcon`.
     /// See [`IgniteResource::NAVIGATION_ICON`](crate::IgniteResource::NAVIGATION_ICON).
     pub navigation_icon: Option<String>,
+    /// The conditions that show or hide the form's fields, and the live fields, as
+    /// Filament's `visible()`, `hidden()` and `live()`. See [`FieldConditions`].
+    pub conditions: FieldConditions,
 }
 
 impl fmt::Debug for RuntimeResource {
@@ -418,6 +422,7 @@ impl fmt::Debug for RuntimeResource {
             .field("navigation_group", &self.navigation_group)
             .field("navigation_sort", &self.navigation_sort)
             .field("navigation_icon", &self.navigation_icon)
+            .field("conditions", &self.conditions)
             .finish_non_exhaustive()
     }
 }
@@ -442,6 +447,7 @@ impl RuntimeResource {
             navigation_group: None,
             navigation_sort: None,
             navigation_icon: None,
+            conditions: FieldConditions::new(),
         }
     }
 
@@ -488,17 +494,61 @@ impl RuntimeResource {
         self.navigation_icon = Some(classes.into());
         self
     }
+
+    /// Shows the field `field` only when `rule` holds, as Filament's `->visible()`. See
+    /// [`FieldConditions::visible`].
+    pub fn visible(
+        mut self,
+        field: impl Into<String>,
+        rule: impl Fn(&FormContext<'_>) -> bool + Send + Sync + 'static,
+    ) -> Self {
+        self.conditions = self.conditions.visible(field, rule);
+        self
+    }
+
+    /// Hides the field `field` when `rule` holds, as Filament's `->hidden()`. See
+    /// [`FieldConditions::hidden`].
+    pub fn hidden(
+        mut self,
+        field: impl Into<String>,
+        rule: impl Fn(&FormContext<'_>) -> bool + Send + Sync + 'static,
+    ) -> Self {
+        self.conditions = self.conditions.hidden(field, rule);
+        self
+    }
+
+    /// Shows the field `field` only on the forms of `operations`, as Filament's
+    /// `->visibleOn()`.
+    pub fn visible_on(mut self, field: impl Into<String>, operations: &[Operation]) -> Self {
+        self.conditions = self.conditions.visible_on(field, operations);
+        self
+    }
+
+    /// Hides the field `field` on the forms of `operations`, as Filament's `->hiddenOn()`.
+    pub fn hidden_on(mut self, field: impl Into<String>, operations: &[Operation]) -> Self {
+        self.conditions = self.conditions.hidden_on(field, operations);
+        self
+    }
+
+    /// Makes the field `field` live, as Filament's `->live()`: a change to it in the browser
+    /// shows the form's fields again for the new value. See [`FieldConditions::live`].
+    pub fn live(mut self, field: impl Into<String>) -> Self {
+        self.conditions = self.conditions.live(field);
+        self
+    }
 }
 
 /// The checks of [`RegisteredResource::validate`]. Each error is keyed by its field's name.
+/// The fields of `hidden` are skipped: they are not checked and the row has no key for them.
 fn validate_fields(
     fields: &[FieldDef],
     form: &FormInput,
     creating: bool,
+    hidden: &BTreeSet<String>,
 ) -> Result<Row, FieldErrors> {
     let mut errors = FieldErrors::new();
     let mut row = Row::new();
-    for field in fields {
+    for field in fields.iter().filter(|f| !hidden.contains(&f.name)) {
         let name = field.name.as_str();
         let label = field.label.as_str();
         // A checkbox is never blank: an unticked checkbox is false.
@@ -706,7 +756,7 @@ impl RegisteredResource {
     /// [`RuntimeData::options`] by the panel, which can read the database, and so is a media
     /// id against the registered [`MediaLibrary`](crate::MediaLibrary).
     pub fn validate(&self, form: &FormInput) -> Result<Row, FieldErrors> {
-        validate_fields(&self.resource.fields, form, true)
+        validate_fields(&self.resource.fields, form, true, &BTreeSet::new())
     }
 
     /// Turns the submitted form into a [`Row`] for an update. It is
@@ -721,7 +771,33 @@ impl RegisteredResource {
     /// - a checkbox the form did not send is `false`, because an unticked HTML checkbox sends
     ///   nothing.
     pub fn validate_update(&self, form: &FormInput) -> Result<Row, FieldErrors> {
-        validate_fields(&self.resource.fields, form, false)
+        validate_fields(&self.resource.fields, form, false, &BTreeSet::new())
+    }
+
+    /// The conditions that show or hide the form's fields.
+    pub fn conditions(&self) -> &FieldConditions {
+        &self.resource.conditions
+    }
+
+    /// [`validate`](Self::validate) for a form whose fields `hidden` are hidden (see
+    /// [`FieldConditions::hidden_fields`]): they are not checked, a required one included, and
+    /// the row has no key for them, so the source writes nothing for them. The panel calls it.
+    pub fn validate_shown(
+        &self,
+        form: &FormInput,
+        hidden: &BTreeSet<String>,
+    ) -> Result<Row, FieldErrors> {
+        validate_fields(&self.resource.fields, form, true, hidden)
+    }
+
+    /// [`validate_update`](Self::validate_update) for a form whose fields `hidden` are hidden:
+    /// the row has no key for them, so their stored values are kept, whatever the form sent.
+    pub fn validate_update_shown(
+        &self,
+        form: &FormInput,
+        hidden: &BTreeSet<String>,
+    ) -> Result<Row, FieldErrors> {
+        validate_fields(&self.resource.fields, form, false, hidden)
     }
 }
 

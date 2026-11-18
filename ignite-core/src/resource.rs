@@ -5,6 +5,7 @@ use std::future::Future;
 use orbit_orm::{Database, Error};
 use serde::Serialize;
 
+use crate::condition::FieldConditions;
 use crate::field::{Column, Field};
 use crate::form::{FieldErrors, FormInput};
 use crate::policy::ActingUser;
@@ -93,6 +94,19 @@ pub trait IgniteResource: Send + Sync + 'static {
     fn fields() -> &'static [Field];
     /// Table columns, in display order. Each column's `key` is a field name.
     fn columns() -> &'static [Column];
+
+    /// The conditions that show or hide the form's fields, and the live fields, as Filament's
+    /// `visible()`, `hidden()` and `live()` (see [`FieldConditions`]). The panel reads them
+    /// once, when it is built. The default is none: every field shows. `#[derive(IgniteResource)]`
+    /// writes it for `#[ignite(conditions = path)]`.
+    ///
+    /// The panel removes a hidden field from the submitted form before it calls
+    /// [`validate`](Self::validate) or [`validate_update`](Self::validate_update), so a field
+    /// that may be hidden must be one `validate` accepts as missing, such as an `Option` field
+    /// of the derive: left out on update, it keeps its stored value.
+    fn conditions() -> FieldConditions {
+        FieldConditions::new()
+    }
 
     /// The choices of a [`FieldKind::Lookup`](crate::FieldKind::Lookup) field, as
     /// `(value, label)` pairs in display order (added in v1), and of every other field whose

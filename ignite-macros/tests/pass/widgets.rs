@@ -1,8 +1,8 @@
-use ignite_core::IgniteResource;
+use ignite_core::{FieldConditions, IgniteResource, Operation};
 
 #[derive(orbit_orm::OrbitModel, serde::Serialize, IgniteResource)]
 #[orbit(table = "widgets")]
-#[ignite(table = widgets, title = "Widgets")]
+#[ignite(table = widgets, title = "Widgets", conditions = widget_conditions)]
 pub struct Widget {
     id: i32,
     #[orbit(fillable)]
@@ -20,7 +20,15 @@ pub struct Widget {
     due: Option<chrono::NaiveDate>,
 }
 
+fn widget_conditions() -> FieldConditions {
+    FieldConditions::new()
+        .live("active")
+        .visible("due", |form| form.checked("active"))
+        .hidden_on("note", &[Operation::Create])
+}
+
 fn main() {
     let _ = Widget::fields();
     let _ = Widget::columns();
+    assert!(Widget::conditions().is_live("active"));
 }

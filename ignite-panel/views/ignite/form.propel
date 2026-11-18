@@ -33,12 +33,17 @@
 @section('content')
   <h1 class="mb-6">{{ $heading }}</h1>
 
-  <form class="ig-card grid max-w-2xl gap-5" method="post" action="{{ $action }}">
+  <form class="ig-card grid max-w-2xl gap-5" method="post" action="{{ $action }}"@if (has_live) data-ignite-live-url="{{ $live_url }}"@endif>
     <input type="hidden" name="_token" value="{{ $csrf_token }}">
 
-    @foreach (field in fields)
-      @include('ignite::partials.field')
-    @endforeach
+    <div class="grid gap-5" data-ignite-fields>
+      @if (has_live)
+        <input type="hidden" name="_ignite_shown" value="{{ $shown_fields }}">
+      @endif
+      @foreach (field in fields)
+        @include('ignite::partials.field')
+      @endforeach
+    </div>
 
     <div class="flex flex-wrap items-center gap-3">
       <button type="submit" class="ig-btn ig-btn-primary">{{ $submit_label }}</button>

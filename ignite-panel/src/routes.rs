@@ -2,14 +2,14 @@
 //! database work through the app's Orbit database, and renders a Propel view. Every route
 //! except the sign-in and the sign-out needs an [`AdminUser`].
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::net::IpAddr;
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 
 use ignite_core::{
     ActingUser, ColumnDef, Database, Direction, FieldDef, FieldErrors, FormInput, LatestRecords,
-    ListQuery,
+    ListQuery, Operation,
 };
 use orbit_orm::Error as OrbitError;
 use propel_rocket::PropelView;
@@ -38,9 +38,9 @@ use crate::sessions;
 use crate::throttle;
 use crate::users;
 use crate::views::{
-    cell_text, compiled, editor_for, field_views, field_views_with, record_form, render_page,
-    CardView, CellView, ColumnHead, DashboardPage, FormChoices, FormPage, HeaderView, IndexPage,
-    LatestRow, LatestTable, Layout, LoginPage, ProfilePage, RowView,
+    cell_text, compiled, editor_for, field_views, form_field_views, live_values, record_form,
+    render_page, CardView, CellView, ColumnHead, DashboardPage, FormChoices, FormPage, HeaderView,
+    IndexPage, LatestRow, LatestTable, Layout, LoginPage, ProfilePage, RowView,
 };
 
 /// The largest form body the panel reads.
@@ -79,8 +79,10 @@ pub(crate) fn all() -> Vec<Route> {
         set_theme,
         index,
         new_form,
+        new_form_live,
         create,
         edit_form,
+        edit_form_live,
         update,
         destroy
     ];
@@ -921,9 +923,9 @@ async fn new_form(
 ) -> Result<PropelView, Status> {
     authorize(registry, &session, slug, Action::Create)?;
     let resource = registry.find(slug).ok_or(Status::NotFound)?;
-    let index_url = format!("{}/{}", registry.mount, resource.slug());
-    let choices = form_choices(db, &session, &resource, &FormInput::default()).await?;
-    let editor = editor_for(resource.fields());
+    let form = FormInput::default();
+    let hidden = hidden_fields(&resource, Operation::Create, None, &session, &form);
+    let choices = form_choices(db, &session, &resource, &form).await?;
     let layout = Layout::new(
         registry,
         Some(&session),
@@ -931,40 +933,54 @@ async fn new_form(
         take_flash(cookies, &registry.secret),
         csrf_token(cookies, &registry.secret),
     );
-    let page = FormPage {
-        home_url: layout.home_url,
-        signed_in: layout.signed_in,
-        user_name: layout.user_name,
-        user_initials: layout.user_initials,
-        has_avatar: layout.has_avatar,
-        avatar_url: layout.avatar_url,
-        theme: layout.theme,
-        theme_url: layout.theme_url,
-        profile_url: layout.profile_url,
-        logout_everywhere_url: layout.logout_everywhere_url,
-        csrf_token: layout.csrf_token,
-        nav: layout.nav,
-        nav_sections: layout.nav_sections,
-        has_flash: layout.has_flash,
-        flash: layout.flash,
-        theme_style: layout.theme_style,
-        brand: layout.brand,
-        title: resource.title().to_string(),
-        singular: resource.singular().to_string(),
-        heading: format!("New {}", resource.singular()),
-        action: index_url.clone(),
-        submit_label: "Create",
-        back_url: index_url,
-        fields: field_views_with(
-            resource.fields(),
-            &FormInput::default(),
-            &FieldErrors::new(),
-            &choices,
-        ),
-        has_editor: editor.is_some(),
-        editor_script: editor.unwrap_or_default(),
-    };
-    Ok(render_page("ignite::form", &page, compiled::form::render))
+    Ok(form_view(
+        registry,
+        layout,
+        &resource,
+        FormTarget::create(registry, &resource),
+        &form,
+        &FieldErrors::new(),
+        &choices,
+        &hidden,
+    ))
+}
+
+/// The create form again, for the values a live field changed: the fields the conditions
+/// show for them, with the values sent. The panel's script calls it (see
+/// [`FieldConditions::live`](ignite_core::FieldConditions::live)); nothing is saved.
+#[post("/<slug>/new/live", data = "<body>")]
+async fn new_form_live(
+    slug: &str,
+    body: Data<'_>,
+    session: AdminUser,
+    cookies: &CookieJar<'_>,
+    registry: &State<Registry>,
+    db: &State<Database>,
+) -> Result<PropelView, Status> {
+    authorize(registry, &session, slug, Action::Create)?;
+    let resource = registry.find(slug).ok_or(Status::NotFound)?;
+    let form = read_form(body).await?;
+    check_csrf(cookies, &registry.secret, form.get("_token"))?;
+    let form = live_values(resource.fields(), None, &form);
+    let hidden = hidden_fields(&resource, Operation::Create, None, &session, &form);
+    let choices = form_choices(db, &session, &resource, &form).await?;
+    let layout = Layout::new(
+        registry,
+        Some(&session),
+        slug,
+        None,
+        csrf_token(cookies, &registry.secret),
+    );
+    Ok(form_view(
+        registry,
+        layout,
+        &resource,
+        FormTarget::create(registry, &resource),
+        &form,
+        &FieldErrors::new(),
+        &choices,
+        &hidden,
+    ))
 }
 
 #[post("/<slug>", data = "<body>")]
@@ -981,9 +997,10 @@ async fn create(
     let index_url = format!("{}/{}", registry.mount, resource.slug());
     let form = read_form(body).await?;
     check_csrf(cookies, &registry.secret, form.get("_token"))?;
+    let hidden = hidden_fields(&resource, Operation::Create, None, &session, &form);
 
     let outcome = resource
-        .create(db.inner(), session.acting_user(), &form)
+        .create(db.inner(), session.acting_user(), &form, &hidden)
         .await
         .map_err(db_status)?;
 
@@ -993,18 +1010,27 @@ async fn create(
             Ok(Reply::Redirect(Box::new(Redirect::to(index_url))))
         }
         Err(errors) => {
+            let form = live_values(resource.fields(), None, &form);
             let choices = form_choices(db, &session, &resource, &form).await?;
-            Ok(form_page(
+            let layout = Layout::new(
                 registry,
-                &session,
-                &resource,
-                &form,
-                &errors,
-                &choices,
-                format!("New {}", resource.singular()),
-                index_url,
-                "Create",
+                Some(&session),
+                slug,
+                None,
                 csrf_token(cookies, &registry.secret),
+            );
+            Ok(Reply::Page(
+                Status::UnprocessableEntity,
+                form_view(
+                    registry,
+                    layout,
+                    &resource,
+                    FormTarget::create(registry, &resource),
+                    &form,
+                    &errors,
+                    &choices,
+                    &hidden,
+                ),
             ))
         }
     }
@@ -1022,13 +1048,11 @@ async fn edit_form(
     authorize(registry, &session, slug, Action::Update)?;
     let id = parse_id(id)?;
     let resource = registry.find(slug).ok_or(Status::NotFound)?;
-    let index_url = format!("{}/{}", registry.mount, resource.slug());
 
     let record = authorize_record(db, &session, &resource, id, Action::Update).await?;
     let form = record_form(resource.fields(), &record);
+    let hidden = hidden_fields(&resource, Operation::Edit, Some(&record), &session, &form);
     let choices = form_choices(db, &session, &resource, &form).await?;
-    let editor = editor_for(resource.fields());
-
     let layout = Layout::new(
         registry,
         Some(&session),
@@ -1036,35 +1060,57 @@ async fn edit_form(
         take_flash(cookies, &registry.secret),
         csrf_token(cookies, &registry.secret),
     );
-    let page = FormPage {
-        home_url: layout.home_url,
-        signed_in: layout.signed_in,
-        user_name: layout.user_name,
-        user_initials: layout.user_initials,
-        has_avatar: layout.has_avatar,
-        avatar_url: layout.avatar_url,
-        theme: layout.theme,
-        theme_url: layout.theme_url,
-        profile_url: layout.profile_url,
-        logout_everywhere_url: layout.logout_everywhere_url,
-        csrf_token: layout.csrf_token,
-        nav: layout.nav,
-        nav_sections: layout.nav_sections,
-        has_flash: layout.has_flash,
-        flash: layout.flash,
-        theme_style: layout.theme_style,
-        brand: layout.brand,
-        title: resource.title().to_string(),
-        singular: resource.singular().to_string(),
-        heading: format!("Edit {} #{id}", resource.singular()),
-        action: format!("{index_url}/{id}"),
-        submit_label: "Save",
-        back_url: index_url,
-        fields: field_views_with(resource.fields(), &form, &FieldErrors::new(), &choices),
-        has_editor: editor.is_some(),
-        editor_script: editor.unwrap_or_default(),
-    };
-    Ok(render_page("ignite::form", &page, compiled::form::render))
+    Ok(form_view(
+        registry,
+        layout,
+        &resource,
+        FormTarget::edit(registry, &resource, id),
+        &form,
+        &FieldErrors::new(),
+        &choices,
+        &hidden,
+    ))
+}
+
+/// The edit form again, for the values a live field changed, as [`new_form_live`]. A field
+/// the change reveals shows its stored value.
+#[post("/<slug>/<id>/edit/live", data = "<body>")]
+#[allow(clippy::too_many_arguments)]
+async fn edit_form_live(
+    slug: &str,
+    id: &str,
+    body: Data<'_>,
+    session: AdminUser,
+    cookies: &CookieJar<'_>,
+    registry: &State<Registry>,
+    db: &State<Database>,
+) -> Result<PropelView, Status> {
+    authorize(registry, &session, slug, Action::Update)?;
+    let id = parse_id(id)?;
+    let resource = registry.find(slug).ok_or(Status::NotFound)?;
+    let form = read_form(body).await?;
+    check_csrf(cookies, &registry.secret, form.get("_token"))?;
+    let record = authorize_record(db, &session, &resource, id, Action::Update).await?;
+    let form = live_values(resource.fields(), Some(&record), &form);
+    let hidden = hidden_fields(&resource, Operation::Edit, Some(&record), &session, &form);
+    let choices = form_choices(db, &session, &resource, &form).await?;
+    let layout = Layout::new(
+        registry,
+        Some(&session),
+        slug,
+        None,
+        csrf_token(cookies, &registry.secret),
+    );
+    Ok(form_view(
+        registry,
+        layout,
+        &resource,
+        FormTarget::edit(registry, &resource, id),
+        &form,
+        &FieldErrors::new(),
+        &choices,
+        &hidden,
+    ))
 }
 
 #[post("/<slug>/<id>", data = "<body>")]
@@ -1083,10 +1129,11 @@ async fn update(
     let index_url = format!("{}/{}", registry.mount, resource.slug());
     let form = read_form(body).await?;
     check_csrf(cookies, &registry.secret, form.get("_token"))?;
-    authorize_record(db, &session, &resource, id, Action::Update).await?;
+    let record = authorize_record(db, &session, &resource, id, Action::Update).await?;
+    let hidden = hidden_fields(&resource, Operation::Edit, Some(&record), &session, &form);
 
     let outcome = resource
-        .update(db.inner(), session.acting_user(), id, &form)
+        .update(db.inner(), session.acting_user(), id, &form, &hidden)
         .await
         .map_err(db_status)?;
 
@@ -1096,18 +1143,27 @@ async fn update(
             Ok(Reply::Redirect(Box::new(Redirect::to(index_url))))
         }
         Err(errors) => {
+            let form = live_values(resource.fields(), Some(&record), &form);
             let choices = form_choices(db, &session, &resource, &form).await?;
-            Ok(form_page(
+            let layout = Layout::new(
                 registry,
-                &session,
-                &resource,
-                &form,
-                &errors,
-                &choices,
-                format!("Edit {} #{id}", resource.singular()),
-                format!("{index_url}/{id}"),
-                "Save",
+                Some(&session),
+                slug,
+                None,
                 csrf_token(cookies, &registry.secret),
+            );
+            Ok(Reply::Page(
+                Status::UnprocessableEntity,
+                form_view(
+                    registry,
+                    layout,
+                    &resource,
+                    FormTarget::edit(registry, &resource, id),
+                    &form,
+                    &errors,
+                    &choices,
+                    &hidden,
+                ),
             ))
         }
     }
@@ -1142,22 +1198,60 @@ async fn destroy(
     Ok(Redirect::to(index_url))
 }
 
-/// Renders a form again with the submitted values and the errors, and a 422
-/// status so the browser and tests can tell it from a fresh form.
-#[allow(clippy::too_many_arguments)]
-fn form_page(
-    registry: &Registry,
-    user: &AdminUser,
-    resource: &Arc<dyn Erased>,
-    form: &FormInput,
-    errors: &FieldErrors,
-    choices: &FormChoices,
+/// Where a create or edit form posts, and its heading and button.
+struct FormTarget {
     heading: String,
     action: String,
     submit_label: &'static str,
-    csrf_token: String,
-) -> Reply {
-    let layout = Layout::new(registry, Some(user), resource.slug(), None, csrf_token);
+    /// Where the form sends its values when a live field changes.
+    live_url: String,
+}
+
+impl FormTarget {
+    /// The form that creates a record of `resource`.
+    fn create(registry: &Registry, resource: &Arc<dyn Erased>) -> Self {
+        let index_url = format!("{}/{}", registry.mount, resource.slug());
+        FormTarget {
+            heading: format!("New {}", resource.singular()),
+            live_url: format!("{index_url}/new/live"),
+            action: index_url,
+            submit_label: "Create",
+        }
+    }
+
+    /// The form that edits the record `id` of `resource`.
+    fn edit(registry: &Registry, resource: &Arc<dyn Erased>, id: i64) -> Self {
+        let index_url = format!("{}/{}", registry.mount, resource.slug());
+        FormTarget {
+            heading: format!("Edit {} #{id}", resource.singular()),
+            action: format!("{index_url}/{id}"),
+            submit_label: "Save",
+            live_url: format!("{index_url}/{id}/edit/live"),
+        }
+    }
+}
+
+/// Renders a create or edit form with `form`'s values and `errors`, without the fields of
+/// `hidden`.
+#[allow(clippy::too_many_arguments)]
+fn form_view(
+    registry: &Registry,
+    layout: Layout,
+    resource: &Arc<dyn Erased>,
+    target: FormTarget,
+    form: &FormInput,
+    errors: &FieldErrors,
+    choices: &FormChoices,
+    hidden: &BTreeSet<String>,
+) -> PropelView {
+    let conditions = resource.conditions();
+    let fields = form_field_views(resource.fields(), conditions, hidden, form, errors, choices);
+    let has_live = fields.iter().any(|field| field.live);
+    let shown_fields = fields
+        .iter()
+        .map(|field| field.name.as_str())
+        .collect::<Vec<_>>()
+        .join(",");
     let editor = editor_for(resource.fields());
     let page = FormPage {
         home_url: layout.home_url,
@@ -1179,17 +1273,35 @@ fn form_page(
         brand: layout.brand,
         title: resource.title().to_string(),
         singular: resource.singular().to_string(),
-        heading,
-        action,
-        submit_label,
+        heading: target.heading,
+        action: target.action,
+        submit_label: target.submit_label,
         back_url: format!("{}/{}", registry.mount, resource.slug()),
-        fields: field_views_with(resource.fields(), form, errors, choices),
+        fields,
+        has_live,
+        live_url: target.live_url,
+        shown_fields,
         has_editor: editor.is_some(),
         editor_script: editor.unwrap_or_default(),
     };
-    Reply::Page(
-        Status::UnprocessableEntity,
-        render_page("ignite::form", &page, compiled::form::render),
+    render_page("ignite::form", &page, compiled::form::render)
+}
+
+/// The fields of `resource` that its conditions hide on the form for `operation`, editing
+/// `record`, whose fields hold `form`.
+fn hidden_fields(
+    resource: &Arc<dyn Erased>,
+    operation: Operation,
+    record: Option<&Value>,
+    session: &AdminUser,
+    form: &FormInput,
+) -> BTreeSet<String> {
+    resource.conditions().hidden_fields(
+        resource.fields(),
+        operation,
+        record.and_then(Value::as_object),
+        session.acting_user(),
+        form,
     )
 }
 

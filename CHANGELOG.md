@@ -4,6 +4,42 @@ All notable changes to Ignite are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Conditional fields, as Filament's `visible()`, `hidden()`, `visibleOn()`, `hiddenOn()` and
+  `live()`: `ignite_core::FieldConditions`, with the closure context `FormContext`
+  (`operation()`, `record()`, `user()`, `get(name)`, `checked(name)`) and `Operation`
+  (`Create`, `Edit`). `RuntimeResource` has the builder methods `visible`, `hidden`,
+  `visible_on`, `hidden_on` and `live` and a `conditions` field; `IgniteResource` has
+  `conditions()` (default: none), and the derive takes `#[ignite(conditions = path)]`. As in
+  Filament, a field has one `hidden` and one `visible` condition, a later call replaces the
+  earlier one, and the field shows when both allow it.
+- A hidden field is not rendered, not checked (a required one included) and not written, on
+  create and on update, so a request that sends it anyway does not change the stored value. A
+  condition that reads a hidden field with `get` gets its stored value, not the one sent.
+  `RegisteredResource::validate_shown` and `validate_update_shown` take the hidden fields;
+  `FormInput::without` drops fields from a form.
+- Live fields: the form marks each field `data-ignite-field="<name>"`, a live one also
+  `data-ignite-live`, and the form `data-ignite-live-url`. When a live field changes, the
+  panel's script posts the form to `POST /<slug>/new/live` or `POST /<slug>/<id>/edit/live`
+  (CSRF-checked, authorized as the form), and replaces the fields with the ones the server
+  renders for the new values. Nothing is saved. A field a change reveals on the edit form shows
+  its stored value. The script is part of the panel's built `app.js`; no CDN.
+
+### Known limitations
+
+- A live field sends its change on the input's `change` event (at once for a select, a
+  checkbox or a radio, on leaving a text input), as Filament's `live(onBlur: true)`; there is
+  no per-keystroke `live()` or `debounce`.
+- Filament's `hiddenJs()` / `visibleJs()` (conditions written in JavaScript) are not provided:
+  every condition runs on the server.
+- The live re-render replaces the fields' markup, so an app's editor or field script must
+  enhance the new inputs again; the form fires a bubbling `ignite:fields` event for that.
+- A static resource whose `validate` refuses a missing field that a condition hides is a
+  server error (500): make such a field optional.
+
 ## [0.6.1] - 2026-11-17
 
 ### Added
