@@ -93,6 +93,27 @@
           </form>
         @endif
       </div>
-    </section>
+    </section>@if (has_admin_themes)
+
+    <section class="ig-card">
+      <h2 class="mb-5">Admin theme</h2>
+      <form class="grid max-w-md gap-5" method="post" action="{{ $admin_theme_action }}">
+        <input type="hidden" name="_token" value="{{ $csrf_token }}">
+
+        <div>
+          <label class="ig-label" for="admin_theme">The look of the panel for you</label>
+          <select class="ig-input" id="admin_theme" name="admin_theme">
+            @foreach (option in admin_themes)
+              <option value="{{ $option.value }}" @if (option.selected)selected@endif>{{ $option.label }}</option>
+            @endforeach
+          </select>
+        </div>
+        <p class="m-0 text-sm">The light or dark mode is the switch in the top bar, and stays as it is.</p>
+
+        <div>
+          <button type="submit" class="ig-btn ig-btn-outline">Save theme</button>
+        </div>
+      </form>
+    </section>@endif
   </div>
 @endsection

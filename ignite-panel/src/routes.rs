@@ -38,9 +38,10 @@ use crate::sessions;
 use crate::throttle;
 use crate::users;
 use crate::views::{
-    cell_text, compiled, editor_for, field_views, form_field_views, live_values, record_form,
-    render_page, CardView, CellView, ColumnHead, DashboardPage, FormChoices, FormPage, HeaderView,
-    IndexPage, LatestRow, LatestTable, Layout, LoginPage, ProfilePage, RowView,
+    admin_theme_options, cell_text, compiled, editor_for, field_views, form_field_views,
+    live_values, record_form, render_page, CardView, CellView, ColumnHead, DashboardPage,
+    FormChoices, FormPage, HeaderView, IndexPage, LatestRow, LatestTable, Layout, LoginPage,
+    ProfilePage, RowView,
 };
 
 /// The largest form body the panel reads.
@@ -77,6 +78,7 @@ pub(crate) fn all() -> Vec<Route> {
         remove_avatar,
         avatar,
         set_theme,
+        save_admin_theme,
         index,
         new_form,
         new_form_live,
@@ -437,6 +439,32 @@ async fn set_theme(
     Ok(Status::NoContent)
 }
 
+/// Saves the signed-in user's admin theme, chosen on the profile page: the name of a
+/// registered theme, or empty for the site default. Only this user's requests change, and the
+/// light or dark mode stays as it is. A name no theme is registered with is refused (400), as
+/// the light or dark toggle refuses an unknown mode.
+#[post("/profile/admin-theme", data = "<body>")]
+async fn save_admin_theme(
+    body: Data<'_>,
+    user: AdminUser,
+    cookies: &CookieJar<'_>,
+    registry: &State<Registry>,
+    db: &State<Database>,
+) -> Result<Redirect, Status> {
+    let form = read_form(body).await?;
+    check_csrf(cookies, &registry.secret, form.get("_token"))?;
+    let choice = match form.get("admin_theme").map(str::trim) {
+        None | Some("") => None,
+        Some(name) if crate::theme::is_registered_admin_theme(name) => Some(name),
+        Some(_) => return Err(Status::BadRequest),
+    };
+    users::set_admin_theme(db.inner(), user.user_id(), choice)
+        .await
+        .map_err(db_status)?;
+    set_flash(cookies, &registry.secret, "Admin theme saved.");
+    Ok(Redirect::to(format!("{}/profile", registry.mount)))
+}
+
 /// Renders the profile page: the profile form, the password form and the picture. The
 /// forms show `values` and their errors, so a rejected form keeps what was typed.
 fn render_profile(
@@ -484,6 +512,9 @@ fn render_profile(
         password_fields: field_views(&password_fields, &FormInput::default(), password_errors),
         avatar_action: format!("{}/profile/avatar", registry.mount),
         remove_avatar_action: format!("{}/profile/avatar/remove", registry.mount),
+        has_admin_themes: crate::theme::registered_admin_themes().len() > 1,
+        admin_theme_action: format!("{}/profile/admin-theme", registry.mount),
+        admin_themes: admin_theme_options(session.admin_theme_choice()),
     };
     render_page("ignite::profile", &page, compiled::profile::render)
 }

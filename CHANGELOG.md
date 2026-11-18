@@ -50,9 +50,35 @@ All notable changes to Ignite are listed here. The format follows
   0.6.1), in the `ignite_stylesheets` section, escaped in the `href`. A WordPress-like theme
   loads Dashicons this way, and the `ignite` theme does not. The pages have a new
   `admin_theme` value (`name`, `stylesheets`).
+- Each user's admin theme: a signed-in user chooses their own admin theme on the profile page
+  (an "Admin theme" card, shown when more than one theme is registered, with "Site default"
+  first), saved by `POST {mount}/profile/admin-theme` (field `admin_theme`: a registered
+  theme's name, or empty for the site default; CSRF-checked; an unknown name is refused with
+  400, as the light or dark toggle refuses an unknown mode). The choice is stored in a new
+  nullable `users.admin_theme` column (`VARCHAR(64)`) and applies to that user's requests only.
+  The panel resolves the theme of each request from the signed-in user's choice, and falls back
+  to the site default for a user with no choice, for a stored name no registered theme has, and
+  on the sign-in pages. It is separate from the light or dark mode (`users.theme`, the top
+  bar's toggle): changing one never changes the other.
+- The migration `20261116000000_add_user_admin_theme` adds the column (and its rollback drops
+  it). Run `ignite migrate` after upgrading; it is one batch with any other pending migration,
+  and `ignite migrate:rollback` reverses that batch, as before.
+- `AdminTheme::label()` (default: the name; `Ignite` for the `ignite` theme), shown in the
+  profile's choice.
+- `ignite_panel::theme`: `registered_admin_themes()`, `is_registered_admin_theme(name)`,
+  `resolve_admin_theme(choice)` (the theme a stored choice renders in) and
+  `with_admin_theme(name, render)` (renders an app's own view that extends
+  `ignite::layouts.app` in a given theme; re-exported from the crate root with
+  `registered_admin_themes` and `resolve_admin_theme`). `AdminUser::admin_theme()` (the theme
+  the user's requests render in) and `AdminUser::admin_theme_choice()` (the stored name).
+  `users::set_admin_theme(db, id, Option<&str>)` and `User::admin_theme`.
 
 ### Changed
 
+- `set_admin_theme` sets the site's default admin theme, and `active_admin_theme` returns it: a
+  user's own choice overrides it for that user's requests.
+- **Breaking:** `users::User` has a new public field, `admin_theme`, so code that builds a
+  `User` with a struct literal must set it.
 - **Breaking:** a resource's icon is a name, not CSS classes. `NAVIGATION_ICON`, the derive's
   `navigation_icon` attribute and `RuntimeResource::navigation_icon` take a name that says what
   the resource is, such as `"post"`, or the app's own name for a custom post type, such as

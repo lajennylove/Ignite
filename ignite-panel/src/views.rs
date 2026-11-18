@@ -154,8 +154,10 @@ impl Layout {
         flash: Option<String>,
         csrf_token: String,
     ) -> Self {
-        // The menu's icons and the colour tokens come from the active admin theme.
-        let admin_theme = crate::theme::active();
+        // The menu's icons, the colour tokens and the stylesheets come from the admin theme of
+        // the request: the signed-in user's choice, or the site default.
+        // The signed-in user's admin theme, or the site default.
+        let admin_theme = crate::theme::resolve(user.and_then(AdminUser::admin_theme_choice));
         // A resource is listed only when the user may view its records, and its "Add new"
         // link only when the user may create one, as Filament's navigation does. The entries
         // are placed by their navigation group and sort (see `crate::navigation`).
@@ -445,6 +447,13 @@ pub(crate) struct ProfilePage {
     pub(crate) password_fields: Vec<FieldView>,
     pub(crate) avatar_action: String,
     pub(crate) remove_avatar_action: String,
+    /// Whether more than one admin theme is registered: the profile then offers the choice.
+    pub(crate) has_admin_themes: bool,
+    pub(crate) admin_theme_action: String,
+    /// The admin theme choice: the site default first (value empty), then each registered
+    /// theme. The user's choice is selected, or the site default when they have none or their
+    /// choice is no longer registered.
+    pub(crate) admin_themes: Vec<OptionView>,
 }
 
 /// The list view of a resource.
@@ -665,6 +674,29 @@ pub(crate) struct OptionView {
     pub(crate) value: String,
     pub(crate) label: String,
     pub(crate) selected: bool,
+}
+
+/// The profile's admin theme choice for a user whose stored choice is `choice`.
+pub(crate) fn admin_theme_options(choice: Option<&str>) -> Vec<OptionView> {
+    let themes = crate::theme::registered_labels();
+    let chosen = choice.filter(|name| themes.iter().any(|(known, _)| known == name));
+    let default = crate::theme::active_admin_theme();
+    let default_label = themes
+        .iter()
+        .find(|(name, _)| *name == default)
+        .map(|(_, label)| label.clone())
+        .unwrap_or(default);
+    std::iter::once(OptionView {
+        value: String::new(),
+        label: format!("Site default ({default_label})"),
+        selected: chosen.is_none(),
+    })
+    .chain(themes.into_iter().map(|(name, label)| OptionView {
+        selected: chosen == Some(name.as_str()),
+        value: name,
+        label,
+    }))
+    .collect()
 }
 
 /// The parts of a link field: its URL, its title, and whether it opens in a new tab.

@@ -269,6 +269,7 @@ pub(crate) fn take_flash(cookies: &CookieJar<'_>, key: &[u8]) -> Option<String> 
 pub struct AdminUser {
     acting: ActingUser,
     theme: String,
+    admin_theme: Option<String>,
     has_avatar: bool,
     /// The abilities, such as `books.viewAny`, that the user holds but a resource's policy
     /// refuses: its `view_any` and `create`, which need no record, asked once per request.
@@ -300,6 +301,20 @@ impl AdminUser {
     /// The theme the user chose, "light" or "dark".
     pub fn theme(&self) -> &str {
         &self.theme
+    }
+
+    /// The admin theme the user chose on the profile page, by name, or `None` when they have
+    /// not chosen one. The name may no longer be registered: [`admin_theme`](Self::admin_theme)
+    /// is the theme the user's requests render in.
+    pub fn admin_theme_choice(&self) -> Option<&str> {
+        self.admin_theme.as_deref()
+    }
+
+    /// The name of the admin theme the user's requests render in: their choice when a theme is
+    /// registered with that name, else the site default
+    /// ([`set_admin_theme`](crate::set_admin_theme)).
+    pub fn admin_theme(&self) -> String {
+        crate::theme::resolve_admin_theme(self.admin_theme_choice())
     }
 
     /// Whether the user has a profile picture. Without one, the panel shows the initials.
@@ -385,6 +400,7 @@ impl<'r> FromRequest<'r> for AdminUser {
                 Outcome::Success(AdminUser {
                     acting,
                     theme: user.theme,
+                    admin_theme: user.admin_theme,
                     has_avatar: user.avatar_mime.is_some(),
                     refused,
                 })

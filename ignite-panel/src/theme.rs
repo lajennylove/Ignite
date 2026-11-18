@@ -16,8 +16,22 @@
 //! ignite_panel::set_admin_theme("my-theme")?;
 //! ```
 //!
-//! The choice is process-wide and read on every request, so it can change while the app runs,
-//! such as from a settings page.
+//! [`set_admin_theme`] sets the site's default theme. It is process-wide and read on every
+//! request, so it can change while the app runs, such as from a settings page.
+//!
+//! # Each user's theme
+//!
+//! A signed-in user can choose their own admin theme on the profile page, as a WordPress user
+//! chooses an admin colour scheme. The choice is stored in the user's `admin_theme` column
+//! (NULL for none) and applies to that user's requests only. The panel resolves the theme of
+//! each request from the signed-in user's choice; a user without a choice, a choice that names
+//! no registered theme (a theme the app no longer registers, say), and the signed-out pages
+//! get the site default. The admin theme is separate from the light or dark mode (the `theme`
+//! column and the top bar's toggle): changing one never changes the other.
+//!
+//! An app's own view that extends `ignite::layouts.app` renders in the site default, or in
+//! the theme it names with [`with_admin_theme`], such as the signed-in user's
+//! ([`AdminUser::admin_theme`](crate::AdminUser::admin_theme)).
 //!
 //! # How a page uses the theme
 //!
@@ -116,6 +130,12 @@ pub trait AdminTheme: Send + Sync + 'static {
     /// The theme's name, which [`set_admin_theme`] chooses it by. Lowercase letters, digits,
     /// `-` and `_`, such as `wp-like`.
     fn name(&self) -> &str;
+
+    /// The theme's name as the profile's admin theme choice shows it, such as `WordPress`. The
+    /// default is [`name`](Self::name).
+    fn label(&self) -> String {
+        self.name().to_string()
+    }
 
     /// The view of the layout every page extends: the HTML document around the page.
     fn layout(&self) -> &str;
@@ -272,6 +292,10 @@ impl AdminTheme for IgniteTheme {
         IGNITE_THEME
     }
 
+    fn label(&self) -> String {
+        "Ignite".to_string()
+    }
+
     fn layout(&self) -> &str {
         IGNITE_LAYOUT
     }
@@ -367,11 +391,12 @@ pub fn register_admin_theme(theme: impl AdminTheme) -> Result<(), ThemeError> {
     Ok(())
 }
 
-/// Makes the theme registered as `name` the panel's look, from the next request on. The
-/// built-in theme is `ignite`.
+/// Makes the theme registered as `name` the site's default theme, from the next request on:
+/// the look of the signed-out pages and of every user who has not chosen their own admin theme
+/// (see the module documentation). The built-in theme is `ignite`.
 ///
-/// Refuses a name no theme is registered with, and keeps the active theme. Any registered
-/// theme can be chosen, in debug and release builds.
+/// Refuses a name no theme is registered with, and keeps the default. Any registered theme can
+/// be chosen, in debug and release builds.
 pub fn set_admin_theme(name: &str) -> Result<(), ThemeError> {
     let mut themes = themes().write().unwrap_or_else(PoisonError::into_inner);
     let found = themes
@@ -384,9 +409,73 @@ pub fn set_admin_theme(name: &str) -> Result<(), ThemeError> {
     Ok(())
 }
 
-/// The name of the active theme.
+/// The name of the site's default theme, set with [`set_admin_theme`].
 pub fn active_admin_theme() -> String {
     active().theme.name().to_string()
+}
+
+/// The names of the registered themes, `ignite` first, then in the order they were
+/// registered.
+pub fn registered_admin_themes() -> Vec<String> {
+    themes()
+        .read()
+        .unwrap_or_else(PoisonError::into_inner)
+        .registered
+        .iter()
+        .map(|t| t.theme.name().to_string())
+        .collect()
+}
+
+/// The registered themes as `(name, label)`, in the order of [`registered_admin_themes`].
+pub(crate) fn registered_labels() -> Vec<(String, String)> {
+    themes()
+        .read()
+        .unwrap_or_else(PoisonError::into_inner)
+        .registered
+        .iter()
+        .map(|t| (t.theme.name().to_string(), t.theme.label()))
+        .collect()
+}
+
+/// Whether a theme is registered as `name`.
+pub fn is_registered_admin_theme(name: &str) -> bool {
+    themes()
+        .read()
+        .unwrap_or_else(PoisonError::into_inner)
+        .registered
+        .iter()
+        .any(|t| t.theme.name() == name)
+}
+
+/// The name of the theme a request renders in for a user whose stored choice is `choice`: the
+/// chosen theme when one is registered with that name, else the site default. `None` (no
+/// choice) and an unknown name both give the site default.
+pub fn resolve_admin_theme(choice: Option<&str>) -> String {
+    resolve(choice).theme.name().to_string()
+}
+
+/// The theme of [`resolve_admin_theme`].
+pub(crate) fn resolve(choice: Option<&str>) -> Arc<ThemeEntry> {
+    match choice {
+        Some(name) => entry_or_default(name),
+        None => active(),
+    }
+}
+
+/// Runs `render` with the panel's `ignite` views served through the theme registered as
+/// `name` (or the site default, for a name no theme has), so an app's own view that extends
+/// `ignite::layouts.app` renders in that theme:
+///
+/// ```ignore
+/// #[get("/admin/reports")]
+/// fn reports(user: AdminUser) -> PropelView {
+///     with_admin_theme(&user.admin_theme(), || PropelView::render("reports", &context))
+/// }
+/// ```
+///
+/// The page's own values (its colour tokens, icons and stylesheets) are the app's to give.
+pub fn with_admin_theme<R>(name: &str, render: impl FnOnce() -> R) -> R {
+    rendering(entry_or_default(name), render)
 }
 
 /// The active theme.

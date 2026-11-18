@@ -270,6 +270,8 @@ ignite_panel::register_admin_theme(WpTheme)?;
 ignite_panel::set_admin_theme("wp")?;
 ```
 
+`set_admin_theme` sets the site's default theme. Each signed-in user can choose their own admin theme on the profile page (the card shows when more than one theme is registered); the choice is stored in the user's `admin_theme` column and applies to that user's requests only. A user without a choice, a stored name that no registered theme has, and the sign-in pages get the site default. The admin theme is separate from the light or dark mode (the top bar's switch and the `theme` column): changing one keeps the other. An app reads the theme of a user with `AdminUser::admin_theme()` (the stored choice is `admin_theme_choice()`), and renders its own view that extends `ignite::layouts.app` in it with `ignite_panel::with_admin_theme(&user.admin_theme(), || PropelView::render(...))`; without that, an app's view renders in the site default.
+
 Every registered theme renders in debug and release builds. A theme's own views come from `AdminTheme::view`, so it can ship them in the binary. In a release build the `ignite` theme renders from the views compiled into the panel, and another theme through Propel's runtime renderer, from the panel's views embedded in the binary.
 
 A theme's own stylesheets (`stylesheets()`, the URLs of files the app serves) load only on the pages that render in that theme, after the panel's CSS and before the app-wide stylesheets of `Ignite::stylesheet`, so the Dashicons font of a WordPress-like theme is not loaded in the `ignite` theme. A layout that has its own head yields the `ignite_stylesheets` section to show them.

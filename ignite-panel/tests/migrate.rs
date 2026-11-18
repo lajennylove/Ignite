@@ -188,7 +188,7 @@ fn rollback_reverts_the_last_batch_and_migrate_restores_it() {
     );
     let out = String::from_utf8_lossy(&rolled.stdout);
     assert!(
-        out.contains("Rolled back the last batch: 9 migrations."),
+        out.contains("Rolled back the last batch: 10 migrations."),
         "stdout: {out}"
     );
     assert!(

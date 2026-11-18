@@ -51,6 +51,10 @@ pub struct User {
     /// When the user was disabled. `None` when the user is enabled. A disabled user cannot sign in.
     #[orbit(fillable)]
     pub disabled_at: Option<NaiveDateTime>,
+    /// The admin theme the user chose, by name, such as `wp`. `None` renders the site's default
+    /// theme. Separate from [`theme`](Self::theme), the light or dark mode.
+    #[orbit(fillable)]
+    pub admin_theme: Option<String>,
 }
 
 /// A row of the `user_avatars` table, one for each user who has a profile picture: the path
@@ -74,6 +78,20 @@ pub async fn set_theme<'a>(db: impl Executor<'a>, id: i64, theme: &str) -> Resul
     User::query()
         .where_eq("id", id)
         .update(db, &[("theme", theme.into())])
+        .await
+}
+
+/// Saves the admin theme `name` for the user with `id`, or clears it with `None`, so the user
+/// gets the site's default theme. The caller checks the name is registered. The light or dark
+/// mode ([`set_theme`]) is a separate column and is not changed.
+pub async fn set_admin_theme<'a>(
+    db: impl Executor<'a>,
+    id: i64,
+    name: Option<&str>,
+) -> Result<u64, Error> {
+    User::query()
+        .where_eq("id", id)
+        .update(db, &[("admin_theme", name.into())])
         .await
 }
 

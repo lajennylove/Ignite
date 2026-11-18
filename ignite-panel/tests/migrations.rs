@@ -27,7 +27,25 @@ use orbit_orm::{raw, Database, Driver, Migration, Migrator, Value};
 use rocket::tokio::runtime::Runtime;
 
 /// Every migration of the panel, in order.
-const NAMES: [&str; 9] = [
+const NAMES: [&str; 10] = [
+    "20261108000000_create_users",
+    "20261108010000_create_sessions",
+    "20261108020000_create_login_throttles",
+    "20261110000000_add_user_theme",
+    "20261111000000_profile",
+    "20261112000000_login_throttles_window_index",
+    "20261113000000_roles_permissions",
+    "20261114000000_account_lifecycle",
+    "20261115000000_password_reset_tokens",
+    ADMIN_THEME,
+];
+
+/// The migration added after the move to the schema builder, which has no old SQL file: the
+/// old SQL is the migrations before it.
+const ADMIN_THEME: &str = "20261116000000_add_user_admin_theme";
+
+/// The migrations that installs ran as SQL files, before the schema builder.
+const OLD_NAMES: [&str; 9] = [
     "20261108000000_create_users",
     "20261108010000_create_sessions",
     "20261108020000_create_login_throttles",
@@ -171,12 +189,13 @@ async fn migrate_check_and_roll_back(db: &Database) {
         count(
             db,
             "SELECT COUNT(*) FROM users WHERE id = ? AND theme = 'light' \
-             AND created_at IS NOT NULL AND disabled_at IS NULL AND avatar_mime IS NULL",
+             AND created_at IS NOT NULL AND disabled_at IS NULL AND avatar_mime IS NULL \
+             AND admin_theme IS NULL",
             &[ann.into()],
         )
         .await,
         1,
-        "a new user is enabled, on the light theme, with a creation time"
+        "a new user is enabled, on the light theme and the site's admin theme, with a creation time"
     );
     let duplicate = raw::execute(
         db,
@@ -285,7 +304,18 @@ async fn migrate_check_and_roll_back(db: &Database) {
         sessions_left
     );
 
-    // One migrate is one batch, so one rollback reverts all nine, last first.
+    // A user's admin theme is a name of up to 64 characters, beside the light or dark mode.
+    exec(
+        db,
+        "UPDATE users SET admin_theme = ? WHERE id = ?",
+        &[
+            "a-theme-name-of-sixty-four-characters-abcdefghijklmnopqrstuvwxyz".into(),
+            ann.into(),
+        ],
+    )
+    .await;
+
+    // One migrate is one batch, so one rollback reverts all ten, last first.
     let reverted = rollback(db).await.expect("rollback");
     let mut expected = NAMES.to_vec();
     expected.reverse();
@@ -402,7 +432,7 @@ fn cli_migrate_and_roll_back(rt: &Runtime, db: &Database, url: &str) {
     let (code, out) = ignite(url, &["migrate:rollback"]);
     assert_eq!(code, 0, "{out}");
     assert!(
-        out.contains("Rolled back the last batch: 9 migrations."),
+        out.contains("Rolled back the last batch: 10 migrations."),
         "{out}"
     );
     for table in TABLES {
@@ -430,7 +460,7 @@ fn the_migrations_run_and_roll_back_on_mysql() {
 
 /// The old SQL files, as installs ran them, as one migrator.
 fn old_migrator() -> Migrator {
-    let migrations = NAMES
+    let migrations = OLD_NAMES
         .iter()
         .map(|name| {
             let read = |file: &str| {
@@ -475,7 +505,7 @@ fn an_install_from_the_old_sql_is_not_migrated_twice_and_rolls_back() {
 
         // An existing install: every old migration ran and is recorded.
         let applied = old_migrator().run(&db).await.expect("the old SQL runs");
-        assert_eq!(applied, NAMES);
+        assert_eq!(applied, OLD_NAMES);
         exec(
             &db,
             "INSERT INTO users (name, email, password_hash) VALUES ('Old', 'old@example.test', 'x')",
@@ -483,9 +513,10 @@ fn an_install_from_the_old_sql_is_not_migrated_twice_and_rolls_back() {
         )
         .await;
 
-        // The new migrations have the same names, so nothing is pending.
-        assert!(
-            migrate(&db).await.expect("migrate").is_empty(),
+        // The new migrations have the same names, so only the one added since runs.
+        assert_eq!(
+            migrate(&db).await.expect("migrate"),
+            [ADMIN_THEME],
             "nothing runs twice"
         );
         assert_eq!(
@@ -517,7 +548,12 @@ fn an_install_from_the_old_sql_is_not_migrated_twice_and_rolls_back() {
             .collect();
         let old = create_statements(&db, &compared).await;
 
-        // The new down migrations revert the old schema: the index and key names match.
+        // The new down migrations revert the old schema: the index and key names match. The
+        // admin theme migration was its own batch, so it rolls back first, on its own.
+        assert_eq!(
+            rollback(&db).await.expect("the new rollback"),
+            [ADMIN_THEME]
+        );
         let reverted = rollback(&db).await.expect("the new rollback");
         assert_eq!(reverted.len(), 9);
         for table in TABLES {
@@ -525,7 +561,7 @@ fn an_install_from_the_old_sql_is_not_migrated_twice_and_rolls_back() {
         }
 
         // The new migrations build the same tables as the old SQL did.
-        assert_eq!(migrate(&db).await.expect("migrate").len(), 9);
+        assert_eq!(migrate(&db).await.expect("migrate").len(), 10);
         assert_eq!(create_statements(&db, &compared).await, old);
         assert_eq!(columns(&db, "user_avatars").await, AVATAR_COLUMNS);
 
