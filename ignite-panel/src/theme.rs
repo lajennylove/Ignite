@@ -60,11 +60,14 @@
 //!
 //! # Builds
 //!
-//! A debug build renders the panel's views at run time, through the active theme. A release
-//! build renders the views compiled into the panel, which are the `ignite` theme's, so it
-//! refuses to switch to another theme ([`ThemeError::NotCompiled`]) rather than show the
-//! wrong look.
+//! Every registered theme renders in debug and release builds. A theme other than `ignite`
+//! renders through Propel's runtime renderer (`PropelView::render`, which renders in release
+//! builds since Propel 0.3.0): the panel's views come from the binary, and the theme's own
+//! views from [`AdminTheme::view`], so a release binary needs no view files on disk. The
+//! `ignite` theme renders in a release build from the views compiled into the panel, as
+//! before. A debug build renders every theme at run time, so an edit shows on refresh.
 
+use std::cell::RefCell;
 use std::fmt;
 use std::io;
 use std::sync::{Arc, OnceLock, PoisonError, RwLock};
@@ -210,9 +213,6 @@ pub enum ThemeError {
         /// The token's name.
         token: String,
     },
-    /// A release build renders only the views compiled into the panel, which are the
-    /// `ignite` theme's, so it cannot show this theme.
-    NotCompiled(String),
 }
 
 impl fmt::Display for ThemeError {
@@ -229,10 +229,6 @@ impl fmt::Display for ThemeError {
             ThemeError::InvalidColor { theme, token } => write!(
                 f,
                 "the admin theme `{theme}` has an invalid colour token `{token}`: use letters, digits and `-` in the name, and a CSS colour value"
-            ),
-            ThemeError::NotCompiled(name) => write!(
-                f,
-                "a release build renders the compiled `{IGNITE_THEME}` views and cannot show the admin theme `{name}`"
             ),
         }
     }
@@ -292,8 +288,8 @@ pub fn register_admin_theme(theme: impl AdminTheme) -> Result<(), ThemeError> {
 /// Makes the theme registered as `name` the panel's look, from the next request on. The
 /// built-in theme is `ignite`.
 ///
-/// Refuses a name no theme is registered with, and keeps the active theme. A release build
-/// also refuses every theme but `ignite` (see [`ThemeError::NotCompiled`]).
+/// Refuses a name no theme is registered with, and keeps the active theme. Any registered
+/// theme can be chosen, in debug and release builds.
 pub fn set_admin_theme(name: &str) -> Result<(), ThemeError> {
     let mut themes = themes().write().unwrap_or_else(PoisonError::into_inner);
     let found = themes
@@ -302,9 +298,6 @@ pub fn set_admin_theme(name: &str) -> Result<(), ThemeError> {
         .find(|t| t.theme.name() == name)
         .cloned()
         .ok_or_else(|| ThemeError::Unknown(name.to_string()))?;
-    if cfg!(not(debug_assertions)) && name != IGNITE_THEME {
-        return Err(ThemeError::NotCompiled(name.to_string()));
-    }
     themes.active = found;
     Ok(())
 }
@@ -322,6 +315,47 @@ pub(crate) fn active() -> Arc<ThemeEntry> {
             .unwrap_or_else(PoisonError::into_inner)
             .active,
     )
+}
+
+/// The registered theme named `name`, or the active theme when no theme has that name.
+pub(crate) fn entry_or_default(name: &str) -> Arc<ThemeEntry> {
+    let themes = themes().read().unwrap_or_else(PoisonError::into_inner);
+    themes
+        .registered
+        .iter()
+        .find(|t| t.theme.name() == name)
+        .unwrap_or(&themes.active)
+        .clone()
+}
+
+thread_local! {
+    /// The theme of the page this thread is rendering, set by [`rendering`] for the length of
+    /// one render. Propel's renderer asks the `ignite` namespace's loader for each view on the
+    /// thread that renders, so the loader reads it here.
+    static RENDERING: RefCell<Option<Arc<ThemeEntry>>> = const { RefCell::new(None) };
+}
+
+/// Runs `render` with the `ignite` namespace's views served through `entry`, and puts the
+/// earlier theme back after, even when `render` panics.
+pub(crate) fn rendering<R>(entry: Arc<ThemeEntry>, render: impl FnOnce() -> R) -> R {
+    struct Restore(Option<Arc<ThemeEntry>>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let earlier = self.0.take();
+            RENDERING.with(|current| *current.borrow_mut() = earlier);
+        }
+    }
+    let earlier = RENDERING.with(|current| current.borrow_mut().replace(entry));
+    let _restore = Restore(earlier);
+    render()
+}
+
+/// The theme the views are served through: the page's, while [`rendering`] runs, else the
+/// active theme (for an app's own view that extends the panel's layout).
+fn current() -> Arc<ThemeEntry> {
+    RENDERING
+        .with(|current| current.borrow().clone())
+        .unwrap_or_else(active)
 }
 
 /// A theme name: lowercase ASCII letters, digits, `-` and `_`.
@@ -365,7 +399,6 @@ fn style_of(theme: &str, tokens: &[ColorToken]) -> Result<String, ThemeError> {
 
 /// The view a page asks for, as the active theme names it: the layout and the partials of the
 /// look resolve to the theme's views, and every other name is unchanged.
-#[cfg_attr(not(debug_assertions), allow(dead_code))]
 fn themed_name<'a>(theme: &'a dyn AdminTheme, name: &'a str) -> &'a str {
     match name {
         "layouts.app" => theme.layout(),
@@ -376,15 +409,14 @@ fn themed_name<'a>(theme: &'a dyn AdminTheme, name: &'a str) -> &'a str {
     }
 }
 
-/// Serves the panel's `ignite` view namespace through the active theme: the layout and the
-/// partials of the look are the theme's, the theme's own views come from the theme, and every
-/// other view from `base` (the views compiled into the binary, or a views directory).
-#[cfg_attr(not(debug_assertions), allow(dead_code))]
+/// Serves the panel's `ignite` view namespace through the theme of the page being rendered
+/// (see [`rendering`]), or the active theme: the layout and the partials of the look are the
+/// theme's, the theme's own views come from the theme, and every other view from `base` (the
+/// views compiled into the binary, or a views directory in a debug build).
 pub(crate) struct ThemedViews<L> {
     base: L,
 }
 
-#[cfg_attr(not(debug_assertions), allow(dead_code))]
 impl<L> ThemedViews<L> {
     /// Serves `base`'s views through the active theme.
     pub(crate) fn new(base: L) -> Self {
@@ -394,7 +426,7 @@ impl<L> ThemedViews<L> {
 
 impl<L: Loader> Loader for ThemedViews<L> {
     fn source(&self, name: &str) -> io::Result<String> {
-        let entry = active();
+        let entry = current();
         let name = themed_name(entry.theme.as_ref(), name);
         match entry.theme.view(name) {
             Some(source) => Ok(source),
@@ -416,6 +448,48 @@ mod tests {
         assert_eq!(themed_name(&theme, "partials.flash"), IGNITE_FLASH);
         assert_eq!(themed_name(&theme, "index"), "index");
         assert_eq!(themed_name(&theme, "partials.field"), "partials.field");
+    }
+
+    #[test]
+    fn a_render_serves_its_own_theme_and_puts_the_earlier_one_back() {
+        struct Other;
+        impl AdminTheme for Other {
+            fn name(&self) -> &str {
+                "other"
+            }
+            fn layout(&self) -> &str {
+                "themes.other.layout"
+            }
+        }
+        let other = Arc::new(ThemeEntry {
+            theme: Box::new(Other),
+            style: String::new(),
+        });
+        assert_eq!(current().theme.name(), IGNITE_THEME);
+        rendering(Arc::clone(&other), || {
+            assert_eq!(current().theme.name(), "other");
+            assert_eq!(
+                themed_name(current().theme.as_ref(), "layouts.app"),
+                "themes.other.layout"
+            );
+        });
+        assert_eq!(current().theme.name(), IGNITE_THEME, "restored after");
+
+        let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            rendering(other, || panic!("render failed"))
+        }));
+        assert!(panicked.is_err());
+        assert_eq!(
+            current().theme.name(),
+            IGNITE_THEME,
+            "restored after a panic"
+        );
+    }
+
+    #[test]
+    fn an_unknown_name_renders_in_the_active_theme() {
+        assert_eq!(entry_or_default("no-such-theme").theme.name(), IGNITE_THEME);
+        assert_eq!(entry_or_default(IGNITE_THEME).theme.name(), IGNITE_THEME);
     }
 
     #[test]

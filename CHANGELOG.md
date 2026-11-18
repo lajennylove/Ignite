@@ -27,6 +27,18 @@ All notable changes to Ignite are listed here. The format follows
   (CSRF-checked, authorized as the form), and replaces the fields with the ones the server
   renders for the new values. Nothing is saved. A field a change reveals on the edit form shows
   its stored value. The script is part of the panel's built `app.js`; no CDN.
+- Release-mode admin themes: a release build renders every registered admin theme. A theme
+  other than `ignite` renders through Propel's runtime renderer (`PropelView::render`, which
+  renders in release builds since Propel 0.3.0), with the panel's views embedded in the binary
+  and the theme's own views from `AdminTheme::view`, so the binary needs no view files on
+  disk. The `ignite` theme still renders from the compiled views in a release build, with the
+  same HTML as before. Propel stays at 0.3.0, the version ignite-panel already depended on: it
+  is the first release whose runtime renderer works in release builds.
+
+### Removed
+
+- **Breaking:** `ThemeError::NotCompiled`. `set_admin_theme` no longer refuses a theme other
+  than `ignite` in a release build. Code that matched the variant can drop that arm.
 
 ### Known limitations
 

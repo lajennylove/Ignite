@@ -12,26 +12,57 @@ pub(crate) mod compiled {
     include!(concat!(env!("OUT_DIR"), "/propel_views.rs"));
 }
 
-/// Renders a panel page. A debug build uses the dev renderer, which reads the views on
-/// each request, so an edit shows on refresh. A release build renders the compiled view,
-/// with the registered assets.
-#[cfg(debug_assertions)]
-pub(crate) fn render_page<C, F>(name: &str, context: &C, _compiled: F) -> PropelView
+/// Renders a panel page in the admin theme its layout values were built for (`admin_theme`).
+///
+/// A release build renders the `ignite` theme's pages from the views compiled into the panel,
+/// as before. Every other theme, and every theme in a debug build, renders through Propel's
+/// runtime renderer (`PropelView::render`, which works in release builds since Propel 0.3.0),
+/// with the panel's `ignite` namespace served through that theme (see
+/// [`crate::theme::ThemedViews`]). A debug build reads the views on each request, so an edit
+/// shows on refresh.
+pub(crate) fn render_page<C, F>(name: &str, context: &C, compiled: F) -> PropelView
 where
-    C: Serialize,
+    C: Serialize + ThemedPage,
     F: FnOnce(&C, &propel_runtime::Assets) -> Result<String, propel_runtime::RenderError>,
 {
-    PropelView::render(name, context)
+    let entry = crate::theme::entry_or_default(&context.admin_theme().name);
+    if cfg!(not(debug_assertions)) && entry.theme.name() == crate::theme::IGNITE_THEME {
+        return PropelView::compiled(|assets| compiled(context, assets));
+    }
+    crate::theme::rendering(entry, || PropelView::render(name, context))
 }
 
-/// See the debug version. A release build renders the compiled view.
-#[cfg(not(debug_assertions))]
-pub(crate) fn render_page<C, F>(_name: &str, context: &C, compiled: F) -> PropelView
-where
-    C: Serialize,
-    F: FnOnce(&C, &propel_runtime::Assets) -> Result<String, propel_runtime::RenderError>,
-{
-    PropelView::compiled(|assets| compiled(context, assets))
+/// A page of the panel, which knows the admin theme its values were built for, so the page
+/// renders in the same theme as its navigation icons and colour tokens.
+pub(crate) trait ThemedPage {
+    fn admin_theme(&self) -> &AdminThemeView;
+}
+
+macro_rules! themed_pages {
+    ($($page:ty),* $(,)?) => {
+        $(impl ThemedPage for $page {
+            fn admin_theme(&self) -> &AdminThemeView {
+                &self.admin_theme
+            }
+        })*
+    };
+}
+
+themed_pages!(
+    DashboardPage,
+    LoginPage,
+    ForgotPage,
+    ResetPage,
+    ProfilePage,
+    IndexPage,
+    FormPage,
+);
+
+/// The admin theme a page renders in, as the views read it (`admin_theme.name`).
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct AdminThemeView {
+    /// The theme's name, such as `ignite`.
+    pub(crate) name: String,
 }
 
 use ignite_core::{FieldConditions, FieldDef, FieldErrors, FieldKindDef, FormInput, MediaItem};
@@ -70,6 +101,8 @@ pub(crate) struct Layout {
     /// The CSS of the active admin theme's colour tokens, or empty when it has none. The
     /// layout prints it raw: the tokens are checked when the theme is registered.
     pub(crate) theme_style: String,
+    /// The admin theme the page renders in.
+    pub(crate) admin_theme: AdminThemeView,
     /// The panel's brand: its name, logo and favicon (see [`Ignite::brand_name`](crate::Ignite::brand_name)).
     pub(crate) brand: BrandView,
 }
@@ -201,6 +234,9 @@ impl Layout {
             has_flash: flash.is_some(),
             flash: flash.unwrap_or_default(),
             theme_style: admin_theme.style.clone(),
+            admin_theme: AdminThemeView {
+                name: admin_theme.theme.name().to_string(),
+            },
             brand: BrandView::new(&registry.brand),
         }
     }
@@ -226,6 +262,7 @@ pub(crate) struct DashboardPage {
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
     pub(crate) theme_style: String,
+    pub(crate) admin_theme: AdminThemeView,
     pub(crate) brand: BrandView,
     pub(crate) title: &'static str,
     pub(crate) cards: Vec<CardView>,
@@ -308,6 +345,7 @@ pub(crate) struct LoginPage {
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
     pub(crate) theme_style: String,
+    pub(crate) admin_theme: AdminThemeView,
     pub(crate) brand: BrandView,
     pub(crate) title: &'static str,
     pub(crate) action: String,
@@ -338,6 +376,7 @@ pub(crate) struct ForgotPage {
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
     pub(crate) theme_style: String,
+    pub(crate) admin_theme: AdminThemeView,
     pub(crate) brand: BrandView,
     pub(crate) title: &'static str,
     pub(crate) action: String,
@@ -367,6 +406,7 @@ pub(crate) struct ResetPage {
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
     pub(crate) theme_style: String,
+    pub(crate) admin_theme: AdminThemeView,
     pub(crate) brand: BrandView,
     pub(crate) title: &'static str,
     pub(crate) action: String,
@@ -396,6 +436,7 @@ pub(crate) struct ProfilePage {
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
     pub(crate) theme_style: String,
+    pub(crate) admin_theme: AdminThemeView,
     pub(crate) brand: BrandView,
     pub(crate) title: &'static str,
     pub(crate) profile_action: String,
@@ -426,6 +467,7 @@ pub(crate) struct IndexPage {
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
     pub(crate) theme_style: String,
+    pub(crate) admin_theme: AdminThemeView,
     pub(crate) brand: BrandView,
     pub(crate) title: String,
     pub(crate) singular: String,
@@ -497,6 +539,7 @@ pub(crate) struct FormPage {
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
     pub(crate) theme_style: String,
+    pub(crate) admin_theme: AdminThemeView,
     pub(crate) brand: BrandView,
     pub(crate) title: String,
     pub(crate) singular: String,

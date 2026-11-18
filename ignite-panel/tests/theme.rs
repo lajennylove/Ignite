@@ -132,19 +132,16 @@ impl AdminTheme for Plain {
     }
 }
 
-#[cfg(debug_assertions)]
 /// Puts the `ignite` theme back when a test ends, even when it fails, so the snapshot test
 /// sees the default look.
 struct RestoreTheme;
 
-#[cfg(debug_assertions)]
 impl Drop for RestoreTheme {
     fn drop(&mut self) {
         set_admin_theme("ignite").expect("the built-in theme is always registered");
     }
 }
 
-#[cfg(debug_assertions)]
 #[test]
 fn switching_the_theme_changes_the_look_of_the_same_list_page() {
     let _guard = reset();
@@ -185,7 +182,6 @@ fn switching_the_theme_changes_the_look_of_the_same_list_page() {
     assert_eq!(page(&client, "/admin/widgets"), before);
 }
 
-#[cfg(debug_assertions)]
 #[test]
 fn a_theme_of_colour_tokens_keeps_the_ignite_layout() {
     /// The `ignite` look in other colours: a theme that gives only colour tokens.
@@ -256,16 +252,46 @@ fn a_theme_with_an_unsafe_colour_token_is_refused() {
     ));
 }
 
-/// A release build renders the views compiled into the panel, which are the `ignite`
-/// theme's, so it refuses to switch to a theme it cannot render.
-#[cfg(not(debug_assertions))]
+/// Both themes render in this build: the `ignite` theme exactly as before (its snapshots),
+/// and a registered theme with its own layout. Run with `--release` to cover a release build,
+/// which renders the `ignite` theme from the compiled views and the other theme through
+/// Propel's runtime renderer, from the views embedded in the binary.
 #[test]
-fn a_release_build_refuses_a_theme_it_cannot_render() {
-    let _guard = theme_lock();
+fn both_themes_render_in_this_build() {
+    let _guard = reset();
     let _ = register_admin_theme(Plain);
-    assert!(matches!(
-        set_admin_theme("plain"),
-        Err(ThemeError::NotCompiled(name)) if name == "plain"
-    ));
+    let _restore = RestoreTheme;
+
     assert_eq!(active_admin_theme(), "ignite");
+    for (name, html) in pages() {
+        assert_snapshot(name, &html);
+    }
+
+    set_admin_theme("plain").expect("any registered theme can be chosen, in every build");
+    assert_eq!(active_admin_theme(), "plain");
+    let client = signed_in(None);
+    for path in [
+        "/admin",
+        "/admin/widgets",
+        "/admin/widgets/new",
+        "/admin/widgets/1/edit",
+        "/admin/profile",
+    ] {
+        let html = page(&client, path);
+        assert!(
+            html.starts_with("<!doctype html>\n<html data-admin-theme=\"plain\">"),
+            "{path} in the plain layout: {html}"
+        );
+        assert!(
+            !html.contains("ig-with-sidebar"),
+            "{path}: not the ignite layout"
+        );
+    }
+    let guest = client_signed_out();
+    let login = page(&guest, "/admin/login");
+    assert!(login.contains("data-admin-theme=\"plain\""), "{login}");
+    assert!(login.contains("Sign in"));
+
+    set_admin_theme("ignite").unwrap();
+    assert_snapshot("index", &page(&client, "/admin/widgets"));
 }

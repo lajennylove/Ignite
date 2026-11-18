@@ -624,9 +624,9 @@ impl Fairing for PanelFairing {
     }
 }
 
-/// Registers the panel's views for the dev renderer: a directory when one is named, or
-/// the embedded views, served through the active admin theme (see [`crate::theme`]). A
-/// release build renders compiled views, so it registers nothing.
+/// Registers the panel's views for Propel's runtime renderer, served through the admin theme
+/// of the page being rendered (see [`crate::theme`]): a directory when one is named, in a
+/// debug build, or the views embedded in the binary.
 #[cfg(debug_assertions)]
 fn register_views(dir: Option<&Path>) {
     use crate::theme::ThemedViews;
@@ -646,9 +646,16 @@ fn register_views(dir: Option<&Path>) {
     }
 }
 
-/// See the debug version.
+/// See the debug version. A release build serves the views embedded in the binary and ignores
+/// a views directory, as it always has: the `ignite` theme renders the compiled views, and
+/// another theme renders the embedded views through Propel's runtime renderer.
 #[cfg(not(debug_assertions))]
-fn register_views(_dir: Option<&Path>) {}
+fn register_views(_dir: Option<&Path>) {
+    propel_rocket::register_namespace_loader(
+        "ignite",
+        crate::theme::ThemedViews::new(crate::embedded::EmbeddedViews),
+    );
+}
 
 /// The views of the `ignite` theme that a views directory must hold, besides the panel's
 /// `layouts/app.propel`. The panel renders through them (see [`crate::theme`]).
