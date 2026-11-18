@@ -246,7 +246,7 @@ fn a_logo_height_that_is_not_a_length_is_refused() {
     title = "Posts",
     navigation_group = "Content",
     navigation_sort = 2,
-    navigation_icon = "dashicons dashicons-admin-post"
+    navigation_icon = "post"
 )]
 pub struct Post {
     id: i32,
@@ -306,10 +306,7 @@ fn the_derive_sets_the_navigation_constants() {
     assert_eq!(<Tag as IgniteResource>::NAVIGATION_LABEL, Some("Labels"));
     assert_eq!(<Log as IgniteResource>::NAVIGATION_SORT, Some(-1));
     assert_eq!(<Order as IgniteResource>::NAVIGATION_SORT, None);
-    assert_eq!(
-        <Post as IgniteResource>::NAVIGATION_ICON,
-        Some("dashicons dashicons-admin-post")
-    );
+    assert_eq!(<Post as IgniteResource>::NAVIGATION_ICON, Some("post"));
     assert_eq!(<Order as IgniteResource>::NAVIGATION_ICON, None);
 }
 
@@ -352,9 +349,9 @@ fn link(label: &str) -> String {
     format!("></i>{label}</a>")
 }
 
-/// A navigation link that ends with `label`, after the resource's own icon.
+/// A navigation link that ends with `label`, after the icon of the classes `classes`.
 fn link_with_icon(classes: &str, label: &str) -> String {
-    format!(r#"<span class="{classes}" aria-hidden="true"></span>{label}</a>"#)
+    format!(r#"<i class="{classes} text-lg"></i>{label}</a>"#)
 }
 
 #[test]
@@ -390,10 +387,7 @@ fn resources_sort_by_navigation_sort_then_label_inside_a_group() {
     let content = at(nav, &heading("Content"));
     let pages = at(nav, &link("Pages"));
     let labels = at(nav, &link("Labels"));
-    let posts = at(
-        nav,
-        &link_with_icon("dashicons dashicons-admin-post", "Posts"),
-    );
+    let posts = at(nav, &link_with_icon("ti ti-pin", "Posts"));
     assert!(
         content < pages && pages < labels && labels < posts,
         "Pages (1), then Labels and Posts (2) by label:\n{nav}"
@@ -455,7 +449,7 @@ fn a_runtime_resource_takes_its_place_in_a_group() {
             .navigation_group("Content")
             .navigation_sort(0)
             .navigation_label("Sticky notes")
-            .navigation_icon("dashicons dashicons-sticky"),
+            .navigation_icon("comment"),
     )
     .expect("register");
     let client = signed_in_with(with_groups);
@@ -463,36 +457,40 @@ fn a_runtime_resource_takes_its_place_in_a_group() {
     unregister_runtime("nav-notes").expect("unregister");
     let nav = navigation(&html);
     let content = at(nav, &heading("Content"));
-    let notes = at(
-        nav,
-        &link_with_icon("dashicons dashicons-sticky", "Sticky notes"),
-    );
+    let notes = at(nav, &link_with_icon("ti ti-message", "Sticky notes"));
     assert!(content < notes && notes < at(nav, &link("Pages")), "{nav}");
 }
 
 #[test]
-fn the_icon_span_appears_only_for_a_resource_that_sets_one() {
+fn the_ignite_theme_maps_each_icon_name_to_a_tabler_icon() {
     let _guard = reset();
     let client = signed_in_with(with_groups);
     let html = page(&client, "/admin/nav_posts/new");
     let nav = navigation(&html);
-    // The active entry shows the resource's icon too.
+    // Posts names the icon `post`: the active entry shows the theme's icon of that name.
     assert!(
-        nav.contains(r#"aria-current="page"><span class="dashicons dashicons-admin-post" aria-hidden="true"></span>Posts</a>"#),
+        nav.contains(r#"aria-current="page"><i class="ti ti-pin text-lg"></i>Posts</a>"#),
         "{nav}"
     );
-    assert_eq!(
-        nav.matches("<span ").count(),
-        1,
-        "only Posts sets an icon:\n{nav}"
-    );
-    // The others keep the admin theme's icon.
-    assert!(nav.contains(r#"<i class="ti ti-table text-lg"></i>Orders</a>"#));
-    assert!(nav.contains(r#"<i class="ti ti-layout-dashboard text-lg"></i>Dashboard</a>"#));
-    assert!(!nav.contains(r#"<i class="ti ti-table text-lg"></i>Posts</a>"#));
+    // The others name none: the theme's generic resource icon.
+    assert!(nav.contains(&link_with_icon("ti ti-table", "Orders")));
+    assert!(nav.contains(&link_with_icon("ti ti-layout-dashboard", "Dashboard")));
+    // An icon is never a resource's raw classes any more.
+    assert!(!nav.contains("<span "), "{nav}");
+}
 
-    // Without icons, no span at all.
-    let plain = signed_in(None);
-    let html = page(&plain, "/admin");
-    assert!(!navigation(&html).contains("<span "));
+#[test]
+fn an_icon_name_the_theme_does_not_know_shows_its_resource_icon() {
+    let _guard = reset();
+    register_runtime(
+        RuntimeResource::new("nav-books", "Books", "Book", NoRows).navigation_icon("book"),
+    )
+    .expect("register");
+    let client = signed_in_with(with_groups);
+    let html = page(&client, "/admin");
+    unregister_runtime("nav-books").expect("unregister");
+    assert!(
+        navigation(&html).contains(&link_with_icon("ti ti-table", "Books")),
+        "{html}"
+    );
 }

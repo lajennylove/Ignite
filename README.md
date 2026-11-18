@@ -242,13 +242,13 @@ A resource places itself in the sidebar with struct attributes, as Filament's `$
     navigation_group = "Content",
     navigation_sort = 1,
     navigation_label = "All posts",
-    navigation_icon = "dashicons dashicons-admin-post"
+    navigation_icon = "post"
 )]
 ```
 
 A resource implemented by hand sets `NAVIGATION_GROUP`, `NAVIGATION_SORT`, `NAVIGATION_LABEL` and `NAVIGATION_ICON`, and a `RuntimeResource` the methods of the same names. The sidebar lists the dashboard and the resources without a group first, as they were listed before, then each group under its name as a heading: the groups in the order of `navigation_groups` (each call adds to the list, as in Filament), then any group not listed there. Inside a group, resources are sorted by `navigation_sort`, lower first, then by label; a resource without a sort comes before those with one. `navigation_label` changes the sidebar's text only; the pages keep the resource's title.
 
-`navigation_icon` is one or more CSS classes. The panel renders `<span class="..." aria-hidden="true"></span>` before the label, in place of the admin theme's icon; a resource without one keeps the theme's icon and gets no span. Ignite ships no icon font for these classes: the app supplies the stylesheet that defines them (Dashicons, Font Awesome or its own). In a debug build, an admin theme's layout or a views directory can link it. In a release build, add it with `stylesheet` (below).
+`navigation_icon` is an icon name that says what the resource is, not a CSS class: `post`, `page`, `media`, `comment`, `appearance`, `plugins`, `users`, `tools`, `settings`, or a name of the app's own, such as a custom post type's `book`. The active admin theme maps the name to its own icon (see [Admin themes](#admin-themes)): the `ignite` theme to a Tabler icon from the font it ships, a WordPress-like theme to a Dashicon. A name the theme does not know, and a resource without a name, show the theme's generic resource icon. Filament's navigation items also take an icon name, which the panel resolves through its icon set; in Ignite the admin theme resolves it.
 
 ### Stylesheets
 
@@ -261,6 +261,52 @@ Ignite::new()
 ```
 
 The value is the path or URL of the file, printed escaped in the link's `href`; the app serves the file. Without the call the pages link only the panel's CSS, as before. An admin theme's layout that has its own head yields the `ignite_stylesheets` section to show them.
+
+### Admin themes
+
+An admin theme decides how the panel looks: the layout, the navigation, the top bar, the flash message, the colour tokens and the icons. Every theme renders the same screens with the same forms and links, as a Filament panel theme replaces the CSS and the views but not the pages' behaviour. The panel ships the `ignite` theme. An app implements `ignite_panel::theme::AdminTheme`, registers the theme and chooses it by name:
+
+```rust
+ignite_panel::register_admin_theme(WpTheme)?;
+ignite_panel::set_admin_theme("wp")?;
+```
+
+Every registered theme renders in debug and release builds. A theme's own views come from `AdminTheme::view`, so it can ship them in the binary. In a release build the `ignite` theme renders from the views compiled into the panel, and another theme through Propel's runtime renderer, from the panel's views embedded in the binary.
+
+Icons are names (see `navigation_icon` above). A theme maps each name to its classes with `icon(name)`, which returns `None` for a name it does not know, and gives its generic resource icon with `resource_icon()`. The panel names the dashboard's entry `dashboard`. `ignite_panel::theme::icons` lists the names the panel and Mission Control use, and `IGNITE_ICONS` the `ignite` theme's Tabler icons:
+
+| Name | `ignite` theme |
+| --- | --- |
+| `dashboard` | `ti ti-layout-dashboard` |
+| `post` | `ti ti-pin` |
+| `page` | `ti ti-file-text` |
+| `media` | `ti ti-photo` |
+| `comment` | `ti ti-message` |
+| `appearance` | `ti ti-brush` |
+| `plugins` | `ti ti-plug` |
+| `users` | `ti ti-users` |
+| `tools` | `ti ti-tool` |
+| `settings` | `ti ti-settings` |
+| any other name, or none | `ti ti-table` |
+
+```rust
+impl AdminTheme for WpTheme {
+    fn name(&self) -> &str { "wp" }
+    fn layout(&self) -> &str { "themes.wp.layout" }
+    fn icon(&self, name: &str) -> Option<String> {
+        let icon = match name {
+            "dashboard" => "dashboard",
+            "post" => "admin-post",
+            "media" => "admin-media",
+            "page" => "admin-page",
+            _ => return None,
+        };
+        Some(format!("dashicons dashicons-{icon}"))
+    }
+    fn resource_icon(&self) -> String { "dashicons dashicons-admin-generic".into() }
+    fn view(&self, name: &str) -> Option<String> { /* the theme's layout and partials */ None }
+}
+```
 
 
 The panel follows Filament and its standard plugin, Filament Shield (built on Spatie laravel-permission). Each resource has five abilities, named after its slug:

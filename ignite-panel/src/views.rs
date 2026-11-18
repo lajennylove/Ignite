@@ -74,7 +74,7 @@ use crate::brand::BrandView;
 use crate::ignite::Registry;
 use crate::navigation::{arrange, Entry};
 use crate::session::AdminUser;
-use crate::theme::Icon;
+use crate::theme::{icon_classes, icons};
 
 /// The values every page shares: the sidebar, the top bar and the flash message.
 #[derive(Debug, Clone, Serialize)]
@@ -111,13 +111,11 @@ pub(crate) struct Layout {
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct NavGroup {
     pub(crate) title: String,
-    /// The active admin theme's icon for the entry.
+    /// The CSS classes of the entry's icon, as the admin theme resolves its name.
     pub(crate) icon: String,
-    /// Whether the resource set its own icon (`NAVIGATION_ICON`), which then replaces the
-    /// theme's.
-    pub(crate) has_icon_class: bool,
-    /// The CSS classes of the resource's own icon.
-    pub(crate) icon_class: String,
+    /// The icon's name, such as `post` (`NAVIGATION_ICON`), or empty when the resource names
+    /// none.
+    pub(crate) icon_name: String,
     pub(crate) url: String,
     pub(crate) has_add: bool,
     pub(crate) add_url: String,
@@ -170,9 +168,8 @@ impl Layout {
                         sort: r.navigation_sort(),
                         item: NavGroup {
                             title: r.navigation_label().to_string(),
-                            icon: admin_theme.theme.icon(Icon::Resource),
-                            has_icon_class: r.navigation_icon().is_some(),
-                            icon_class: r.navigation_icon().unwrap_or_default().to_string(),
+                            icon: icon_classes(admin_theme.theme.as_ref(), r.navigation_icon()),
+                            icon_name: r.navigation_icon().unwrap_or_default().to_string(),
                             url: format!("{}/{}", registry.mount, r.slug()),
                             has_add: user.may(r.slug(), Action::Create),
                             add_url: format!("{}/{}/new", registry.mount, r.slug()),
@@ -186,9 +183,8 @@ impl Layout {
                     0,
                     NavGroup {
                         title: "Dashboard".to_string(),
-                        icon: admin_theme.theme.icon(Icon::Dashboard),
-                        has_icon_class: false,
-                        icon_class: String::new(),
+                        icon: icon_classes(admin_theme.theme.as_ref(), Some(icons::DASHBOARD)),
+                        icon_name: icons::DASHBOARD.to_string(),
                         url: registry.mount.clone(),
                         has_add: false,
                         add_url: String::new(),

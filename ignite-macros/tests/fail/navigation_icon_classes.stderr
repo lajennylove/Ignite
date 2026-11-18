@@ -1,0 +1,5 @@
+error: `navigation_icon` takes an icon name such as "post", "media" or "settings", which the admin theme maps to its icon, not CSS classes
+ --> tests/fail/navigation_icon_classes.rs:5:45
+  |
+5 | #[ignite(table = widgets, navigation_icon = "dashicons dashicons-admin-post")]
+  |                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

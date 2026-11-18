@@ -12,8 +12,8 @@ use std::path::PathBuf;
 
 use common::*;
 use ignite_panel::theme::{
-    active_admin_theme, register_admin_theme, set_admin_theme, AdminTheme, ColorToken, Icon,
-    ThemeError,
+    active_admin_theme, icon_classes, register_admin_theme, set_admin_theme, AdminTheme,
+    ColorToken, IgniteTheme, ThemeError,
 };
 use rocket::http::Status;
 use rocket::local::blocking::Client;
@@ -120,11 +120,18 @@ impl AdminTheme for Plain {
         vec![ColorToken::new("primary", "#2271b1", "#72aee6")]
     }
 
-    fn icon(&self, icon: Icon) -> String {
-        match icon {
-            Icon::Dashboard => "dashicons-dashboard".to_string(),
-            _ => "dashicons-admin-post".to_string(),
+    fn icon(&self, name: &str) -> Option<String> {
+        match name {
+            "dashboard" => Some("dashicons dashicons-dashboard"),
+            "post" => Some("dashicons dashicons-admin-post"),
+            "media" => Some("dashicons dashicons-admin-media"),
+            _ => None,
         }
+        .map(str::to_string)
+    }
+
+    fn resource_icon(&self) -> String {
+        "dashicons dashicons-admin-generic".to_string()
     }
 
     fn view(&self, name: &str) -> Option<String> {
@@ -174,8 +181,9 @@ fn switching_the_theme_changes_the_look_of_the_same_list_page() {
             && after.contains(":root[data-theme=\"dark\"]{--color-primary:#72aee6;}"),
         "colour tokens: {after}"
     );
-    assert!(after.contains("class=\"dashicons-dashboard\" href=\"/admin\""));
-    assert!(after.contains("class=\"dashicons-admin-post\" href=\"/admin/widgets\""));
+    assert!(after.contains("class=\"dashicons dashicons-dashboard\" href=\"/admin\""));
+    // Widgets names no icon: the theme's generic resource icon.
+    assert!(after.contains("class=\"dashicons dashicons-admin-generic\" href=\"/admin/widgets\""));
 
     // Back to the default look: the same HTML as before.
     set_admin_theme("ignite").unwrap();
@@ -294,4 +302,39 @@ fn both_themes_render_in_this_build() {
 
     set_admin_theme("ignite").unwrap();
     assert_snapshot("index", &page(&client, "/admin/widgets"));
+}
+
+/// Each theme maps an icon name to its own classes, and a name it does not know, or no name,
+/// to its generic resource icon.
+#[test]
+fn each_theme_maps_icon_names_to_its_own_icons() {
+    assert_eq!(
+        icon_classes(&IgniteTheme, Some("dashboard")),
+        "ti ti-layout-dashboard"
+    );
+    assert_eq!(icon_classes(&IgniteTheme, Some("post")), "ti ti-pin");
+    assert_eq!(
+        icon_classes(&IgniteTheme, Some("settings")),
+        "ti ti-settings"
+    );
+    assert_eq!(icon_classes(&IgniteTheme, Some("book")), "ti ti-table");
+    assert_eq!(icon_classes(&IgniteTheme, None), "ti ti-table");
+
+    assert_eq!(
+        icon_classes(&Plain, Some("post")),
+        "dashicons dashicons-admin-post"
+    );
+    assert_eq!(
+        icon_classes(&Plain, Some("media")),
+        "dashicons dashicons-admin-media"
+    );
+    assert_eq!(
+        icon_classes(&Plain, Some("book")),
+        "dashicons dashicons-admin-generic",
+        "a custom post type's name the theme does not know"
+    );
+    assert_eq!(
+        icon_classes(&Plain, None),
+        "dashicons dashicons-admin-generic"
+    );
 }

@@ -24,7 +24,7 @@ use syn::{
 /// - `#[ignite(navigation_label = "All widgets")]`: the label of the resource's navigation entry, as Filament's `$navigationLabel`. Defaults to the title.
 /// - `#[ignite(navigation_group = "Shop")]`: the navigation group the entry is listed under, as Filament's `$navigationGroup`. Defaults to none: the entry is listed before the groups.
 /// - `#[ignite(navigation_sort = 2)]`: the entry's place, as Filament's `$navigationSort`: lower first. Defaults to none, which comes before any number.
-/// - `#[ignite(navigation_icon = "dashicons dashicons-admin-post")]`: the CSS classes of the entry's icon, as Filament's `$navigationIcon`, from a stylesheet the app loads (Ignite ships no icon font). Defaults to the admin theme's icon.
+/// - `#[ignite(navigation_icon = "post")]`: the name of the entry's icon, as Filament's `$navigationIcon`: what the resource is (`post`, `page`, `media`, `comment`, `users`, `settings`, or a name of the app's own), not a CSS class. The admin theme maps the name to its icon. Defaults to the theme's generic resource icon.
 /// - `#[ignite(conditions = post_conditions)]`: the conditions that show or hide the form's fields, and the live fields, as Filament's `visible()`, `hidden()` and `live()`: the path of a `fn() -> ignite_core::FieldConditions`. Defaults to none: every field shows. A field that a condition may hide should be an `Option`, so it is NULL on create and keeps its stored value on update.
 ///
 /// Field attributes:
@@ -704,7 +704,16 @@ fn struct_attrs(input: &DeriveInput) -> syn::Result<StructAttrs> {
                 navigation.group = Some(meta.value()?.parse::<LitStr>()?.value());
                 Ok(())
             } else if meta.path.is_ident("navigation_icon") {
-                navigation.icon = Some(meta.value()?.parse::<LitStr>()?.value());
+                let icon = meta.value()?.parse::<LitStr>()?;
+                let name = icon.value();
+                // Before 0.7.0 the value was CSS classes, such as `dashicons dashicons-admin-post`.
+                if name.trim().is_empty() || name.chars().any(char::is_whitespace) {
+                    return Err(syn::Error::new(
+                        icon.span(),
+                        "`navigation_icon` takes an icon name such as \"post\", \"media\" or \"settings\", which the admin theme maps to its icon, not CSS classes",
+                    ));
+                }
+                navigation.icon = Some(name);
                 Ok(())
             } else if meta.path.is_ident("navigation_sort") {
                 navigation.sort = Some(sort_value(&meta.value()?.parse::<syn::Expr>()?)?);

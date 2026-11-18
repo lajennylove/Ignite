@@ -401,8 +401,8 @@ pub struct RuntimeResource {
     /// The resource's place in the navigation, as Filament's `$navigationSort`: lower first.
     /// See [`IgniteResource::NAVIGATION_SORT`](crate::IgniteResource::NAVIGATION_SORT).
     pub navigation_sort: Option<i32>,
-    /// The CSS classes of the navigation entry's icon, as Filament's `$navigationIcon`.
-    /// See [`IgniteResource::NAVIGATION_ICON`](crate::IgniteResource::NAVIGATION_ICON).
+    /// The name of the navigation entry's icon, such as `post`, as Filament's
+    /// `$navigationIcon`. See [`IgniteResource::NAVIGATION_ICON`](crate::IgniteResource::NAVIGATION_ICON).
     pub navigation_icon: Option<String>,
     /// The conditions that show or hide the form's fields, and the live fields, as
     /// Filament's `visible()`, `hidden()` and `live()`. See [`FieldConditions`].
@@ -487,11 +487,11 @@ impl RuntimeResource {
         self
     }
 
-    /// Sets the icon of the navigation entry, as Filament's `navigationIcon`: one or more CSS
-    /// classes from a stylesheet the app loads, such as `"dashicons dashicons-admin-post"`.
+    /// Sets the name of the navigation entry's icon, as Filament's `navigationIcon`: a name
+    /// such as `"post"` or a custom post type's own, which the admin theme maps to its icon.
     /// See [`IgniteResource::NAVIGATION_ICON`](crate::IgniteResource::NAVIGATION_ICON).
-    pub fn navigation_icon(mut self, classes: impl Into<String>) -> Self {
-        self.navigation_icon = Some(classes.into());
+    pub fn navigation_icon(mut self, name: impl Into<String>) -> Self {
+        self.navigation_icon = Some(name.into());
         self
     }
 
@@ -718,7 +718,7 @@ impl RegisteredResource {
         self.resource.navigation_sort
     }
 
-    /// The CSS classes of the navigation entry's icon, if set.
+    /// The name of the navigation entry's icon, if set.
     pub fn navigation_icon(&self) -> Option<&str> {
         self.resource.navigation_icon.as_deref()
     }

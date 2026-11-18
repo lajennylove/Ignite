@@ -61,11 +61,13 @@ pub trait IgniteResource: Send + Sync + 'static {
     /// comes first. The default, `None`, comes before any number. In a group, resources with
     /// the same place are listed by label; without a group, in the order they were added.
     const NAVIGATION_SORT: Option<i32> = None;
-    /// The icon of the resource's navigation entry, as Filament's `$navigationIcon`: one or
-    /// more CSS classes, such as `"dashicons dashicons-admin-post"`. The panel renders it as
-    /// `<span class="..." aria-hidden="true"></span>` before the label, in place of the admin
-    /// theme's icon. Ignite ships no icon font: the app loads the stylesheet that defines the
-    /// classes. The default, `None`, shows the admin theme's icon, as before.
+    /// The name of the resource's navigation icon, as Filament's `$navigationIcon`: a name
+    /// that says what the resource is, such as `"post"`, `"page"`, `"media"`, `"comment"`,
+    /// `"users"` or `"settings"`, or a name of the app's own, such as a custom post type's
+    /// `"book"`. It is not a CSS class: the active admin theme maps the name to its own icon
+    /// (the `ignite` theme to a Tabler icon, a WordPress-like theme to a Dashicon), and shows
+    /// its generic resource icon for a name it does not know. The default, `None`, shows the
+    /// theme's generic resource icon.
     const NAVIGATION_ICON: Option<&'static str> = None;
 
     /// Stat cards for the dashboard, in display order. The default is none.

@@ -34,9 +34,52 @@ All notable changes to Ignite are listed here. The format follows
   disk. The `ignite` theme still renders from the compiled views in a release build, with the
   same HTML as before. Propel stays at 0.3.0, the version ignite-panel already depended on: it
   is the first release whose runtime renderer works in release builds.
+- Semantic icons: `ignite_panel::theme::icons` (the names `dashboard`, `post`, `page`,
+  `media`, `comment`, `appearance`, `plugins`, `users`, `tools`, `settings`),
+  `IGNITE_ICONS` and `ignite_icon(name)` (the `ignite` theme's Tabler icon of each name),
+  `IGNITE_RESOURCE_ICON` (`ti ti-table`), and `icon_classes(theme, name)`, which resolves a
+  name through a theme and falls back to its generic resource icon. Filament's navigation
+  items take an icon name that the panel resolves through its icon set; in Ignite the admin
+  theme resolves it.
+- `AdminTheme::resource_icon()`: the theme's generic resource icon, for a resource that names
+  no icon and for a name the theme does not know. Defaults to `ti ti-table`.
+- A navigation entry has `icon_name` (the name, or empty) beside `icon` (the resolved classes).
+
+### Changed
+
+- **Breaking:** a resource's icon is a name, not CSS classes. `NAVIGATION_ICON`, the derive's
+  `navigation_icon` attribute and `RuntimeResource::navigation_icon` take a name that says what
+  the resource is, such as `"post"`, or the app's own name for a custom post type, such as
+  `"book"`. The active admin theme maps the name to its icon. The set of names is open.
+- **Breaking:** `AdminTheme::icon(&self, icon: Icon) -> String` is now
+  `AdminTheme::icon(&self, name: &str) -> Option<String>`: the theme returns the whole `class`
+  value of the icon named `name` (such as `ti ti-pin` or `dashicons dashicons-admin-post`), or
+  `None` for a name it does not know. The default maps the names to the `ignite` theme's Tabler
+  icons.
+- **Breaking:** the `ignite` theme's navigation partial prints `<i class="{icon} text-lg">` for
+  every entry; the `<span class="..." aria-hidden="true">` of a resource's own classes is gone,
+  and so are the entry's `has_icon_class` and `icon_class` values. The pages of the `ignite`
+  theme render the same HTML as before for resources without an icon.
+
+### Migration from 0.6
+
+- **`navigation_icon` with CSS classes.** Replace the classes with the name of what the
+  resource is: `navigation_icon = "dashicons dashicons-admin-post"` becomes
+  `navigation_icon = "post"`, and `.navigation_icon("dashicons dashicons-sticky")` becomes,
+  for example, `.navigation_icon("note")`. The derive refuses a value with a space at compile
+  time and says so; a hand-written `NAVIGATION_ICON` or a runtime resource with classes shows
+  the theme's generic resource icon instead. To keep a particular icon, map its name in your
+  admin theme's `icon`, such as `"note" => Some("dashicons dashicons-sticky".into())`. A
+  stylesheet that defined the classes (`Ignite::stylesheet`) is needed only by the theme that
+  uses them (see the theme stylesheets below).
+- **A theme that implemented `icon(Icon)`.** Implement `icon(&self, name: &str) ->
+  Option<String>` instead: `Icon::Dashboard` is the name `dashboard`, and `Icon::Resource` is
+  `resource_icon()`. Return the full class list, as the panel no longer adds `ti`.
+- **`ignite_panel::theme::Icon` is removed**, with no replacement type: the names are strings.
 
 ### Removed
 
+- **Breaking:** `ignite_panel::theme::Icon` (see the migration above).
 - **Breaking:** `ThemeError::NotCompiled`. `set_admin_theme` no longer refuses a theme other
   than `ignite` in a release build. Code that matched the variant can drop that arm.
 

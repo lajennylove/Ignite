@@ -10,9 +10,9 @@
     @foreach (section in nav_sections)@if (section.has_heading)<p class="ig-caption mt-5">{{ $section.heading }}</p>
     @endif@foreach (group in section.items)
       @if (group.active)
-        <a class="ig-nav-link ig-nav-link-active" href="{{ $group.url }}" aria-current="page">@if (group.has_icon_class)<span class="{{ $group.icon_class }}" aria-hidden="true"></span>@else<i class="ti {{ $group.icon }} text-lg"></i>@endif{{ $group.title }}</a>
+        <a class="ig-nav-link ig-nav-link-active" href="{{ $group.url }}" aria-current="page"><i class="{{ $group.icon }} text-lg"></i>{{ $group.title }}</a>
       @else
-        <a class="ig-nav-link" href="{{ $group.url }}">@if (group.has_icon_class)<span class="{{ $group.icon_class }}" aria-hidden="true"></span>@else<i class="ti {{ $group.icon }} text-lg"></i>@endif{{ $group.title }}</a>
+        <a class="ig-nav-link" href="{{ $group.url }}"><i class="{{ $group.icon }} text-lg"></i>{{ $group.title }}</a>
       @endif
       @if (group.has_add)
         <a class="ig-nav-link py-1.5 pl-11 text-[13px]" href="{{ $group.add_url }}">Add new</a>

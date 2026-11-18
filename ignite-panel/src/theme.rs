@@ -51,8 +51,18 @@
 //! `nav_sections` (the sidebar in sections, each with `has_heading`, `heading` and `items`, as
 //! [`Ignite::navigation_groups`](crate::Ignite::navigation_groups) orders them) and `nav` (the
 //! same entries in one list). Each entry has `title`, `url`, `active`, `has_add`, `add_url`,
-//! `icon` (the theme's icon) and `has_icon_class` and `icon_class` (the resource's own
-//! icon, its `NAVIGATION_ICON`).
+//! `icon` (the CSS classes of the entry's icon, as the theme resolves it) and `icon_name` (the
+//! icon's name, such as `post`, or empty for a resource that names none).
+//!
+//! # Icons
+//!
+//! A resource names its icon by what it is (`post`, `media`, `settings`, or a custom post
+//! type's own name), with `NAVIGATION_ICON`, and the theme decides how it looks: the panel
+//! asks the active theme's [`AdminTheme::icon`] for the classes of that name, and shows the
+//! theme's [`AdminTheme::resource_icon`] for a name the theme does not know. Filament's
+//! navigation items take an icon name that the panel resolves through its icon set (with
+//! aliases an app can replace); here the admin theme resolves it, so one resource shows a
+//! Tabler icon in the `ignite` theme and a Dashicon in a WordPress-like theme.
 //!
 //! A theme's own views come from [`AdminTheme::view`], so a theme can ship them in its binary,
 //! and the same method can replace any view of the panel by name. A replaced page must keep
@@ -95,7 +105,7 @@ pub const IGNITE_FLASH: &str = "themes.ignite.partials.flash";
 /// default to the `ignite` theme's, so a theme replaces only what it changes, as a WordPress
 /// child theme does. A theme in the style of wp-admin, for example, gives its own layout (the
 /// admin bar above a dark menu and the content), its own navigation and top bar, WordPress's
-/// colours as tokens, and Dashicons for the icons.
+/// colours as tokens, and Dashicons for the icon names.
 ///
 /// View names are names in the panel's `ignite` namespace, such as `themes.ignite.layouts.app`.
 /// A theme's views get the same values as the panel's own: see the module documentation for
@@ -129,13 +139,23 @@ pub trait AdminTheme: Send + Sync + 'static {
         Vec::new()
     }
 
-    /// The CSS classes of `icon`. The default is the `ignite` theme's Tabler icon.
-    fn icon(&self, icon: Icon) -> String {
-        match icon {
-            Icon::Dashboard => "ti-layout-dashboard",
-            Icon::Resource => "ti-table",
-        }
-        .to_string()
+    /// The CSS classes of the icon named `name`, or `None` when the theme has no icon of that
+    /// name. A name says what the entry is, not how it looks: `dashboard`, `post`, `page`,
+    /// `media`, `comment`, `appearance`, `plugins`, `users`, `tools`, `settings` (see
+    /// [`icons`]), or any name an app gives a resource, such as a custom post type's `book`.
+    /// The panel shows [`resource_icon`](Self::resource_icon) for a name the theme does not
+    /// know. The classes are the whole `class` value, such as `dashicons dashicons-admin-post`.
+    ///
+    /// The default is the `ignite` theme's Tabler icons ([`ignite_icon`]).
+    fn icon(&self, name: &str) -> Option<String> {
+        ignite_icon(name).map(str::to_string)
+    }
+
+    /// The CSS classes of the theme's generic resource icon: the icon of a resource that names
+    /// none, and of a name [`icon`](Self::icon) does not know. The default is the `ignite`
+    /// theme's, [`IGNITE_RESOURCE_ICON`].
+    fn resource_icon(&self) -> String {
+        IGNITE_RESOURCE_ICON.to_string()
     }
 
     /// The source of the theme's view `name`, or `None` to read the panel's view of that
@@ -147,14 +167,65 @@ pub trait AdminTheme: Send + Sync + 'static {
     }
 }
 
-/// An icon the panel shows outside a theme's own views, so the theme chooses it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum Icon {
-    /// The dashboard's entry in the navigation.
-    Dashboard,
-    /// A resource's entry in the navigation.
-    Resource,
+/// The icon names the panel and Mission Control use. A name says what an entry is; each
+/// theme maps it to its own icon with [`AdminTheme::icon`]. The set is open: a resource can
+/// name any icon, and a theme that does not know it shows its
+/// [`resource_icon`](AdminTheme::resource_icon).
+pub mod icons {
+    /// The dashboard's entry in the navigation. The panel names it for every theme.
+    pub const DASHBOARD: &str = "dashboard";
+    /// Posts, or any list of articles.
+    pub const POST: &str = "post";
+    /// Pages.
+    pub const PAGE: &str = "page";
+    /// The media library: images and files.
+    pub const MEDIA: &str = "media";
+    /// Comments.
+    pub const COMMENT: &str = "comment";
+    /// The look of the site: themes, menus, widgets.
+    pub const APPEARANCE: &str = "appearance";
+    /// Plugins and extensions.
+    pub const PLUGINS: &str = "plugins";
+    /// Users and accounts.
+    pub const USERS: &str = "users";
+    /// Tools: imports, exports and maintenance.
+    pub const TOOLS: &str = "tools";
+    /// Settings.
+    pub const SETTINGS: &str = "settings";
+}
+
+/// The `ignite` theme's generic resource icon: Tabler's table.
+pub const IGNITE_RESOURCE_ICON: &str = "ti ti-table";
+
+/// The `ignite` theme's icons, by name: Tabler icons, from the font the panel ships.
+pub const IGNITE_ICONS: &[(&str, &str)] = &[
+    (icons::DASHBOARD, "ti ti-layout-dashboard"),
+    (icons::POST, "ti ti-pin"),
+    (icons::PAGE, "ti ti-file-text"),
+    (icons::MEDIA, "ti ti-photo"),
+    (icons::COMMENT, "ti ti-message"),
+    (icons::APPEARANCE, "ti ti-brush"),
+    (icons::PLUGINS, "ti ti-plug"),
+    (icons::USERS, "ti ti-users"),
+    (icons::TOOLS, "ti ti-tool"),
+    (icons::SETTINGS, "ti ti-settings"),
+];
+
+/// The `ignite` theme's icon named `name` ([`IGNITE_ICONS`]), or `None` for a name it does not
+/// know.
+pub fn ignite_icon(name: &str) -> Option<&'static str> {
+    IGNITE_ICONS
+        .iter()
+        .find(|(known, _)| *known == name)
+        .map(|(_, classes)| *classes)
+}
+
+/// The CSS classes `theme` shows for the icon named `name`: its [`icon`](AdminTheme::icon),
+/// or its [`resource_icon`](AdminTheme::resource_icon) when it does not know the name, or no
+/// name is given.
+pub fn icon_classes(theme: &dyn AdminTheme, name: Option<&str>) -> String {
+    name.and_then(|name| theme.icon(name))
+        .unwrap_or_else(|| theme.resource_icon())
 }
 
 /// A colour of a theme: the CSS custom property `--color-<name>`, with its value in the light
