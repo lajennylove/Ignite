@@ -63,6 +63,9 @@ themed_pages!(
 pub(crate) struct AdminThemeView {
     /// The theme's name, such as `ignite`.
     pub(crate) name: String,
+    /// The theme's own stylesheets ([`AdminTheme::stylesheets`](crate::AdminTheme::stylesheets)),
+    /// which `partials.stylesheets` links before the app's.
+    pub(crate) stylesheets: Vec<String>,
 }
 
 use ignite_core::{FieldConditions, FieldDef, FieldErrors, FieldKindDef, FormInput, MediaItem};
@@ -232,6 +235,7 @@ impl Layout {
             theme_style: admin_theme.style.clone(),
             admin_theme: AdminThemeView {
                 name: admin_theme.theme.name().to_string(),
+                stylesheets: admin_theme.theme.stylesheets(),
             },
             brand: BrandView::new(&registry.brand),
         }

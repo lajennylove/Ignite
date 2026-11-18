@@ -256,11 +256,10 @@ A resource implemented by hand sets `NAVIGATION_GROUP`, `NAVIGATION_SORT`, `NAVI
 
 ```rust
 Ignite::new()
-    .stylesheet("/mc-includes/css/dashicons.min.css")
     .stylesheet("/mc-admin/css/admin.css")
 ```
 
-The value is the path or URL of the file, printed escaped in the link's `href`; the app serves the file. Without the call the pages link only the panel's CSS, as before. An admin theme's layout that has its own head yields the `ignite_stylesheets` section to show them.
+The value is the path or URL of the file, printed escaped in the link's `href`; the app serves the file. Without the call the pages link only the panel's CSS, as before. An admin theme's layout that has its own head yields the `ignite_stylesheets` section to show them. These stylesheets load in every admin theme; a stylesheet that only one theme needs, such as its icon font, belongs in the theme's `stylesheets` (see [Admin themes](#admin-themes)).
 
 ### Admin themes
 
@@ -272,6 +271,8 @@ ignite_panel::set_admin_theme("wp")?;
 ```
 
 Every registered theme renders in debug and release builds. A theme's own views come from `AdminTheme::view`, so it can ship them in the binary. In a release build the `ignite` theme renders from the views compiled into the panel, and another theme through Propel's runtime renderer, from the panel's views embedded in the binary.
+
+A theme's own stylesheets (`stylesheets()`, the URLs of files the app serves) load only on the pages that render in that theme, after the panel's CSS and before the app-wide stylesheets of `Ignite::stylesheet`, so the Dashicons font of a WordPress-like theme is not loaded in the `ignite` theme. A layout that has its own head yields the `ignite_stylesheets` section to show them.
 
 Icons are names (see `navigation_icon` above). A theme maps each name to its classes with `icon(name)`, which returns `None` for a name it does not know, and gives its generic resource icon with `resource_icon()`. The panel names the dashboard's entry `dashboard`. `ignite_panel::theme::icons` lists the names the panel and Mission Control use, and `IGNITE_ICONS` the `ignite` theme's Tabler icons:
 
@@ -304,6 +305,9 @@ impl AdminTheme for WpTheme {
         Some(format!("dashicons dashicons-{icon}"))
     }
     fn resource_icon(&self) -> String { "dashicons dashicons-admin-generic".into() }
+    fn stylesheets(&self) -> Vec<String> {
+        vec!["/mc-includes/css/dashicons.min.css".into(), "/mc-admin/css/wp.css".into()]
+    }
     fn view(&self, name: &str) -> Option<String> { /* the theme's layout and partials */ None }
 }
 ```

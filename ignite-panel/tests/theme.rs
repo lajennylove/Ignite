@@ -338,3 +338,57 @@ fn each_theme_maps_icon_names_to_its_own_icons() {
         "dashicons dashicons-admin-generic"
     );
 }
+
+/// A theme with its own stylesheet: the Dashicons font of a WordPress-like theme.
+struct Styled;
+
+impl AdminTheme for Styled {
+    fn name(&self) -> &str {
+        "styled"
+    }
+
+    fn layout(&self) -> &str {
+        ignite_panel::theme::IGNITE_LAYOUT
+    }
+
+    fn stylesheets(&self) -> Vec<String> {
+        vec![
+            "/mc-includes/css/dashicons.min.css".to_string(),
+            "/mc-admin/css/wp.css?v=1&x=2".to_string(),
+        ]
+    }
+}
+
+#[test]
+fn a_themes_stylesheets_load_only_while_it_is_active() {
+    let _guard = reset();
+    let _ = register_admin_theme(Styled);
+    let _restore = RestoreTheme;
+    let client = signed_in_with(|ignite| ignite.stylesheet("/app.css"));
+    let guest = client_with(|ignite| ignite.stylesheet("/app.css"));
+    let dashicons = r#"<link rel="stylesheet" href="/mc-includes/css/dashicons.min.css">"#;
+    let app = r#"<link rel="stylesheet" href="/app.css">"#;
+
+    // The ignite theme has none: only the app's stylesheet.
+    for html in [page(&client, "/admin"), page(&guest, "/admin/login")] {
+        assert!(!html.contains("dashicons"), "{html}");
+        assert!(html.contains(app));
+    }
+
+    set_admin_theme("styled").unwrap();
+    for html in [
+        page(&client, "/admin"),
+        page(&client, "/admin/widgets"),
+        page(&client, "/admin/profile"),
+        page(&guest, "/admin/login"),
+    ] {
+        // The theme's stylesheets, in order and escaped, then the app's, at the end of the head.
+        let expected = format!(
+            "{dashicons}\n<link rel=\"stylesheet\" href=\"/mc-admin/css/wp.css?v=1&amp;x=2\">\n{app}\n</head>"
+        );
+        assert!(html.contains(&expected), "{html}");
+    }
+
+    set_admin_theme("ignite").unwrap();
+    assert!(!page(&client, "/admin").contains("dashicons"));
+}

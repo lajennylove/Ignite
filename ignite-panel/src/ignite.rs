@@ -476,11 +476,12 @@ impl Ignite {
     /// default is none.
     ///
     /// The URL is printed in the `href` attribute and escaped there, as every value of the
-    /// views is.
+    /// views is. These stylesheets load in every admin theme, after the theme's own; a
+    /// stylesheet that only one theme needs, such as its icon font, belongs in that theme's
+    /// [`AdminTheme::stylesheets`](crate::AdminTheme::stylesheets).
     ///
     /// ```ignore
     /// Ignite::new()
-    ///     .stylesheet("/mc-includes/css/dashicons.min.css")
     ///     .stylesheet("/mc-admin/css/admin.css")
     /// ```
     pub fn stylesheet(mut self, url: impl Into<String>) -> Self {

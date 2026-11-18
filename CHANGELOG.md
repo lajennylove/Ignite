@@ -44,6 +44,12 @@ All notable changes to Ignite are listed here. The format follows
 - `AdminTheme::resource_icon()`: the theme's generic resource icon, for a resource that names
   no icon and for a name the theme does not know. Defaults to `ti ti-table`.
 - A navigation entry has `icon_name` (the name, or empty) beside `icon` (the resolved classes).
+- Theme stylesheets: `AdminTheme::stylesheets() -> Vec<String>` (default none), the URLs of a
+  theme's own stylesheets. They load only on the pages that render in that theme, after the
+  panel's CSS and before the app-wide stylesheets of `Ignite::stylesheet` (unchanged since
+  0.6.1), in the `ignite_stylesheets` section, escaped in the `href`. A WordPress-like theme
+  loads Dashicons this way, and the `ignite` theme does not. The pages have a new
+  `admin_theme` value (`name`, `stylesheets`).
 
 ### Changed
 

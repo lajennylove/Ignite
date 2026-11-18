@@ -37,15 +37,17 @@
 //! - `content`: the screen itself.
 //! - `ignite_html`: attributes of the `<html>` element (the light or dark mode).
 //! - `ignite_head`: the theme's colour tokens, as a `<style>` element, when it has any.
-//! - `ignite_stylesheets`: the app's stylesheet links (the panel's `partials.stylesheets`,
-//!   set with [`Ignite::stylesheet`](crate::Ignite::stylesheet)), at the end of the head,
-//!   after the theme's CSS. Empty by default.
+//! - `ignite_stylesheets`: the stylesheet links of the page's theme
+//!   ([`AdminTheme::stylesheets`]) and then the app's (set with
+//!   [`Ignite::stylesheet`](crate::Ignite::stylesheet)), as the panel's `partials.stylesheets`
+//!   prints them, at the end of the head, after the panel's CSS. Empty by default.
 //! - `ignite_aside`: the navigation, on signed-in pages.
 //! - `ignite_column`: classes of the column beside the navigation.
 //! - `ignite_bar`: the top bar.
 //! - `ignite_flash`: the flash message.
 //!
-//! Besides each page's own values, every page has the values of the look: `brand` (the
+//! Besides each page's own values, every page has the values of the look: `admin_theme` (the
+//! page's theme: its `name` and its `stylesheets`), `brand` (the
 //! brand's `name`, `has_logo`, `logo`, `logo_height`, `has_mark`, `has_favicon`, `favicon` and
 //! `stylesheets`, set with [`Ignite::brand_name`](crate::Ignite::brand_name) and the methods beside it),
 //! `nav_sections` (the sidebar in sections, each with `has_heading`, `heading` and `items`, as
@@ -136,6 +138,15 @@ pub trait AdminTheme: Send + Sync + 'static {
     /// The colour tokens the theme sets, as CSS custom properties named `--color-<name>`, over
     /// the panel's stylesheet. The `ignite` theme sets none: its colours are the stylesheet's.
     fn colors(&self) -> Vec<ColorToken> {
+        Vec::new()
+    }
+
+    /// The URLs of the theme's own stylesheets, such as `/mc-includes/css/dashicons.min.css`,
+    /// in order. The layout links them only while this theme is the page's theme, after the
+    /// panel's CSS and before the app's stylesheets ([`Ignite::stylesheet`](crate::Ignite::stylesheet)),
+    /// so a theme loads its icon font and CSS without every other theme loading them too. The
+    /// app serves the files. Each URL is escaped in the link's `href`. The default is none.
+    fn stylesheets(&self) -> Vec<String> {
         Vec::new()
     }
 
