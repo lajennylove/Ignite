@@ -6,28 +6,28 @@ Documentation: [ignite.rocketboost.rs](https://ignite.rocketboost.rs). Changes b
 
 ## Install
 
-Ignite is not on crates.io. Add it from git, at the revision the install page and the example app pin. Orbit, Rocket and Propel come from crates.io, so the app builds one copy of each crate:
+Ignite is on crates.io. Orbit, Rocket and Propel come from crates.io too, so the app builds one copy of each crate:
 
 ```toml
 [dependencies]
-ignite-panel = { git = "https://github.com/lajennylove/Ignite", rev = "d3d1975ae107b4e7e7dce92a20f1c83a73428866" }
-ignite-core = { git = "https://github.com/lajennylove/Ignite", rev = "d3d1975ae107b4e7e7dce92a20f1c83a73428866" }
-orbit-orm = "0.1.0"
+ignite-panel = "0.6.2"
+ignite-core = "0.6.2"
+orbit-orm = "0.4.0"
 rocket = "0.5.2"
-propel_rocket = "0.2.0"
-propel_runtime = "0.2.0"
+propel_rocket = "0.3.0"
+propel_runtime = "0.3.0"
 serde = { version = "1", features = ["derive"] }
 chrono = { version = "0.4", features = ["serde"] }
 dotenvy = "0.15"
 
 [build-dependencies]
-propel_compiler = "0.2.0"
+propel_compiler = "0.3.0"
 ```
 
-- **Ignite** is pinned to revision `d3d1975`, the revision of the Ignite main branch that the install page documents. Cargo takes it from git. That revision is before 0.3.0; the pin moves to the 0.3.0 revision when that release is published. Upgrading to 0.3.0 has breaking changes: see the migration notes in [CHANGELOG.md](CHANGELOG.md).
-- **Orbit** (`orbit-orm`) 0.1.0 comes from crates.io. The models derive its `OrbitModel`.
-- **Rocket** 0.5.2 and **Propel** 0.2.0 come from crates.io. A git pin of either would build a second copy, and the panel's views would not match the app's.
-- **propel_compiler** 0.2.0 is a build dependency. An app with its own views compiles them in its `build.rs`.
+- **Ignite** 0.6.2: `ignite-panel`, `ignite-core` and `ignite-macros` are released together, at the same version. Upgrading from 0.6 has breaking changes (icon names, the admin theme trait): see the migration notes in [CHANGELOG.md](CHANGELOG.md).
+- **Orbit** (`orbit-orm`) 0.4.0. The models derive its `OrbitModel`.
+- **Rocket** 0.5.2 and **Propel** 0.3.0. Use the same versions as the panel, or Cargo builds a second copy and the panel's views would not match the app's.
+- **propel_compiler** 0.3.0 is a build dependency. An app with its own views compiles them in its `build.rs`.
 - **chrono** is needed for the date fields of a resource, and **dotenvy** for the `ignite` command.
 
 ### Build requirements

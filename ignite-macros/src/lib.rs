@@ -706,7 +706,7 @@ fn struct_attrs(input: &DeriveInput) -> syn::Result<StructAttrs> {
             } else if meta.path.is_ident("navigation_icon") {
                 let icon = meta.value()?.parse::<LitStr>()?;
                 let name = icon.value();
-                // Before 0.7.0 the value was CSS classes, such as `dashicons dashicons-admin-post`.
+                // Before 0.6.2 the value was CSS classes, such as `dashicons dashicons-admin-post`.
                 if name.trim().is_empty() || name.chars().any(char::is_whitespace) {
                     return Err(syn::Error::new(
                         icon.span(),

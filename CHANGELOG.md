@@ -4,7 +4,7 @@ All notable changes to Ignite are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.6.2] - 2026-11-22
 
 ### Added
 
@@ -103,11 +103,13 @@ All notable changes to Ignite are listed here. The format follows
   the theme's generic resource icon instead. To keep a particular icon, map its name in your
   admin theme's `icon`, such as `"note" => Some("dashicons dashicons-sticky".into())`. A
   stylesheet that defined the classes (`Ignite::stylesheet`) is needed only by the theme that
-  uses them (see the theme stylesheets below).
+  uses them: move it to that theme's `stylesheets()` (see Theme stylesheets above).
 - **A theme that implemented `icon(Icon)`.** Implement `icon(&self, name: &str) ->
   Option<String>` instead: `Icon::Dashboard` is the name `dashboard`, and `Icon::Resource` is
   `resource_icon()`. Return the full class list, as the panel no longer adds `ti`.
 - **`ignite_panel::theme::Icon` is removed**, with no replacement type: the names are strings.
+- **The database.** Run `ignite migrate` (or `ignite_panel::migrate`) to add
+  `users.admin_theme`. Nothing else changes for existing users: they get the site default.
 
 ### Removed
 
@@ -126,6 +128,9 @@ All notable changes to Ignite are listed here. The format follows
   enhance the new inputs again; the form fires a bubbling `ignite:fields` event for that.
 - A static resource whose `validate` refuses a missing field that a condition hides is a
   server error (500): make such a field optional.
+- An app's own view that extends `ignite::layouts.app` renders in the site default theme unless
+  the app wraps the render in `with_admin_theme(&user.admin_theme(), ...)`; the panel cannot see
+  the signed-in user from an app's handler.
 
 ## [0.6.1] - 2026-11-17
 
