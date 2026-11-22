@@ -44,6 +44,11 @@
           <input class="ig-input py-2.5" id="password" name="password" type="password" autocomplete="current-password">
         </div>
 
+        <label class="flex items-center gap-2 text-sm">
+          <input type="checkbox" class="h-4 w-4 rounded border-bordergray text-primary focus:ring-primary" id="remember" name="remember" value="on" @if (remember)checked@endif>
+          Remember me
+        </label>
+
         <button type="submit" class="ig-btn ig-btn-primary w-full py-3">Sign in</button>
       </form>
 

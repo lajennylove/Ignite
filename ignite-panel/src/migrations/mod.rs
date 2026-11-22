@@ -16,6 +16,7 @@ use orbit_orm::Migration;
 
 mod account_lifecycle;
 mod add_user_admin_theme;
+mod add_user_remember_token;
 mod add_user_theme;
 mod create_login_throttles;
 mod create_sessions;
@@ -38,5 +39,6 @@ pub(crate) fn all() -> Vec<Migration> {
         account_lifecycle::migration(),
         password_reset_tokens::migration(),
         add_user_admin_theme::migration(),
+        add_user_remember_token::migration(),
     ]
 }

@@ -27,7 +27,7 @@ use orbit_orm::{raw, Database, Driver, Migration, Migrator, Value};
 use rocket::tokio::runtime::Runtime;
 
 /// Every migration of the panel, in order.
-const NAMES: [&str; 10] = [
+const NAMES: [&str; 11] = [
     "20261108000000_create_users",
     "20261108010000_create_sessions",
     "20261108020000_create_login_throttles",
@@ -38,11 +38,15 @@ const NAMES: [&str; 10] = [
     "20261114000000_account_lifecycle",
     "20261115000000_password_reset_tokens",
     ADMIN_THEME,
+    REMEMBER_TOKEN,
 ];
 
 /// The migration added after the move to the schema builder, which has no old SQL file: the
 /// old SQL is the migrations before it.
 const ADMIN_THEME: &str = "20261116000000_add_user_admin_theme";
+
+/// The "Remember me" token, added after the admin theme.
+const REMEMBER_TOKEN: &str = "20261117000000_add_user_remember_token";
 
 /// The migrations that installs ran as SQL files, before the schema builder.
 const OLD_NAMES: [&str; 9] = [
@@ -190,12 +194,13 @@ async fn migrate_check_and_roll_back(db: &Database) {
             db,
             "SELECT COUNT(*) FROM users WHERE id = ? AND theme = 'light' \
              AND created_at IS NOT NULL AND disabled_at IS NULL AND avatar_mime IS NULL \
-             AND admin_theme IS NULL",
+             AND admin_theme IS NULL AND remember_token IS NULL",
             &[ann.into()],
         )
         .await,
         1,
-        "a new user is enabled, on the light theme and the site's admin theme, with a creation time"
+        "a new user is enabled, on the light theme and the site's admin theme, with a creation time \
+         and no remember token"
     );
     let duplicate = raw::execute(
         db,
@@ -315,7 +320,15 @@ async fn migrate_check_and_roll_back(db: &Database) {
     )
     .await;
 
-    // One migrate is one batch, so one rollback reverts all ten, last first.
+    // A remember token is up to 100 characters, as Laravel's `rememberToken()`.
+    exec(
+        db,
+        "UPDATE users SET remember_token = ? WHERE id = ?",
+        &["r".repeat(100).into(), ann.into()],
+    )
+    .await;
+
+    // One migrate is one batch, so one rollback reverts all eleven, last first.
     let reverted = rollback(db).await.expect("rollback");
     let mut expected = NAMES.to_vec();
     expected.reverse();
@@ -432,7 +445,7 @@ fn cli_migrate_and_roll_back(rt: &Runtime, db: &Database, url: &str) {
     let (code, out) = ignite(url, &["migrate:rollback"]);
     assert_eq!(code, 0, "{out}");
     assert!(
-        out.contains("Rolled back the last batch: 10 migrations."),
+        out.contains("Rolled back the last batch: 11 migrations."),
         "{out}"
     );
     for table in TABLES {
@@ -513,10 +526,10 @@ fn an_install_from_the_old_sql_is_not_migrated_twice_and_rolls_back() {
         )
         .await;
 
-        // The new migrations have the same names, so only the one added since runs.
+        // The new migrations have the same names, so only the ones added since run.
         assert_eq!(
             migrate(&db).await.expect("migrate"),
-            [ADMIN_THEME],
+            [ADMIN_THEME, REMEMBER_TOKEN],
             "nothing runs twice"
         );
         assert_eq!(
@@ -549,10 +562,10 @@ fn an_install_from_the_old_sql_is_not_migrated_twice_and_rolls_back() {
         let old = create_statements(&db, &compared).await;
 
         // The new down migrations revert the old schema: the index and key names match. The
-        // admin theme migration was its own batch, so it rolls back first, on its own.
+        // migrations added since were their own batch, so they roll back first, on their own.
         assert_eq!(
             rollback(&db).await.expect("the new rollback"),
-            [ADMIN_THEME]
+            [REMEMBER_TOKEN, ADMIN_THEME]
         );
         let reverted = rollback(&db).await.expect("the new rollback");
         assert_eq!(reverted.len(), 9);
@@ -561,7 +574,7 @@ fn an_install_from_the_old_sql_is_not_migrated_twice_and_rolls_back() {
         }
 
         // The new migrations build the same tables as the old SQL did.
-        assert_eq!(migrate(&db).await.expect("migrate").len(), 10);
+        assert_eq!(migrate(&db).await.expect("migrate").len(), 11);
         assert_eq!(create_statements(&db, &compared).await, old);
         assert_eq!(columns(&db, "user_avatars").await, AVATAR_COLUMNS);
 

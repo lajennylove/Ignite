@@ -15,11 +15,14 @@ use std::path::{Component, Path, PathBuf};
 use std::pin::Pin;
 use std::sync::{Arc, PoisonError, RwLock};
 
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
 use chrono::{NaiveDateTime, Utc};
 use orbit_orm::{raw, Database, Error, Executor, Model, Operator, OrbitModel, Transaction, Value};
 use rand_core::{OsRng, RngCore};
 use rocket::tokio::fs;
 
+use crate::session::constant_time_eq;
 use crate::sessions;
 
 /// A row of the `users` table. See `src/migrations/create_users.rs`.
@@ -70,6 +73,20 @@ struct UserAvatar {
     path: String,
 }
 
+/// The sign-in secrets of a `users` row: the password hash and the "Remember me" token (see
+/// `src/migrations/add_user_remember_token.rs`). The token is kept off [`User`], as Laravel
+/// hides `remember_token`, so the public struct does not change.
+#[derive(Debug, Clone, OrbitModel)]
+#[orbit(table = "users")]
+#[allow(dead_code)]
+struct Credentials {
+    id: i64,
+    #[orbit(fillable)]
+    password_hash: String,
+    #[orbit(fillable)]
+    remember_token: Option<String>,
+}
+
 /// The themes a user can choose.
 pub const THEMES: [&str; 2] = ["light", "dark"];
 
@@ -116,17 +133,92 @@ pub async fn update_profile<'a>(
         .await
 }
 
-/// Replaces the password hash of the user with `id`.
+/// Replaces the password hash of the user with `id`, and sets a new remember token, so a
+/// "Remember me" cookie issued with the old password no longer signs anyone in, as Laravel's
+/// password reset does with `setRememberToken(Str::random(60))`.
 pub async fn update_password<'a>(
     db: impl Executor<'a>,
     id: i64,
     password: &str,
 ) -> Result<u64, Error> {
     let hash = ignite_core::hash_password(password).map_err(hash_error)?;
-    User::query()
+    Credentials::query()
         .where_eq("id", id)
-        .update(db, &[("password_hash", hash.as_str().into())])
+        .update(
+            db,
+            &[
+                ("password_hash", hash.as_str().into()),
+                ("remember_token", new_remember_token().as_str().into()),
+            ],
+        )
         .await
+}
+
+/// A new remember token: 60 URL-safe characters from 45 random bytes, the length of Laravel's
+/// `Str::random(60)`.
+fn new_remember_token() -> String {
+    let mut bytes = [0u8; 45];
+    OsRng.fill_bytes(&mut bytes);
+    URL_SAFE_NO_PAD.encode(bytes)
+}
+
+/// The remember token of the user with `id`, set first when the user has none, as Laravel's
+/// `ensureRememberTokenIsSet`. Every browser the user ticked "Remember me" on shares it, so
+/// a new sign-in does not end the others.
+pub(crate) async fn ensure_remember_token(db: &Database, id: i64) -> Result<String, Error> {
+    let row: Option<(Option<String>,)> = Credentials::query()
+        .where_eq("id", id)
+        .select(&["remember_token"])
+        .first_as(db)
+        .await?;
+    if let Some((Some(token),)) = row {
+        if !token.is_empty() {
+            return Ok(token);
+        }
+    }
+    let token = new_remember_token();
+    Credentials::query()
+        .where_eq("id", id)
+        .update(db, &[("remember_token", token.as_str().into())])
+        .await?;
+    Ok(token)
+}
+
+/// Sets a new remember token for the user with `id` when they have one, so every "Remember
+/// me" cookie of the user stops working, as Laravel's `logout` does with `cycleRememberToken`.
+pub(crate) async fn cycle_remember_token<'a>(db: impl Executor<'a>, id: i64) -> Result<u64, Error> {
+    Credentials::query()
+        .where_eq("id", id)
+        .where_not_null("remember_token")
+        .update(
+            db,
+            &[("remember_token", new_remember_token().as_str().into())],
+        )
+        .await
+}
+
+/// The user with `id` when `token` is their remember token, as Laravel's `retrieveByToken`.
+/// The tokens are compared in constant time.
+pub(crate) async fn find_by_remember_token(
+    db: &Database,
+    id: i64,
+    token: &str,
+) -> Result<Option<User>, Error> {
+    let row: Option<(Option<String>,)> = Credentials::query()
+        .where_eq("id", id)
+        .select(&["remember_token"])
+        .first_as(db)
+        .await?;
+    let matches = match row {
+        Some((Some(stored),)) => {
+            !stored.is_empty() && constant_time_eq(stored.as_bytes(), token.as_bytes())
+        }
+        _ => false,
+    };
+    if !matches {
+        return Ok(None);
+    }
+    find_by_id(db, id).await
 }
 
 /// Sets a new password for the user with `id` and ends every session of the user, so

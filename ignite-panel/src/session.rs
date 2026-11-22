@@ -34,12 +34,24 @@ pub(crate) const SESSION_COOKIE: &str = "ignite_session";
 pub(crate) const CSRF_COOKIE: &str = "ignite_csrf";
 /// The cookie that holds the flash message until the next page shows it.
 pub(crate) const FLASH_COOKIE: &str = "ignite_flash";
+/// The cookie of a "Remember me" sign-in, Laravel's recaller cookie: the user's id and their
+/// remember token. It signs the user in again when their session has ended.
+pub(crate) const REMEMBER_COOKIE: &str = "ignite_remember";
+/// How long the remember cookie lasts: 400 days, Laravel's `$rememberDuration` of 576000
+/// minutes, and the longest a browser keeps a cookie.
+const REMEMBER_DAYS: i64 = 400;
 /// The shortest key the panel accepts, in bytes.
 const MIN_KEY_BYTES: usize = 32;
 
 #[derive(Serialize, Deserialize)]
 struct SessionPayload {
     sid: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct RememberPayload {
+    uid: i64,
+    token: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -178,9 +190,31 @@ pub(crate) fn session_id(cookies: &CookieJar<'_>, key: &[u8]) -> Option<String> 
         .map(|p| p.sid)
 }
 
-/// Ends the sign-in.
+/// Ends the sign-in, and forgets a "Remember me" sign-in of this browser.
 pub(crate) fn end_session(cookies: &CookieJar<'_>) {
     cookies.remove(cookie(SESSION_COOKIE, String::new()));
+    cookies.remove(cookie(REMEMBER_COOKIE, String::new()));
+}
+
+/// Sets the remember cookie of `user_id` with their remember token, as Laravel's
+/// `queueRecallerCookie`. It outlives the session, for [`REMEMBER_DAYS`].
+pub(crate) fn remember(cookies: &CookieJar<'_>, key: &[u8], user_id: i64, token: &str) {
+    let payload = RememberPayload {
+        uid: user_id,
+        token: token.to_string(),
+    };
+    let mut remembered = cookie(REMEMBER_COOKIE, seal(key, "remember", &payload));
+    remembered.set_max_age(rocket::time::Duration::days(REMEMBER_DAYS));
+    cookies.add(remembered);
+}
+
+/// The user id and remember token in the request's remember cookie, if it is validly signed.
+/// Whether the token is still the user's is for the database to say.
+pub(crate) fn recaller(cookies: &CookieJar<'_>, key: &[u8]) -> Option<(i64, String)> {
+    cookies
+        .get(REMEMBER_COOKIE)
+        .and_then(|c| open::<RememberPayload>(key, "remember", c.value()))
+        .map(|p| (p.uid, p.token))
 }
 
 /// The CSRF token of this browser session, created when it is first needed.
@@ -225,7 +259,7 @@ pub(crate) fn check_csrf(
 }
 
 /// Compares two byte strings without stopping at the first difference.
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+pub(crate) fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;
     }
@@ -375,13 +409,33 @@ impl<'r> FromRequest<'r> for AdminUser {
         ) else {
             return Outcome::Error((Status::InternalServerError, ()));
         };
-        let Some(sid) = session_id(request.cookies(), &registry.secret) else {
+        let cookies = request.cookies();
+        let sid = session_id(cookies, &registry.secret);
+        let remembered = recaller(cookies, &registry.secret);
+        if sid.is_none() && remembered.is_none() {
             return Outcome::Error((Status::Unauthorized, ()));
-        };
+        }
         // A runtime resource registered since the last request gets its permission rows
         // before the abilities are read, as a static one gets them when the app starts.
         registry.sync_runtime_permissions(db).await;
-        let found = classify(lookup_user(db, &sid).await);
+        let mut found = match sid {
+            Some(sid) => classify(lookup_user(db, &sid).await),
+            None => Lookup::Unknown,
+        };
+        // Without a live session, a "Remember me" cookie signs the user in again with a new
+        // session, as Laravel's `user()` does with the recaller.
+        if matches!(found, Lookup::Unknown) {
+            if let Some((user_id, token)) = remembered {
+                found = match classify(recall(db, user_id, &token).await) {
+                    Lookup::Found(sid) => {
+                        start_session(cookies, &registry.secret, &sid);
+                        classify(lookup_user(db, &sid).await)
+                    }
+                    Lookup::Unknown => Lookup::Unknown,
+                    Lookup::Unavailable => Lookup::Unavailable,
+                };
+            }
+        }
         match found {
             Lookup::Unknown => Outcome::Error((Status::Unauthorized, ())),
             // A database outage is not a sign-out, so it must not reach the 401 catcher,
@@ -449,6 +503,20 @@ async fn lookup_user(
     // A failed read of the roles is an outage, not a sign-out, so it answers 500.
     let abilities = authz::load(db, user.id).await?;
     Ok(Some((user, abilities)))
+}
+
+/// Starts a new session for `user_id` when `token` is their remember token and the user is
+/// enabled, and returns its id. The error is a failed query, which is an outage.
+async fn recall(
+    db: &Database,
+    user_id: i64,
+    token: &str,
+) -> Result<Option<String>, orbit_orm::Error> {
+    let user = users::find_by_remember_token(db, user_id, token).await?;
+    let Some(user) = user.filter(|user| user.disabled_at.is_none()) else {
+        return Ok(None);
+    };
+    sessions::create(db, user.id).await.map(Some)
 }
 
 /// Answers a request that failed the CSRF check: the form expired or its token did not match.

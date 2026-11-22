@@ -4,6 +4,21 @@ All notable changes to Ignite are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- "Remember me" on the sign-in page, as Laravel's: a checkbox, unticked by default. Ticked, the
+  user also gets the `ignite_remember` cookie (signed, HttpOnly, 400 days, Laravel's remember
+  duration of 576000 minutes) with their id and remember token. When the session has ended,
+  the cookie signs the user in again with a new session. Unticked, the sign-in is unchanged.
+- A new nullable `users.remember_token` column (migration
+  `20261117000000_add_user_remember_token`), as Laravel's `rememberToken()`. Existing users
+  keep NULL until they sign in with the box ticked.
+- Signing out, signing out everywhere and a password change (the profile, the reset link and
+  `ignite user password`) set a new remember token, so every remember cookie issued before
+  stops working, as Laravel's `cycleRememberToken`. A disabled user is not signed in by it.
+
 ## [0.6.2] - 2026-11-22
 
 ### Added

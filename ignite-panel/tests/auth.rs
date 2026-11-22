@@ -401,3 +401,309 @@ fn an_unknown_theme_is_refused() {
         .dispatch();
     assert_eq!(response.status(), Status::BadRequest);
 }
+
+// ---------------------------------------------------------------------------------------------
+// "Remember me", as Laravel's: a recaller cookie with the user's `remember_token`, which signs
+// the user in again when the session has ended, and a new token on sign-out and on a password
+// change.
+// ---------------------------------------------------------------------------------------------
+
+const REMEMBER: &str = "ignite_remember";
+
+/// Signs the test user in with the "Remember me" box ticked.
+fn remembered() -> rocket::local::blocking::Client {
+    let client = client(None);
+    client.get("/admin/login").dispatch();
+    let body = with_token(
+        &client,
+        &format!("email={EMAIL}&password={PASSWORD}&remember=on"),
+    );
+    let status = client
+        .post("/admin/login")
+        .header(ContentType::Form)
+        .body(body)
+        .dispatch()
+        .status();
+    assert_eq!(status, Status::SeeOther, "remembered sign-in failed");
+    client
+}
+
+fn remember_token() -> Option<String> {
+    let conn = test_db();
+    conn.run(raw::fetch_scalar::<Option<String>>(
+        &conn.db,
+        "SELECT remember_token FROM users WHERE email = ?",
+        &[EMAIL.into()],
+    ))
+    .expect("read the remember token")
+}
+
+/// Ends every session row, as if the normal lifetime had passed.
+fn expire_sessions() {
+    test_db().exec("UPDATE sessions SET expires_at = '2000-01-01 00:00:00'");
+}
+
+/// A fresh browser with a copy of `client`'s remember cookie and nothing else.
+fn with_copied_remember_cookie(
+    client: &rocket::local::blocking::Client,
+) -> rocket::local::blocking::Client {
+    let copied = client
+        .cookies()
+        .get(REMEMBER)
+        .expect("remember cookie")
+        .value()
+        .to_string();
+    let other = common::client(None);
+    other.cookies().add(Cookie::new(REMEMBER, copied));
+    other
+}
+
+#[test]
+fn the_login_page_has_an_unticked_remember_me_box() {
+    let _guard = reset();
+    let body = client(None)
+        .get("/admin/login")
+        .dispatch()
+        .into_string()
+        .unwrap();
+    assert!(body.contains(r#"name="remember""#));
+    assert!(body.contains("Remember me"));
+    assert!(
+        !body.contains(r#"value="on" checked"#),
+        "the box starts unticked"
+    );
+}
+
+#[test]
+fn a_failed_attempt_keeps_the_remember_me_box_ticked() {
+    let _guard = reset();
+    let client = client(None);
+    client.get("/admin/login").dispatch();
+    let response = client
+        .post("/admin/login")
+        .header(ContentType::Form)
+        .body(with_token(
+            &client,
+            &format!("email={EMAIL}&password=wrong-password&remember=on"),
+        ))
+        .dispatch();
+    assert_eq!(response.status(), Status::UnprocessableEntity);
+    assert!(response
+        .into_string()
+        .unwrap()
+        .contains(r#"name="remember" value="on" checked"#));
+    assert!(client.cookies().get(REMEMBER).is_none());
+    assert_eq!(remember_token(), None, "no token for a failed attempt");
+}
+
+#[test]
+fn an_unticked_sign_in_sets_no_remember_cookie_and_ends_with_the_session() {
+    let _guard = reset();
+    let client = signed_in(None);
+    assert!(client.cookies().get(REMEMBER).is_none());
+    assert_eq!(remember_token(), None);
+
+    expire_sessions();
+    let response = client.get("/admin/widgets").dispatch();
+    assert_eq!(response.status(), Status::SeeOther);
+    assert_eq!(response.headers().get_one("Location"), Some("/admin/login"));
+}
+
+#[test]
+fn a_ticked_sign_in_sets_a_long_lived_remember_cookie() {
+    let _guard = reset();
+    let client = client(None);
+    client.get("/admin/login").dispatch();
+    let response = client
+        .post("/admin/login")
+        .header(ContentType::Form)
+        .body(with_token(
+            &client,
+            &format!("email={EMAIL}&password={PASSWORD}&remember=on"),
+        ))
+        .dispatch();
+    assert_eq!(response.status(), Status::SeeOther);
+    let set_cookie: Vec<&str> = response.headers().get("Set-Cookie").collect();
+    let remember = set_cookie
+        .iter()
+        .find(|c| c.starts_with("ignite_remember="))
+        .expect("the remember cookie is set");
+    // 400 days, Laravel's remember duration of 576000 minutes.
+    assert!(remember.contains("Max-Age=34560000"), "{remember}");
+    assert!(remember.contains("HttpOnly"), "{remember}");
+    let session = set_cookie
+        .iter()
+        .find(|c| c.starts_with("ignite_session="))
+        .expect("the session cookie is set");
+    assert!(
+        !session.contains("Max-Age"),
+        "the session cookie is unchanged: {session}"
+    );
+    let token = remember_token().expect("the user has a remember token");
+    assert_eq!(token.len(), 60);
+}
+
+#[test]
+fn a_ticked_sign_in_keeps_the_user_signed_in_past_the_session_lifetime() {
+    let _guard = reset();
+    let client = remembered();
+    let first_session = session_value(&client);
+
+    expire_sessions();
+    let response = client.get("/admin/widgets").dispatch();
+    assert_eq!(response.status(), Status::Ok);
+    // The remember cookie started a new session, with the normal lifetime.
+    assert_ne!(session_value(&client), first_session);
+    let conn = test_db();
+    assert_eq!(
+        conn.count(
+            "SELECT COUNT(*) FROM sessions WHERE expires_at > '2001-01-01 00:00:00'",
+            &[]
+        ),
+        1
+    );
+    assert_eq!(client.get("/admin").dispatch().status(), Status::Ok);
+}
+
+#[test]
+fn a_second_remembered_browser_shares_the_token() {
+    let _guard = reset();
+    let laptop = remembered();
+    let token = remember_token();
+    let phone = remembered();
+    assert_eq!(remember_token(), token, "a new sign-in keeps the token");
+
+    expire_sessions();
+    assert_eq!(laptop.get("/admin/widgets").dispatch().status(), Status::Ok);
+    assert_eq!(phone.get("/admin/widgets").dispatch().status(), Status::Ok);
+}
+
+#[test]
+fn a_forged_remember_cookie_is_rejected() {
+    let _guard = reset();
+    let client = client(None);
+    client.cookies().add(Cookie::new(
+        REMEMBER,
+        "eyJ1aWQiOjEsInRva2VuIjoieCJ9.bm90LWEtdGFn",
+    ));
+    assert_eq!(
+        client.get("/admin/widgets").dispatch().status(),
+        Status::SeeOther
+    );
+}
+
+#[test]
+fn logout_rotates_the_remember_token_and_forgets_the_cookie() {
+    let _guard = reset();
+    let client = remembered();
+    let copy = with_copied_remember_cookie(&client);
+    let before = remember_token();
+
+    let response = client
+        .post("/admin/logout")
+        .header(ContentType::Form)
+        .body(with_token(&client, ""))
+        .dispatch();
+    assert_eq!(response.status(), Status::SeeOther);
+    assert!(client.cookies().get(REMEMBER).is_none());
+    assert_ne!(remember_token(), before, "a new token");
+    assert!(remember_token().is_some());
+
+    // The copied cookie holds the old token, so it no longer signs anyone in.
+    assert_eq!(
+        copy.get("/admin/widgets").dispatch().status(),
+        Status::SeeOther
+    );
+}
+
+#[test]
+fn logout_after_the_session_ended_still_rotates_the_token() {
+    let _guard = reset();
+    let client = remembered();
+    let copy = with_copied_remember_cookie(&client);
+    let before = remember_token();
+
+    test_db().exec("DELETE FROM sessions");
+    let response = client
+        .post("/admin/logout")
+        .header(ContentType::Form)
+        .body(with_token(&client, ""))
+        .dispatch();
+    assert_eq!(response.status(), Status::SeeOther);
+    assert_ne!(remember_token(), before);
+    assert_eq!(
+        copy.get("/admin/widgets").dispatch().status(),
+        Status::SeeOther
+    );
+}
+
+#[test]
+fn sign_out_everywhere_ends_every_remembered_sign_in() {
+    let _guard = reset();
+    let phone = remembered();
+    let laptop = remembered();
+    let before = remember_token();
+
+    let response = phone
+        .post("/admin/logout-everywhere")
+        .header(ContentType::Form)
+        .body(with_token(&phone, ""))
+        .dispatch();
+    assert_eq!(response.status(), Status::SeeOther);
+    assert_ne!(remember_token(), before);
+    assert!(phone.cookies().get(REMEMBER).is_none());
+
+    // The laptop still has its remember cookie, with the old token.
+    assert!(laptop.cookies().get(REMEMBER).is_some());
+    assert_eq!(
+        laptop.get("/admin/widgets").dispatch().status(),
+        Status::SeeOther
+    );
+}
+
+#[test]
+fn a_password_change_rotates_the_remember_token() {
+    let _guard = reset();
+    let client = remembered();
+    let copy = with_copied_remember_cookie(&client);
+    let before = remember_token();
+
+    let body = format!(
+        "current_password={PASSWORD}&new_password=a-new-password&confirm_password=a-new-password"
+    );
+    let response = client
+        .post("/admin/profile/password")
+        .header(ContentType::Form)
+        .body(with_token(&client, &body))
+        .dispatch();
+    assert_eq!(response.status(), Status::SeeOther);
+    assert_ne!(remember_token(), before, "a new token");
+
+    // The current session goes on, but no remember cookie from before the change signs in.
+    assert_eq!(client.get("/admin/widgets").dispatch().status(), Status::Ok);
+    assert_eq!(
+        copy.get("/admin/widgets").dispatch().status(),
+        Status::SeeOther
+    );
+    expire_sessions();
+    assert_eq!(
+        client.get("/admin/widgets").dispatch().status(),
+        Status::SeeOther
+    );
+}
+
+#[test]
+fn a_disabled_user_is_not_signed_in_by_the_remember_cookie() {
+    let _guard = reset();
+    let client = remembered();
+    let conn = test_db();
+    conn.exec_with(
+        "UPDATE users SET disabled_at = '2026-01-01 00:00:00' WHERE email = ?",
+        &[EMAIL.into()],
+    );
+    expire_sessions();
+    assert_eq!(
+        client.get("/admin/widgets").dispatch().status(),
+        Status::SeeOther
+    );
+}

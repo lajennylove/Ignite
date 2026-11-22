@@ -31,8 +31,8 @@ use crate::ignite::Registry;
 use crate::profile;
 use crate::proxy::{self, TrustedProxies};
 use crate::session::{
-    check_csrf, csrf_token, end_session, session_id, set_flash, start_session, take_flash,
-    AdminUser,
+    check_csrf, csrf_token, end_session, recaller, remember, session_id, set_flash, start_session,
+    take_flash, AdminUser,
 };
 use crate::sessions;
 use crate::throttle;
@@ -212,7 +212,7 @@ fn login_form(cookies: &CookieJar<'_>, registry: &State<Registry>) -> PropelView
     let token = csrf_token(cookies, &registry.secret);
     render_page(
         "ignite::login",
-        &login_page(registry, "", None, token),
+        &login_page(registry, "", false, None, token),
         compiled::login::render,
     )
 }
@@ -220,6 +220,7 @@ fn login_form(cookies: &CookieJar<'_>, registry: &State<Registry>) -> PropelView
 fn login_page(
     registry: &Registry,
     email: &str,
+    remember: bool,
     error: Option<&str>,
     csrf_token: String,
 ) -> LoginPage {
@@ -247,6 +248,7 @@ fn login_page(
         action: format!("{}/login", registry.mount),
         forgot_url: format!("{}/password/forgot", registry.mount),
         email: email.to_string(),
+        remember,
         has_error: error.is_some(),
         error: error.unwrap_or_default().to_string(),
     }
@@ -264,6 +266,8 @@ async fn login(
     check_csrf(cookies, &registry.secret, form.get("_token"))?;
     let email = form.get("email").unwrap_or("").trim().to_string();
     let password = form.get("password").unwrap_or("").to_string();
+    // The "Remember me" box, read as Laravel's `$request->boolean('remember')`.
+    let remember_me = matches!(form.get("remember"), Some("1" | "true" | "on" | "yes"));
     let throttle_key = throttle::key(&email, client_ip.0);
 
     // Refuse before checking the password while the key is at its limit.
@@ -277,6 +281,7 @@ async fn login(
             &login_page(
                 registry,
                 &email,
+                remember_me,
                 Some(&message),
                 csrf_token(cookies, &registry.secret),
             ),
@@ -306,11 +311,20 @@ async fn login(
             throttle::clear(database, &throttle_key)
                 .await
                 .map_err(db_status)?;
-            Some(
-                sessions::create(database, user.id)
-                    .await
-                    .map_err(db_status)?,
-            )
+            let session_id = sessions::create(database, user.id)
+                .await
+                .map_err(db_status)?;
+            // Ticked, the user also gets the remember cookie, as Laravel's `login($user, true)`.
+            let token = if remember_me {
+                Some(
+                    users::ensure_remember_token(database, user.id)
+                        .await
+                        .map_err(db_status)?,
+                )
+            } else {
+                None
+            };
+            Some((session_id, user.id, token))
         }
         None => {
             throttle::record_failure(database, &throttle_key)
@@ -321,8 +335,11 @@ async fn login(
     };
 
     match signed_in {
-        Some(session_id) => {
+        Some((session_id, user_id, token)) => {
             start_session(cookies, &registry.secret, &session_id);
+            if let Some(token) = token {
+                remember(cookies, &registry.secret, user_id, &token);
+            }
             Ok(Reply::Redirect(Box::new(Redirect::to(
                 registry.mount.clone(),
             ))))
@@ -334,6 +351,7 @@ async fn login(
                 &login_page(
                     registry,
                     &email,
+                    remember_me,
                     Some("The email or password is incorrect."),
                     csrf_token(cookies, &registry.secret),
                 ),
@@ -390,9 +408,31 @@ async fn logout(
 ) -> Result<Redirect, Status> {
     let form = read_form(body).await?;
     check_csrf(cookies, &registry.secret, form.get("_token"))?;
-    if let Some(session_id) = session_id(cookies, &registry.secret) {
+    let database = db.inner();
+    let session_id = session_id(cookies, &registry.secret);
+    // The signed-out user: the one of the session, or of a valid remember cookie when the
+    // session has ended. Their new remember token ends every "Remember me" sign-in, as
+    // Laravel's `logout` does with `cycleRememberToken`.
+    let mut user_id = None;
+    if let Some(session_id) = &session_id {
+        user_id = sessions::user_for(database, session_id)
+            .await
+            .ok()
+            .flatten();
+    }
+    if user_id.is_none() {
+        if let Some((id, token)) = recaller(cookies, &registry.secret) {
+            if let Ok(Some(user)) = users::find_by_remember_token(database, id, &token).await {
+                user_id = Some(user.id);
+            }
+        }
+    }
+    if let Some(user_id) = user_id {
+        let _ = users::cycle_remember_token(database, user_id).await;
+    }
+    if let Some(session_id) = session_id {
         // The row goes first: a copied cookie stops working even if the cookie is still in the jar.
-        let _ = sessions::delete(db.inner(), &session_id).await;
+        let _ = sessions::delete(database, &session_id).await;
     }
     end_session(cookies);
     Ok(Redirect::to(format!("{}/login", registry.mount)))
@@ -410,6 +450,10 @@ async fn logout_everywhere(
     let form = read_form(body).await?;
     check_csrf(cookies, &registry.secret, form.get("_token"))?;
     sessions::delete_for_user(db.inner(), user.user_id())
+        .await
+        .map_err(db_status)?;
+    // A new remember token, so a remembered browser does not sign in again (see `logout`).
+    users::cycle_remember_token(db.inner(), user.user_id())
         .await
         .map_err(db_status)?;
     end_session(cookies);

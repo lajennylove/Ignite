@@ -353,6 +353,8 @@ pub(crate) struct LoginPage {
     pub(crate) action: String,
     pub(crate) forgot_url: String,
     pub(crate) email: String,
+    /// Whether the "Remember me" box is ticked: unticked on a new page, kept on a failed attempt.
+    pub(crate) remember: bool,
     pub(crate) has_error: bool,
     pub(crate) error: String,
 }
