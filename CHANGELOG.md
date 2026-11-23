@@ -4,7 +4,7 @@ All notable changes to Ignite are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## [0.6.3] - 2026-11-23
 
 ### Added
 
@@ -18,6 +18,15 @@ All notable changes to Ignite are listed here. The format follows
 - Signing out, signing out everywhere and a password change (the profile, the reset link and
   `ignite user password`) set a new remember token, so every remember cookie issued before
   stops working, as Laravel's `cycleRememberToken`. A disabled user is not signed in by it.
+- Run `ignite migrate` (or `ignite_panel::migrate`) after upgrading, to add
+  `users.remember_token`; `ignite migrate:rollback` drops it.
+
+### Changed
+
+- The sign-in page sends a user who is already signed in, by the session or by the remember
+  cookie, to the panel's dashboard, as Laravel's `guest` middleware
+  (`RedirectIfAuthenticated`). A signed-out user sees the page as before, and a sign-in attempt
+  (the `POST`) is unchanged.
 
 ## [0.6.2] - 2026-11-22
 
