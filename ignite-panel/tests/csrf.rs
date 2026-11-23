@@ -138,6 +138,9 @@ fn every_form_carries_the_token() {
         "the delete and sign-out forms have the token"
     );
 
-    let login = client.get("/admin/login").dispatch().into_string().unwrap();
+    // The login page is for guests (a signed-in user goes to the dashboard), so a guest reads it.
+    let guest = common::client(None);
+    let login = guest.get("/admin/login").dispatch().into_string().unwrap();
+    let field = format!(r#"name="_token" value="{}""#, csrf_token(&guest));
     assert!(login.contains(&field), "the login form has the token");
 }

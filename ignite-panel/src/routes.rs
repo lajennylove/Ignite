@@ -207,14 +207,36 @@ fn build_asset(path: PathBuf) -> Option<(ContentType, Vec<u8>)> {
     Some((content_type, bytes))
 }
 
+/// The sign-in page. A user who is already signed in, by the session or by the "Remember me"
+/// cookie, goes to the dashboard instead, as Laravel's `guest` middleware
+/// (`RedirectIfAuthenticated`) sends them to the home route.
 #[get("/login")]
-fn login_form(cookies: &CookieJar<'_>, registry: &State<Registry>) -> PropelView {
+fn login_form(
+    user: Outcome<AdminUser, ()>,
+    cookies: &CookieJar<'_>,
+    registry: &State<Registry>,
+) -> Result<Reply, Status> {
+    match user {
+        Outcome::Success(_) => {
+            return Ok(Reply::Redirect(Box::new(Redirect::to(
+                registry.mount.clone(),
+            ))))
+        }
+        // A database outage is not a sign-out, so it answers 500 as the guard does elsewhere.
+        Outcome::Error((Status::InternalServerError, ())) => {
+            return Err(Status::InternalServerError)
+        }
+        Outcome::Error(_) | Outcome::Forward(_) => {}
+    }
     let token = csrf_token(cookies, &registry.secret);
-    render_page(
-        "ignite::login",
-        &login_page(registry, "", false, None, token),
-        compiled::login::render,
-    )
+    Ok(Reply::Page(
+        Status::Ok,
+        render_page(
+            "ignite::login",
+            &login_page(registry, "", false, None, token),
+            compiled::login::render,
+        ),
+    ))
 }
 
 fn login_page(

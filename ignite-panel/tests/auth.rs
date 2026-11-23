@@ -707,3 +707,84 @@ fn a_disabled_user_is_not_signed_in_by_the_remember_cookie() {
         Status::SeeOther
     );
 }
+
+// ---------------------------------------------------------------------------------------------
+// The sign-in page is for guests, as Laravel's `guest` middleware (`RedirectIfAuthenticated`):
+// a signed-in user who opens it goes to the dashboard.
+// ---------------------------------------------------------------------------------------------
+
+#[test]
+fn a_signed_in_user_is_sent_from_the_login_page_to_the_dashboard() {
+    let _guard = reset();
+    let client = signed_in(None);
+    let response = client.get("/admin/login").dispatch();
+
+    assert_eq!(response.status(), Status::SeeOther);
+    assert_eq!(response.headers().get_one("Location"), Some("/admin"));
+}
+
+#[test]
+fn the_login_page_redirect_follows_the_mount_path() {
+    let _guard = reset();
+    let client = signed_in(Some("/panel"));
+    let response = client.get("/panel/login").dispatch();
+
+    assert_eq!(response.status(), Status::SeeOther);
+    assert_eq!(response.headers().get_one("Location"), Some("/panel"));
+}
+
+#[test]
+fn a_signed_out_user_sees_the_login_page() {
+    let _guard = reset();
+    let client = signed_in(None);
+    client
+        .post("/admin/logout")
+        .header(ContentType::Form)
+        .body(with_token(&client, ""))
+        .dispatch();
+    let response = client.get("/admin/login").dispatch();
+
+    assert_eq!(response.status(), Status::Ok);
+    assert!(response
+        .into_string()
+        .unwrap()
+        .contains(r#"type="password""#));
+}
+
+#[test]
+fn a_user_whose_session_ended_without_remember_me_sees_the_login_page() {
+    let _guard = reset();
+    let client = signed_in(None);
+    expire_sessions();
+    let response = client.get("/admin/login").dispatch();
+
+    assert_eq!(response.status(), Status::Ok);
+    assert!(response
+        .into_string()
+        .unwrap()
+        .contains(r#"type="password""#));
+}
+
+#[test]
+fn a_user_signed_in_by_the_remember_cookie_is_sent_to_the_dashboard() {
+    let _guard = reset();
+    let client = remembered();
+    let first_session = session_value(&client);
+    expire_sessions();
+    let response = client.get("/admin/login").dispatch();
+
+    assert_eq!(response.status(), Status::SeeOther);
+    assert_eq!(response.headers().get_one("Location"), Some("/admin"));
+    // The remember cookie started a new session, as on any other page.
+    assert_ne!(session_value(&client), first_session);
+    assert_eq!(client.get("/admin").dispatch().status(), Status::Ok);
+}
+
+#[test]
+fn a_signed_in_user_can_still_post_a_sign_in_attempt() {
+    let _guard = reset();
+    let client = signed_in(None);
+    // The POST is not behind the guest check: a fresh attempt signs in again.
+    assert_eq!(login(&client, EMAIL, PASSWORD), Status::SeeOther);
+    assert_eq!(client.get("/admin").dispatch().status(), Status::Ok);
+}
