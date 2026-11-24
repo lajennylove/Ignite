@@ -401,6 +401,10 @@ pub struct RuntimeResource {
     /// The resource's place in the navigation, as Filament's `$navigationSort`: lower first.
     /// See [`IgniteResource::NAVIGATION_SORT`](crate::IgniteResource::NAVIGATION_SORT).
     pub navigation_sort: Option<i32>,
+    /// The navigation entry the resource is listed under, as Filament's
+    /// `$navigationParentItem`: the parent's label or slug. See
+    /// [`IgniteResource::NAVIGATION_PARENT_ITEM`](crate::IgniteResource::NAVIGATION_PARENT_ITEM).
+    pub navigation_parent_item: Option<String>,
     /// The name of the navigation entry's icon, such as `post`, as Filament's
     /// `$navigationIcon`. See [`IgniteResource::NAVIGATION_ICON`](crate::IgniteResource::NAVIGATION_ICON).
     pub navigation_icon: Option<String>,
@@ -421,6 +425,7 @@ impl fmt::Debug for RuntimeResource {
             .field("navigation_label", &self.navigation_label)
             .field("navigation_group", &self.navigation_group)
             .field("navigation_sort", &self.navigation_sort)
+            .field("navigation_parent_item", &self.navigation_parent_item)
             .field("navigation_icon", &self.navigation_icon)
             .field("conditions", &self.conditions)
             .finish_non_exhaustive()
@@ -446,6 +451,7 @@ impl RuntimeResource {
             navigation_label: None,
             navigation_group: None,
             navigation_sort: None,
+            navigation_parent_item: None,
             navigation_icon: None,
             conditions: FieldConditions::new(),
         }
@@ -484,6 +490,14 @@ impl RuntimeResource {
     /// Sets the resource's place in the navigation, as Filament's `navigationSort`: lower first.
     pub fn navigation_sort(mut self, sort: i32) -> Self {
         self.navigation_sort = Some(sort);
+        self
+    }
+
+    /// Lists the resource under the navigation entry `parent` (its label or slug), as
+    /// Filament's `navigationParentItem`. See
+    /// [`IgniteResource::NAVIGATION_PARENT_ITEM`](crate::IgniteResource::NAVIGATION_PARENT_ITEM).
+    pub fn navigation_parent_item(mut self, parent: impl Into<String>) -> Self {
+        self.navigation_parent_item = Some(parent.into());
         self
     }
 
@@ -716,6 +730,11 @@ impl RegisteredResource {
     /// The resource's place in the navigation, if set.
     pub fn navigation_sort(&self) -> Option<i32> {
         self.resource.navigation_sort
+    }
+
+    /// The navigation entry the resource is listed under, if any.
+    pub fn navigation_parent_item(&self) -> Option<&str> {
+        self.resource.navigation_parent_item.as_deref()
     }
 
     /// The name of the navigation entry's icon, if set.

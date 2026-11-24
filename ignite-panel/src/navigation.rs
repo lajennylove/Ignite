@@ -1,14 +1,117 @@
 //! The order of the sidebar, as Filament's navigation builds it: the entries without a group
 //! first, then one section per navigation group under its heading. The groups come in the
 //! order the panel declares them ([`Ignite::navigation_groups`](crate::Ignite::navigation_groups)),
-//! and a group the panel does not declare comes after the declared ones, as in Filament.
+//! and a group the panel does not declare comes after the declared ones, as in Filament. An
+//! entry that names a parent item is listed under that parent, as Filament's
+//! `$navigationParentItem`.
 
-/// An entry of the sidebar with what places it: its label, its group and its sort.
+/// A navigation group as the panel declares it, as Filament's `NavigationGroup`: its label,
+/// and whether its entries can be collapsed under its heading. Pass it to
+/// [`Ignite::navigation_groups`](crate::Ignite::navigation_groups), beside or instead of a
+/// plain label.
+///
+/// ```ignore
+/// Ignite::new().navigation_groups([
+///     NavigationGroup::make("Content"),
+///     NavigationGroup::make("Settings").collapsed(true),
+/// ])
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NavigationGroup {
+    label: String,
+    collapsible: Option<bool>,
+    collapsed: bool,
+}
+
+impl NavigationGroup {
+    /// The group `label`: the name resources give as their navigation group, shown as its
+    /// heading.
+    pub fn make(label: impl Into<String>) -> Self {
+        NavigationGroup {
+            label: label.into(),
+            collapsible: None,
+            collapsed: false,
+        }
+    }
+
+    /// Whether the group's heading collapses and expands its entries, as Filament's
+    /// `collapsible()`. A group that does not say follows the panel's
+    /// [`collapsible_navigation_groups`](crate::Ignite::collapsible_navigation_groups).
+    pub fn collapsible(mut self, collapsible: bool) -> Self {
+        self.collapsible = Some(collapsible);
+        self
+    }
+
+    /// Whether the group starts collapsed, as Filament's `collapsed()`, until the user expands
+    /// it. As in Filament, it also sets [`collapsible`](Self::collapsible) to the same value.
+    pub fn collapsed(mut self, collapsed: bool) -> Self {
+        self.collapsed = collapsed;
+        self.collapsible = Some(collapsed);
+        self
+    }
+
+    /// The group's label.
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+
+    /// Whether the group collapses, when the panel's default is `default`.
+    pub(crate) fn is_collapsible(&self, default: bool) -> bool {
+        self.collapsible.unwrap_or(default)
+    }
+
+    /// Whether the group starts collapsed, when the panel's default is `default`.
+    pub(crate) fn is_collapsed(&self, default: bool) -> bool {
+        self.collapsed && self.is_collapsible(default)
+    }
+}
+
+impl From<&str> for NavigationGroup {
+    fn from(label: &str) -> Self {
+        NavigationGroup::make(label)
+    }
+}
+
+impl From<String> for NavigationGroup {
+    fn from(label: String) -> Self {
+        NavigationGroup::make(label)
+    }
+}
+
+impl From<&String> for NavigationGroup {
+    fn from(label: &String) -> Self {
+        NavigationGroup::make(label.as_str())
+    }
+}
+
+impl From<std::borrow::Cow<'_, str>> for NavigationGroup {
+    fn from(label: std::borrow::Cow<'_, str>) -> Self {
+        NavigationGroup::make(label.into_owned())
+    }
+}
+
+impl From<Box<str>> for NavigationGroup {
+    fn from(label: Box<str>) -> Self {
+        NavigationGroup::make(String::from(label))
+    }
+}
+
+/// An entry of the sidebar with what places it: its key (the slug), its label, its group, its
+/// sort and the parent it is listed under.
 pub(crate) struct Entry<T> {
     pub(crate) item: T,
+    pub(crate) key: String,
     pub(crate) label: String,
     pub(crate) group: Option<String>,
     pub(crate) sort: Option<i32>,
+    pub(crate) parent: Option<String>,
+}
+
+/// An entry of a section, with the entries listed under it, in order.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct Node<T> {
+    pub(crate) item: T,
+    pub(crate) children: Vec<T>,
 }
 
 /// A section of the sidebar: the entries of one group under its heading, or the entries
@@ -16,7 +119,7 @@ pub(crate) struct Entry<T> {
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct Section<T> {
     pub(crate) heading: Option<String>,
-    pub(crate) items: Vec<T>,
+    pub(crate) items: Vec<Node<T>>,
 }
 
 /// Places `entries` in sections. The first section is always the one without a heading, even
@@ -27,6 +130,9 @@ pub(crate) struct Section<T> {
 /// - The groups come in the order of `declared`. Groups not declared come after them, in the
 ///   order their first entry comes in when every entry is sorted by its sort.
 /// - Inside a group, the entries are sorted by their sort, then by label.
+/// - An entry with a parent is listed under the entry of its section whose key or label is the
+///   parent's name, in the order above. As in Filament, only an entry without a parent can be
+///   a parent, and an entry whose parent is not in its section is left out.
 pub(crate) fn arrange<T>(mut entries: Vec<Entry<T>>, declared: &[String]) -> Vec<Section<T>> {
     // A stable sort: entries with the same sort keep the order they were added in.
     entries.sort_by_key(|entry| entry.sort);
@@ -35,7 +141,7 @@ pub(crate) fn arrange<T>(mut entries: Vec<Entry<T>>, declared: &[String]) -> Vec
     let mut groups: Vec<(String, Vec<Entry<T>>)> = Vec::new();
     for entry in entries {
         match entry.group.clone().filter(|group| !group.trim().is_empty()) {
-            None => ungrouped.push(entry.item),
+            None => ungrouped.push(entry),
             Some(group) => match groups.iter_mut().find(|(name, _)| *name == group) {
                 Some((_, items)) => items.push(entry),
                 None => groups.push((group, vec![entry])),
@@ -53,7 +159,7 @@ pub(crate) fn arrange<T>(mut entries: Vec<Entry<T>>, declared: &[String]) -> Vec
 
     let mut sections = vec![Section {
         heading: None,
-        items: ungrouped,
+        items: nest(ungrouped),
     }];
     for (name, mut items) in groups {
         items.sort_by(|a, b| {
@@ -66,10 +172,43 @@ pub(crate) fn arrange<T>(mut entries: Vec<Entry<T>>, declared: &[String]) -> Vec
         });
         sections.push(Section {
             heading: Some(name),
-            items: items.into_iter().map(|entry| entry.item).collect(),
+            items: nest(items),
         });
     }
     sections
+}
+
+/// Lists each entry of a section that names a parent under that parent, keeping the order of
+/// `entries`, as Filament's navigation does. The parent is found by key first, then by label.
+fn nest<T>(entries: Vec<Entry<T>>) -> Vec<Node<T>> {
+    let (children, parents): (Vec<_>, Vec<_>) = entries.into_iter().partition(|entry| {
+        entry
+            .parent
+            .as_deref()
+            .is_some_and(|parent| !parent.trim().is_empty())
+    });
+    let mut nodes: Vec<(String, String, Node<T>)> = parents
+        .into_iter()
+        .map(|entry| {
+            let node = Node {
+                item: entry.item,
+                children: Vec::new(),
+            };
+            (entry.key, entry.label, node)
+        })
+        .collect();
+    for child in children {
+        let parent = child.parent.unwrap_or_default();
+        let found = nodes
+            .iter()
+            .position(|(key, _, _)| *key == parent)
+            .or_else(|| nodes.iter().position(|(_, label, _)| *label == parent));
+        // A child whose parent is not in the section is left out, as in Filament.
+        if let Some(index) = found {
+            nodes[index].2.children.push(child.item);
+        }
+    }
+    nodes.into_iter().map(|(_, _, node)| node).collect()
 }
 
 #[cfg(test)]
@@ -79,10 +218,29 @@ mod tests {
     fn entry(label: &'static str, group: Option<&str>, sort: Option<i32>) -> Entry<&'static str> {
         Entry {
             item: label,
+            key: label.to_lowercase(),
             label: label.to_string(),
             group: group.map(str::to_string),
             sort,
+            parent: None,
         }
+    }
+
+    fn child(
+        label: &'static str,
+        group: Option<&str>,
+        sort: Option<i32>,
+        parent: &str,
+    ) -> Entry<&'static str> {
+        Entry {
+            parent: Some(parent.to_string()),
+            ..entry(label, group, sort)
+        }
+    }
+
+    /// The entries of `section` without their children.
+    fn items(section: &Section<&'static str>) -> Vec<&'static str> {
+        section.items.iter().map(|node| node.item).collect()
     }
 
     fn declared(groups: &[&str]) -> Vec<String> {
@@ -99,13 +257,9 @@ mod tests {
             ],
             &[],
         );
-        assert_eq!(
-            sections,
-            [Section {
-                heading: None,
-                items: vec!["Widgets", "Apples", "Users"],
-            }]
-        );
+        assert_eq!(sections.len(), 1);
+        assert_eq!(sections[0].heading, None);
+        assert_eq!(items(&sections[0]), ["Widgets", "Apples", "Users"]);
     }
 
     #[test]
@@ -124,7 +278,7 @@ mod tests {
             headings,
             [None, Some("Content"), Some("Shop"), Some("System")]
         );
-        assert_eq!(sections[0].items, ["Widgets"]);
+        assert_eq!(items(&sections[0]), ["Widgets"]);
     }
 
     #[test]
@@ -157,7 +311,7 @@ mod tests {
             &[],
         );
         assert_eq!(
-            sections[1].items,
+            items(&sections[1]),
             ["Posts", "Pages", "comments", "Media", "Tags"]
         );
     }
@@ -173,14 +327,14 @@ mod tests {
             ],
             &[],
         );
-        assert_eq!(sections[0].items, ["Zebras", "Apes", "Bears", "Lions"]);
+        assert_eq!(items(&sections[0]), ["Zebras", "Apes", "Bears", "Lions"]);
     }
 
     #[test]
     fn a_blank_group_is_no_group() {
         let sections = arrange(vec![entry("Widgets", Some(" "), None)], &[]);
         assert_eq!(sections.len(), 1);
-        assert_eq!(sections[0].items, ["Widgets"]);
+        assert_eq!(items(&sections[0]), ["Widgets"]);
     }
 
     #[test]
@@ -189,5 +343,56 @@ mod tests {
         assert_eq!(sections.len(), 2);
         assert!(sections[0].items.is_empty());
         assert_eq!(sections[0].heading, None);
+    }
+
+    #[test]
+    fn a_child_is_listed_under_its_parent_by_label_or_key_in_sort_order() {
+        let sections = arrange(
+            vec![
+                entry("Posts", Some("Content"), Some(1)),
+                child("Tags", Some("Content"), Some(3), "Posts"),
+                child("Categories", Some("Content"), Some(2), "posts"),
+                entry("Pages", Some("Content"), Some(2)),
+            ],
+            &[],
+        );
+        assert_eq!(items(&sections[1]), ["Posts", "Pages"]);
+        assert_eq!(sections[1].items[0].children, ["Categories", "Tags"]);
+        assert!(sections[1].items[1].children.is_empty());
+    }
+
+    #[test]
+    fn a_child_whose_parent_is_not_in_its_section_is_left_out() {
+        let sections = arrange(
+            vec![
+                entry("Posts", Some("Content"), None),
+                // Another group, an unknown parent, and a parent that is a child itself.
+                child("Tags", None, None, "Posts"),
+                child("Ghosts", Some("Content"), None, "Nowhere"),
+                child("Categories", Some("Content"), None, "Posts"),
+                child("Colours", Some("Content"), None, "Categories"),
+            ],
+            &[],
+        );
+        assert!(sections[0].items.is_empty());
+        assert_eq!(items(&sections[1]), ["Posts"]);
+        assert_eq!(sections[1].items[0].children, ["Categories"]);
+    }
+
+    #[test]
+    fn a_blank_parent_is_no_parent() {
+        let sections = arrange(vec![child("Widgets", None, None, " ")], &[]);
+        assert_eq!(items(&sections[0]), ["Widgets"]);
+    }
+
+    #[test]
+    fn collapsed_makes_a_group_collapsible_as_in_filament() {
+        let group = NavigationGroup::make("Settings");
+        assert!(!group.is_collapsible(false) && group.is_collapsible(true));
+        assert!(!group.is_collapsed(true));
+        let collapsed = NavigationGroup::make("Settings").collapsed(true);
+        assert!(collapsed.is_collapsible(false) && collapsed.is_collapsed(false));
+        let fixed = NavigationGroup::make("Settings").collapsible(false);
+        assert!(!fixed.is_collapsible(true));
     }
 }

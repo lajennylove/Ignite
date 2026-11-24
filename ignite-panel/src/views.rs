@@ -75,7 +75,7 @@ use serde_json::Value;
 use crate::authz::Action;
 use crate::brand::BrandView;
 use crate::ignite::Registry;
-use crate::navigation::{arrange, Entry};
+use crate::navigation::{arrange, Entry, Node};
 use crate::session::AdminUser;
 use crate::theme::{icon_classes, icons};
 
@@ -93,12 +93,15 @@ pub(crate) struct Layout {
     pub(crate) profile_url: String,
     pub(crate) logout_everywhere_url: String,
     pub(crate) csrf_token: String,
-    /// Every entry of the sidebar, in the order shown, without the group headings. The `ignite`
-    /// theme reads `nav_sections`; `nav` stays for themes that list the entries as before.
+    /// Every entry of the sidebar, in the order shown, without the group headings, each child
+    /// entry after its parent. The `ignite` theme reads `nav_sections`; `nav` stays for themes
+    /// that list the entries as before.
     pub(crate) nav: Vec<NavGroup>,
     /// The sidebar in sections: the entries without a navigation group first, without a
     /// heading, then one section per group, under its heading.
     pub(crate) nav_sections: Vec<NavSection>,
+    /// Whether a section of the sidebar is collapsible, so the navigation needs its script.
+    pub(crate) nav_collapsible: bool,
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
     /// The CSS of the active admin theme's colour tokens, or empty when it has none. The
@@ -123,6 +126,28 @@ pub(crate) struct NavGroup {
     pub(crate) has_add: bool,
     pub(crate) add_url: String,
     pub(crate) active: bool,
+    /// The entries listed under this one (Filament's child items), in order. A child has none.
+    pub(crate) children: Vec<NavGroup>,
+    pub(crate) has_children: bool,
+    /// Whether one of the children is the current page. The entry itself is then not active.
+    pub(crate) has_active_child: bool,
+    /// Whether the children show: the entry or one of its children is the current page, as
+    /// Filament shows an item's children.
+    pub(crate) expanded: bool,
+}
+
+impl NavGroup {
+    /// The entry `item` with the entries listed under it.
+    fn with_children(node: Node<NavGroup>) -> NavGroup {
+        let has_active_child = node.children.iter().any(|child| child.active);
+        NavGroup {
+            has_children: !node.children.is_empty(),
+            expanded: !node.children.is_empty() && (node.item.active || has_active_child),
+            has_active_child,
+            children: node.children,
+            ..node.item
+        }
+    }
 }
 
 /// A section of the sidebar: a navigation group's entries under its heading, or the entries
@@ -132,6 +157,18 @@ pub(crate) struct NavSection {
     pub(crate) has_heading: bool,
     pub(crate) heading: String,
     pub(crate) items: Vec<NavGroup>,
+    /// Whether the heading collapses and expands the entries, as Filament's collapsible
+    /// navigation groups. Only a section with a heading is collapsible.
+    pub(crate) collapsible: bool,
+    /// Whether the group starts collapsed (`NavigationGroup::collapsed`) until the user
+    /// expands it. The page renders every group expanded; the navigation's script collapses
+    /// it, so without JavaScript every group shows its entries.
+    pub(crate) collapsed: bool,
+    /// Whether an entry of the section, or a child of one, is the current page. The script
+    /// keeps such a group expanded.
+    pub(crate) active: bool,
+    /// The `id` of the element that holds the entries, for the heading's `aria-controls`.
+    pub(crate) items_id: String,
 }
 
 /// The initials of a name, for the avatar: "Ada Lovelace" gives "AL".
@@ -160,33 +197,19 @@ impl Layout {
         let admin_theme = crate::theme::resolve(user.and_then(AdminUser::admin_theme_choice));
         // A resource is listed only when the user may view its records, and its "Add new"
         // link only when the user may create one, as Filament's navigation does. The entries
-        // are placed by their navigation group and sort (see `crate::navigation`).
+        // are placed by their navigation group, sort and parent item (see `crate::navigation`).
         let nav_sections: Vec<NavSection> = match user {
             Some(user) => {
-                let entries = registry
-                    .all()
-                    .into_iter()
-                    .filter(|r| user.may(r.slug(), Action::ViewAny))
-                    .map(|r| Entry {
-                        label: r.navigation_label().to_string(),
-                        group: r.navigation_group().map(str::to_string),
-                        sort: r.navigation_sort(),
-                        item: NavGroup {
-                            title: r.navigation_label().to_string(),
-                            icon: icon_classes(admin_theme.theme.as_ref(), r.navigation_icon()),
-                            icon_name: r.navigation_icon().unwrap_or_default().to_string(),
-                            url: format!("{}/{}", registry.mount, r.slug()),
-                            has_add: user.may(r.slug(), Action::Create),
-                            add_url: format!("{}/{}/new", registry.mount, r.slug()),
-                            active: section == r.slug(),
-                        },
-                    })
-                    .collect();
-                let mut sections = arrange(entries, &registry.navigation_groups);
-                // The dashboard is the first entry, before every group, as Filament's is.
-                sections[0].items.insert(
-                    0,
-                    NavGroup {
+                // The dashboard is the first entry, before every group, as Filament's is: it
+                // has no sort, and the ungrouped entries keep the order they were added in.
+                // A resource may list itself under it.
+                let dashboard = Entry {
+                    key: String::new(),
+                    label: "Dashboard".to_string(),
+                    group: None,
+                    sort: None,
+                    parent: None,
+                    item: NavGroup {
                         title: "Dashboard".to_string(),
                         icon: icon_classes(admin_theme.theme.as_ref(), Some(icons::DASHBOARD)),
                         icon_name: icons::DASHBOARD.to_string(),
@@ -194,14 +217,81 @@ impl Layout {
                         has_add: false,
                         add_url: String::new(),
                         active: section.is_empty(),
+                        children: Vec::new(),
+                        has_children: false,
+                        has_active_child: false,
+                        expanded: false,
                     },
-                );
-                sections
+                };
+                let entries = std::iter::once(dashboard)
+                    .chain(
+                        registry
+                            .all()
+                            .into_iter()
+                            .filter(|r| user.may(r.slug(), Action::ViewAny))
+                            .map(|r| Entry {
+                                key: r.slug().to_string(),
+                                label: r.navigation_label().to_string(),
+                                group: r.navigation_group().map(str::to_string),
+                                sort: r.navigation_sort(),
+                                parent: r.navigation_parent_item().map(str::to_string),
+                                item: NavGroup {
+                                    title: r.navigation_label().to_string(),
+                                    icon: icon_classes(
+                                        admin_theme.theme.as_ref(),
+                                        r.navigation_icon(),
+                                    ),
+                                    icon_name: r.navigation_icon().unwrap_or_default().to_string(),
+                                    url: format!("{}/{}", registry.mount, r.slug()),
+                                    has_add: user.may(r.slug(), Action::Create),
+                                    add_url: format!("{}/{}/new", registry.mount, r.slug()),
+                                    active: section == r.slug(),
+                                    children: Vec::new(),
+                                    has_children: false,
+                                    has_active_child: false,
+                                    expanded: false,
+                                },
+                            }),
+                    )
+                    .collect();
+                let declared: Vec<String> = registry
+                    .navigation_groups
+                    .iter()
+                    .map(|group| group.label().to_string())
+                    .collect();
+                arrange(entries, &declared)
                     .into_iter()
-                    .map(|section| NavSection {
-                        has_heading: section.heading.is_some(),
-                        heading: section.heading.unwrap_or_default(),
-                        items: section.items,
+                    .enumerate()
+                    .map(|(index, section)| {
+                        let items: Vec<NavGroup> = section
+                            .items
+                            .into_iter()
+                            .map(NavGroup::with_children)
+                            .collect();
+                        // A group the panel does not declare follows the panel's default. A
+                        // group declared twice takes the options of its last declaration.
+                        let declared = section.heading.as_deref().and_then(|heading| {
+                            registry
+                                .navigation_groups
+                                .iter()
+                                .rev()
+                                .find(|group| group.label() == heading)
+                        });
+                        let default = registry.collapsible_navigation_groups;
+                        let collapsible = section.heading.is_some()
+                            && declared.map_or(default, |group| group.is_collapsible(default));
+                        NavSection {
+                            has_heading: section.heading.is_some(),
+                            heading: section.heading.unwrap_or_default(),
+                            collapsible,
+                            collapsed: collapsible
+                                && declared.is_some_and(|group| group.is_collapsed(default)),
+                            active: items
+                                .iter()
+                                .any(|item| item.active || item.has_active_child),
+                            items_id: format!("ig-nav-group-{index}"),
+                            items,
+                        }
                     })
                     .collect()
             }
@@ -209,8 +299,11 @@ impl Layout {
         };
         let nav = nav_sections
             .iter()
-            .flat_map(|section| section.items.iter().cloned())
+            .flat_map(|section| &section.items)
+            .flat_map(|item| std::iter::once(item).chain(&item.children))
+            .cloned()
             .collect();
+        let nav_collapsible = nav_sections.iter().any(|section| section.collapsible);
         Layout {
             home_url: registry.mount.clone(),
             signed_in: user.is_some(),
@@ -231,6 +324,7 @@ impl Layout {
             logout_everywhere_url: format!("{}/logout-everywhere", registry.mount),
             nav,
             nav_sections,
+            nav_collapsible,
             csrf_token,
             has_flash: flash.is_some(),
             flash: flash.unwrap_or_default(),
@@ -261,6 +355,7 @@ pub(crate) struct DashboardPage {
     pub(crate) csrf_token: String,
     pub(crate) nav: Vec<NavGroup>,
     pub(crate) nav_sections: Vec<NavSection>,
+    pub(crate) nav_collapsible: bool,
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
     pub(crate) theme_style: String,
@@ -344,6 +439,7 @@ pub(crate) struct LoginPage {
     pub(crate) csrf_token: String,
     pub(crate) nav: Vec<NavGroup>,
     pub(crate) nav_sections: Vec<NavSection>,
+    pub(crate) nav_collapsible: bool,
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
     pub(crate) theme_style: String,
@@ -375,6 +471,7 @@ pub(crate) struct ForgotPage {
     pub(crate) csrf_token: String,
     pub(crate) nav: Vec<NavGroup>,
     pub(crate) nav_sections: Vec<NavSection>,
+    pub(crate) nav_collapsible: bool,
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
     pub(crate) theme_style: String,
@@ -405,6 +502,7 @@ pub(crate) struct ResetPage {
     pub(crate) csrf_token: String,
     pub(crate) nav: Vec<NavGroup>,
     pub(crate) nav_sections: Vec<NavSection>,
+    pub(crate) nav_collapsible: bool,
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
     pub(crate) theme_style: String,
@@ -435,6 +533,7 @@ pub(crate) struct ProfilePage {
     pub(crate) csrf_token: String,
     pub(crate) nav: Vec<NavGroup>,
     pub(crate) nav_sections: Vec<NavSection>,
+    pub(crate) nav_collapsible: bool,
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
     pub(crate) theme_style: String,
@@ -473,6 +572,7 @@ pub(crate) struct IndexPage {
     pub(crate) csrf_token: String,
     pub(crate) nav: Vec<NavGroup>,
     pub(crate) nav_sections: Vec<NavSection>,
+    pub(crate) nav_collapsible: bool,
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
     pub(crate) theme_style: String,
@@ -545,6 +645,7 @@ pub(crate) struct FormPage {
     pub(crate) csrf_token: String,
     pub(crate) nav: Vec<NavGroup>,
     pub(crate) nav_sections: Vec<NavSection>,
+    pub(crate) nav_collapsible: bool,
     pub(crate) has_flash: bool,
     pub(crate) flash: String,
     pub(crate) theme_style: String,

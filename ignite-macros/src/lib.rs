@@ -24,6 +24,7 @@ use syn::{
 /// - `#[ignite(navigation_label = "All widgets")]`: the label of the resource's navigation entry, as Filament's `$navigationLabel`. Defaults to the title.
 /// - `#[ignite(navigation_group = "Shop")]`: the navigation group the entry is listed under, as Filament's `$navigationGroup`. Defaults to none: the entry is listed before the groups.
 /// - `#[ignite(navigation_sort = 2)]`: the entry's place, as Filament's `$navigationSort`: lower first. Defaults to none, which comes before any number.
+/// - `#[ignite(navigation_parent_item = "Posts")]`: the navigation entry the resource is listed under, as Filament's `$navigationParentItem`: the parent's label or slug, in the same navigation group. Defaults to none: the resource is an entry of its own.
 /// - `#[ignite(navigation_icon = "post")]`: the name of the entry's icon, as Filament's `$navigationIcon`: what the resource is (`post`, `page`, `media`, `comment`, `users`, `settings`, or a name of the app's own), not a CSS class. The admin theme maps the name to its icon. Defaults to the theme's generic resource icon.
 /// - `#[ignite(conditions = post_conditions)]`: the conditions that show or hide the form's fields, and the live fields, as Filament's `visible()`, `hidden()` and `live()`: the path of a `fn() -> ignite_core::FieldConditions`. Defaults to none: every field shows. A field that a condition may hide should be an `Option`, so it is NULL on create and keeps its stored value on update.
 ///
@@ -641,6 +642,7 @@ struct Navigation {
     label: Option<String>,
     group: Option<String>,
     sort: Option<i32>,
+    parent_item: Option<String>,
     icon: Option<String>,
 }
 
@@ -656,10 +658,13 @@ impl Navigation {
         let sort = self.sort.map(|sort| {
             quote! { const NAVIGATION_SORT: ::core::option::Option<i32> = ::core::option::Option::Some(#sort); }
         });
+        let parent_item = self.parent_item.as_ref().map(|parent| {
+            quote! { const NAVIGATION_PARENT_ITEM: ::core::option::Option<&'static str> = ::core::option::Option::Some(#parent); }
+        });
         let icon = self.icon.as_ref().map(|icon| {
             quote! { const NAVIGATION_ICON: ::core::option::Option<&'static str> = ::core::option::Option::Some(#icon); }
         });
-        quote! { #label #group #sort #icon }
+        quote! { #label #group #sort #parent_item #icon }
     }
 }
 
@@ -703,6 +708,9 @@ fn struct_attrs(input: &DeriveInput) -> syn::Result<StructAttrs> {
             } else if meta.path.is_ident("navigation_group") {
                 navigation.group = Some(meta.value()?.parse::<LitStr>()?.value());
                 Ok(())
+            } else if meta.path.is_ident("navigation_parent_item") {
+                navigation.parent_item = Some(meta.value()?.parse::<LitStr>()?.value());
+                Ok(())
             } else if meta.path.is_ident("navigation_icon") {
                 let icon = meta.value()?.parse::<LitStr>()?;
                 let name = icon.value();
@@ -723,7 +731,7 @@ fn struct_attrs(input: &DeriveInput) -> syn::Result<StructAttrs> {
                 Ok(())
             } else {
                 Err(meta.error(
-                    "unknown ignite attribute on the struct; expected `table`, `title`, `singular`, `latest_records`, `navigation_label`, `navigation_group`, `navigation_sort`, `navigation_icon` or `conditions`",
+                    "unknown ignite attribute on the struct; expected `table`, `title`, `singular`, `latest_records`, `navigation_label`, `navigation_group`, `navigation_sort`, `navigation_parent_item`, `navigation_icon` or `conditions`",
                 ))
             }
         })?;

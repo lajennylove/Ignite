@@ -27,6 +27,8 @@ pub(crate) trait Erased: Send + Sync {
     fn navigation_group(&self) -> Option<&str>;
     /// The resource's place in the navigation, if set: lower first.
     fn navigation_sort(&self) -> Option<i32>;
+    /// The navigation entry the resource is listed under (its label or slug), if any.
+    fn navigation_parent_item(&self) -> Option<&str>;
     /// The CSS classes of the navigation entry's icon, if set.
     fn navigation_icon(&self) -> Option<&str>;
     /// The form fields, owned, so static and runtime resources render the same way.
@@ -164,6 +166,10 @@ impl<R: IgniteResource> Erased for Adapter<R> {
 
     fn navigation_sort(&self) -> Option<i32> {
         R::NAVIGATION_SORT
+    }
+
+    fn navigation_parent_item(&self) -> Option<&str> {
+        R::NAVIGATION_PARENT_ITEM
     }
 
     fn navigation_icon(&self) -> Option<&str> {
@@ -504,6 +510,10 @@ impl Erased for RuntimeAdapter {
 
     fn navigation_sort(&self) -> Option<i32> {
         self.0.navigation_sort()
+    }
+
+    fn navigation_parent_item(&self) -> Option<&str> {
+        self.0.navigation_parent_item()
     }
 
     fn navigation_icon(&self) -> Option<&str> {
