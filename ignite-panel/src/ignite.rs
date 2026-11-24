@@ -222,7 +222,7 @@ impl Ignite {
             storage: PathBuf::from(users::DEFAULT_STORAGE_DIR),
             brand: Brand::default(),
             navigation_groups: Vec::new(),
-            collapsible_navigation_groups: false,
+            collapsible_navigation_groups: true,
         }
     }
 
@@ -521,11 +521,11 @@ impl Ignite {
         self
     }
 
-    /// Makes every navigation group collapsible, as Filament's panel
+    /// Whether every navigation group is collapsible, as Filament's panel
     /// `collapsibleNavigationGroups()`: its heading collapses and expands its entries, and the
-    /// browser remembers which groups the user collapsed. A [`NavigationGroup`] that says
-    /// otherwise wins. The default is `false`, so a sidebar renders as before; Filament's
-    /// default is `true`.
+    /// browser remembers which groups the user collapsed. The default is `true`, as in
+    /// Filament; `false` renders each group under a plain heading. A [`NavigationGroup`] that
+    /// says otherwise wins.
     pub fn collapsible_navigation_groups(mut self, collapsible: bool) -> Self {
         self.collapsible_navigation_groups = collapsible;
         self

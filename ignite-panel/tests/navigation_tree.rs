@@ -1,7 +1,7 @@
 //! The sidebar's tree, as Filament's navigation builds it: entries listed under a parent entry
 //! (`$navigationParentItem`), and collapsible navigation groups (`NavigationGroup::collapsible()`
-//! and `collapsed()`). Runs against the `ignite_test` database. The sidebar needs no rows, so
-//! the resources' tables are never created.
+//! and `collapsed()`), collapsible by default as in Filament. Runs against the `ignite_test`
+//! database. The sidebar needs no rows, so the resources' tables are never created.
 
 mod common;
 
@@ -334,22 +334,87 @@ fn a_group_heading_is_escaped_in_its_attributes() {
     assert!(!nav.contains("<now>"));
 }
 
-/// The sidebar of `/admin/tree_posts/new` in the panel of the next test, as Ignite 0.6.2
-/// rendered it, before child entries and collapsible groups.
+/// The panel of the sidebar fixtures: Posts and Pages in Content, and General in Settings,
+/// with no child entries.
+fn with_groups(ignite: Ignite) -> Ignite {
+    ignite
+        .resource::<Post>()
+        .resource::<PageRow>()
+        .resource::<Options>()
+        .navigation_groups(["Content", "Settings"])
+}
+
+/// The sidebar of `/admin/tree_posts/new` in [`with_groups`] with no other option: its groups
+/// collapsible, as Filament's are by default.
 const SIDEBAR_BEFORE: &str = include_str!("fixtures/navigation/sidebar_before.html");
 
+/// The same sidebar as Ignite 0.6.2 rendered it, before collapsible groups: each group under a
+/// plain heading.
+const SIDEBAR_PLAIN: &str = include_str!("fixtures/navigation/sidebar_plain.html");
+
 #[test]
-fn without_the_new_options_the_sidebar_renders_as_before() {
+fn without_options_the_groups_are_collapsible() {
+    let _guard = reset();
+    let client = signed_in_with(with_groups);
+    let html = page(&client, "/admin/tree_posts/new");
+    let nav = sidebar(&html);
+    assert!(nav == SIDEBAR_BEFORE, "{nav}");
+    assert_eq!(
+        group_tag(nav, "Content"),
+        r#"<div class="flex flex-col gap-1" data-ig-nav-group="Content" data-ig-nav-active>"#
+    );
+    assert_eq!(
+        group_tag(nav, "Settings"),
+        r#"<div class="flex flex-col gap-1" data-ig-nav-group="Settings">"#
+    );
+    assert!(!nav.contains(r#"<p class="ig-caption mt-5">"#), "{nav}");
+    assert!(nav.contains("ignite:sidebar:collapsed_groups"), "{nav}");
+}
+
+#[test]
+fn collapsible_navigation_groups_false_renders_plain_groups_as_before() {
+    let _guard = reset();
+    let client = signed_in_with(|ignite| with_groups(ignite).collapsible_navigation_groups(false));
+    let html = page(&client, "/admin/tree_posts/new");
+    let nav = sidebar(&html);
+    assert!(nav == SIDEBAR_PLAIN, "{nav}");
+    assert!(!nav.contains("data-ig-nav-group"), "{nav}");
+    assert!(!nav.contains("<script>"), "{nav}");
+}
+
+#[test]
+fn a_group_opts_out_of_the_default() {
     let _guard = reset();
     let client = signed_in_with(|ignite| {
-        ignite
-            .resource::<Post>()
-            .resource::<PageRow>()
-            .resource::<Options>()
-            .navigation_groups(["Content", "Settings"])
+        with_groups(ignite)
+            .navigation_groups([NavigationGroup::make("Settings").collapsible(false)])
     });
     let html = page(&client, "/admin/tree_posts/new");
-    assert!(sidebar(&html) == SIDEBAR_BEFORE, "{}", sidebar(&html));
+    let nav = sidebar(&html);
+    assert!(nav.contains(r#"data-ig-nav-group="Content""#), "{nav}");
+    assert!(
+        nav.contains(r#"<p class="ig-caption mt-5">Settings</p>"#),
+        "{nav}"
+    );
+    assert!(!nav.contains(r#"data-ig-nav-group="Settings""#), "{nav}");
+}
+
+#[test]
+fn a_group_opts_in_when_the_panel_opts_out() {
+    let _guard = reset();
+    let client = signed_in_with(|ignite| {
+        with_groups(ignite)
+            .collapsible_navigation_groups(false)
+            .navigation_groups([NavigationGroup::make("Settings").collapsible(true)])
+    });
+    let html = page(&client, "/admin/tree_posts/new");
+    let nav = sidebar(&html);
+    assert!(nav.contains(r#"data-ig-nav-group="Settings""#), "{nav}");
+    assert!(
+        nav.contains(r#"<p class="ig-caption mt-5">Content</p>"#),
+        "{nav}"
+    );
+    assert!(!nav.contains(r#"data-ig-nav-group="Content""#), "{nav}");
 }
 
 /// A data source with no rows: the sidebar does not read any.

@@ -339,9 +339,10 @@ fn at(haystack: &str, needle: &str) -> usize {
         .unwrap_or_else(|| panic!("`{needle}` is not in:\n{haystack}"))
 }
 
-/// The heading of the group `name`.
+/// The heading of the group `name`: the button that collapses it, as groups are collapsible
+/// by default, as in Filament.
 fn heading(name: &str) -> String {
-    format!(r#"<p class="ig-caption mt-5">{name}</p>"#)
+    format!(r#"data-ig-nav-toggle>{name}<i class="ti ti-chevron-down"#)
 }
 
 /// A navigation link that ends with `label`, after its icon.
@@ -375,7 +376,8 @@ fn navigation_groups_render_in_the_declared_order_with_headings() {
         order.windows(2).all(|pair| pair[0] < pair[1]),
         "out of order: {order:?}\n{nav}"
     );
-    assert_eq!(nav.matches(r#"<p class="ig-caption mt-5">"#).count(), 3);
+    assert_eq!(nav.matches("data-ig-nav-toggle>").count(), 3);
+    assert!(!nav.contains(r#"<p class="ig-caption mt-5">"#), "{nav}");
 }
 
 #[test]

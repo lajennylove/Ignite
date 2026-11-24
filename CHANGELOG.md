@@ -20,8 +20,9 @@ All notable changes to Ignite are listed here. The format follows
   plain labels, and `Ignite::collapsible_navigation_groups(bool)` for every group. The
   browser remembers the collapsed groups (localStorage `ignite:sidebar:collapsed_groups`, as
   Filament's), the group of the current page shows expanded, and without JavaScript every
-  group is expanded. Groups are not collapsible by default, unlike Filament, so a sidebar
-  renders as before.
+  group is expanded. As in Filament, groups are collapsible by default;
+  `collapsible_navigation_groups(false)` (or `collapsible(false)` on a group) keeps the plain
+  headings of 0.6.2.
 - The navigation view values `children`, `has_children`, `has_active_child` and `expanded` on
   each entry, `collapsible`, `collapsed`, `active` and `items_id` on each section, and
   `nav_collapsible`, for themes.
