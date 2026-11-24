@@ -68,7 +68,10 @@ pub(crate) struct AdminThemeView {
     pub(crate) stylesheets: Vec<String>,
 }
 
-use ignite_core::{FieldConditions, FieldDef, FieldErrors, FieldKindDef, FormInput, MediaItem};
+use ignite_core::{
+    ColumnSpan, Component, FieldConditions, FieldDef, FieldErrors, FieldKindDef, FormInput,
+    FormLayout, MediaItem, Width,
+};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -556,7 +559,24 @@ pub(crate) struct FormPage {
     pub(crate) action: String,
     pub(crate) submit_label: &'static str,
     pub(crate) back_url: String,
+    /// The fields, in display order, of a form without a layout. Empty with a layout: the
+    /// fields are in `layout_columns`.
     pub(crate) fields: Vec<FieldView>,
+    /// Whether the form has a layout ([`FormLayout`]), the classes of its grid, and its
+    /// columns. The form then loads `resources/css/form.css`, which has the grid's classes.
+    pub(crate) has_layout: bool,
+    pub(crate) layout_class: String,
+    pub(crate) layout_columns: Vec<LayoutColumnView>,
+    /// The width class of the page's content (`ignite_content_width` in the layout).
+    pub(crate) content_width: &'static str,
+    /// Whether the form asks before the user leaves it changed
+    /// (`data-ignite-unsaved-changes-alert`), and whether it is changed already, because it
+    /// is shown again after a save that failed (`data-ignite-unsaved`).
+    pub(crate) unsaved_changes_alert: bool,
+    pub(crate) has_unsaved_changes: bool,
+    /// Whether the page loads the form script (`resources/js/form.js`): the form asks before
+    /// it is left, or has a slug field.
+    pub(crate) has_form_script: bool,
     /// Whether a field is live: the form then sends its values to `live_url` when one changes,
     /// and shows the fields the answer renders.
     pub(crate) has_live: bool,
@@ -576,6 +596,9 @@ pub(crate) struct FieldView {
     pub(crate) required: bool,
     /// Whether a change to the field shows the form's fields again (`data-ignite-live`).
     pub(crate) live: bool,
+    /// The field this one is filled from as a slug, if any (`data-ignite-slug-from`).
+    pub(crate) has_slug_from: bool,
+    pub(crate) slug_from: String,
     pub(crate) input_type: &'static str,
     pub(crate) is_textarea: bool,
     pub(crate) is_checkbox: bool,
@@ -839,6 +862,8 @@ impl FieldView {
             label: field.label.clone(),
             required: field.required,
             live: false,
+            has_slug_from: false,
+            slug_from: String::new(),
             input_type,
             is_textarea,
             is_checkbox,
@@ -1097,8 +1122,156 @@ pub(crate) fn form_field_views(
     let mut views = field_views_with(&shown, form, errors, choices);
     for view in &mut views {
         view.live = conditions.is_live(&view.name);
+        if let Some(source) = conditions.slug_source(&view.name) {
+            view.has_slug_from = true;
+            view.slug_from = source.to_string();
+        }
     }
     views
+}
+
+/// One column of a form layout: a top-level section, group or field, with its span.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct LayoutColumnView {
+    pub(crate) class: String,
+    /// The cards stacked in the column, one under the other.
+    pub(crate) sections: Vec<LayoutSectionView>,
+}
+
+/// One card of a form layout: a section, or fields placed without a section.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct LayoutSectionView {
+    pub(crate) has_heading: bool,
+    pub(crate) heading: String,
+    pub(crate) has_description: bool,
+    pub(crate) description: String,
+    pub(crate) fields: Vec<FieldView>,
+}
+
+impl LayoutSectionView {
+    fn new(heading: &str, description: Option<&str>) -> Self {
+        LayoutSectionView {
+            has_heading: !heading.is_empty(),
+            heading: heading.to_string(),
+            has_description: description.is_some(),
+            description: description.unwrap_or_default().to_string(),
+            fields: Vec::new(),
+        }
+    }
+}
+
+/// The classes of the fields' container of a form with `layout`: a grid of its columns from
+/// the `lg` breakpoint, one column below it, as Filament's `columns()`.
+pub(crate) fn layout_grid_class(layout: &FormLayout) -> String {
+    match layout.column_count() {
+        Some(columns) if columns > 1 => {
+            format!("grid grid-cols-[minmax(0,1fr)] items-start gap-5 lg:grid-cols-{columns}")
+        }
+        _ => "grid grid-cols-[minmax(0,1fr)] items-start gap-5".to_string(),
+    }
+}
+
+/// The width class of the page's content for `layout`: the panel's 1536px, or none.
+pub(crate) fn content_width_class(layout: &FormLayout) -> &'static str {
+    match layout.content_width() {
+        Some(Width::Full) => "max-w-none",
+        _ => "max-w-[1536px]",
+    }
+}
+
+/// The classes of a layout column that takes `span`, as Filament's `columnSpan()`.
+fn column_class(span: ColumnSpan) -> String {
+    match span {
+        ColumnSpan::Columns(columns) => {
+            format!("grid min-w-0 content-start gap-5 lg:col-span-{columns}")
+        }
+        ColumnSpan::Full => "grid min-w-0 content-start gap-5 col-span-full".to_string(),
+    }
+}
+
+/// The columns of a form with `layout`, holding `fields`: each top-level component is a
+/// column, and each section, or run of fields outside a section, is a card in it. A field the
+/// conditions hide is not in `fields`, so the layout leaves it out; a card or column left
+/// without fields is left out too. A field the layout does not place is shown after the
+/// others in the first column, so the form still sends it. A field the layout places twice
+/// shows the first time only.
+pub(crate) fn layout_columns(layout: &FormLayout, fields: Vec<FieldView>) -> Vec<LayoutColumnView> {
+    let order: Vec<String> = fields.iter().map(|field| field.name.clone()).collect();
+    let mut unplaced: HashMap<String, FieldView> = fields
+        .into_iter()
+        .map(|field| (field.name.clone(), field))
+        .collect();
+    let mut columns = Vec::new();
+    for component in layout.components() {
+        let span = match component {
+            Component::Field(_) => ColumnSpan::Columns(1),
+            Component::Section(section) => section.get_column_span(),
+            Component::Group(group) => group.get_column_span(),
+        };
+        let mut sections = Vec::new();
+        place(component, &mut unplaced, &mut sections);
+        sections.retain(|section: &LayoutSectionView| !section.fields.is_empty());
+        if !sections.is_empty() {
+            columns.push(LayoutColumnView {
+                class: column_class(span),
+                sections,
+            });
+        }
+    }
+    let rest: Vec<FieldView> = order
+        .iter()
+        .filter_map(|name| unplaced.remove(name))
+        .collect();
+    if !rest.is_empty() {
+        let mut section = LayoutSectionView::new("", None);
+        section.fields = rest;
+        match columns.first_mut() {
+            Some(first) => first.sections.push(section),
+            None => columns.push(LayoutColumnView {
+                class: column_class(ColumnSpan::Full),
+                sections: vec![section],
+            }),
+        }
+    }
+    columns
+}
+
+/// Adds the cards of `component` to `sections`, taking its fields from `unplaced`. Fields
+/// outside a section join the card before them when it has no heading.
+fn place(
+    component: &Component,
+    unplaced: &mut HashMap<String, FieldView>,
+    sections: &mut Vec<LayoutSectionView>,
+) {
+    match component {
+        Component::Field(name) => {
+            let Some(field) = unplaced.remove(name) else {
+                return;
+            };
+            match sections.last_mut() {
+                Some(last) if !last.has_heading && !last.has_description => last.fields.push(field),
+                _ => {
+                    let mut section = LayoutSectionView::new("", None);
+                    section.fields.push(field);
+                    sections.push(section);
+                }
+            }
+        }
+        Component::Section(section) => {
+            let mut view = LayoutSectionView::new(section.heading(), section.get_description());
+            view.fields = section
+                .fields()
+                .iter()
+                .filter_map(|name| unplaced.remove(name))
+                .collect();
+            sections.push(view);
+        }
+        Component::Group(group) => {
+            for inner in group.components() {
+                place(inner, unplaced, sections);
+            }
+        }
+    }
 }
 
 /// The values a form of a resource with live fields shows again. A form sends `_ignite_shown`,

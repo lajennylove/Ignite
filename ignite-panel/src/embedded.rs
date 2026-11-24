@@ -34,6 +34,10 @@ pub(crate) const VIEWS: &[(&str, &str)] = &[
         include_str!("../views/ignite/partials/field.propel"),
     ),
     (
+        "partials.form_layout",
+        include_str!("../views/ignite/partials/form_layout.propel"),
+    ),
+    (
         "partials.fields.clone",
         include_str!("../views/ignite/partials/fields/clone.propel"),
     ),

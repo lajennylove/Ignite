@@ -29,6 +29,7 @@ use serde_json::{Map, Value};
 use crate::condition::{FieldConditions, FormContext, Operation};
 use crate::field::{self as check, Block, Column, Field, FieldKind};
 use crate::form::{FieldErrors, FormInput};
+use crate::layout::FormLayout;
 use crate::policy::ActingUser;
 use crate::query::{ListQuery, Page};
 
@@ -407,6 +408,9 @@ pub struct RuntimeResource {
     /// The conditions that show or hide the form's fields, and the live fields, as
     /// Filament's `visible()`, `hidden()` and `live()`. See [`FieldConditions`].
     pub conditions: FieldConditions,
+    /// The layout of the create and edit forms, as Filament's layout components. See
+    /// [`FormLayout`]. The default has none: the form renders as one card of fields.
+    pub form_layout: FormLayout,
 }
 
 impl fmt::Debug for RuntimeResource {
@@ -423,6 +427,7 @@ impl fmt::Debug for RuntimeResource {
             .field("navigation_sort", &self.navigation_sort)
             .field("navigation_icon", &self.navigation_icon)
             .field("conditions", &self.conditions)
+            .field("form_layout", &self.form_layout)
             .finish_non_exhaustive()
     }
 }
@@ -448,6 +453,7 @@ impl RuntimeResource {
             navigation_sort: None,
             navigation_icon: None,
             conditions: FieldConditions::new(),
+            form_layout: FormLayout::new(),
         }
     }
 
@@ -534,6 +540,20 @@ impl RuntimeResource {
     /// shows the form's fields again for the new value. See [`FieldConditions::live`].
     pub fn live(mut self, field: impl Into<String>) -> Self {
         self.conditions = self.conditions.live(field);
+        self
+    }
+
+    /// Fills the field `field` with the slug of the field `source` until the user edits it, as
+    /// Filament's slug pattern. See [`FieldConditions::slug_from`].
+    pub fn slug_from(mut self, field: impl Into<String>, source: impl Into<String>) -> Self {
+        self.conditions = self.conditions.slug_from(field, source);
+        self
+    }
+
+    /// Sets the layout of the create and edit forms: columns, sections and groups, as
+    /// Filament's layout components. See [`FormLayout`].
+    pub fn form_layout(mut self, layout: FormLayout) -> Self {
+        self.form_layout = layout;
         self
     }
 }
@@ -777,6 +797,11 @@ impl RegisteredResource {
     /// The conditions that show or hide the form's fields.
     pub fn conditions(&self) -> &FieldConditions {
         &self.resource.conditions
+    }
+
+    /// The layout of the create and edit forms.
+    pub fn form_layout(&self) -> &FormLayout {
+        &self.resource.form_layout
     }
 
     /// [`validate`](Self::validate) for a form whose fields `hidden` are hidden (see

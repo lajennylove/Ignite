@@ -215,6 +215,32 @@ RuntimeResource::new("posts", "Posts", "Post", PostData)
 
 A static resource returns the same `FieldConditions` from `IgniteResource::conditions`, and the derive takes `#[ignite(conditions = post_conditions)]`, a `fn() -> FieldConditions`. The panel removes a hidden field from the form before `validate`, so a field that may be hidden must be one `validate` accepts as missing, such as an `Option` field of the derive.
 
+### Form layout
+
+A form can be laid out in columns, as Filament's `Grid`, `Section`, `Group`, `columns()` and `columnSpan()`. A WordPress-like editor puts the content in a main column two thirds wide and stacks its settings in a sidebar:
+
+```rust
+use ignite_core::{FormLayout, Group, Section, Width};
+
+RuntimeResource::new("posts", "Posts", "Post", PostData)
+    // ...fields...
+    .slug_from("slug", "title")
+    .form_layout(FormLayout::new().columns(3).schema([
+        Group::make([Section::make("Content").schema(["title", "slug", "body"])]).column_span(2),
+        Group::make([
+            Section::make("Publish").schema(["status", "published_at"]),
+            Section::make("Category").schema(["category"]),
+        ])
+        .column_span(1),
+    ]));
+```
+
+Each section is a card; `columns` and `column_span` apply from the `lg` breakpoint, and below it the cards stack in one column. `column_span_full()` takes every column. `max_content_width(Width::Full)` lets a settings form use the whole width beside the sidebar instead of the panel's 1536px. A field the layout does not place shows after the others in the first column. A form without a layout renders as before, one card of fields. A static resource returns the layout from `IgniteResource::form_layout`, and the derive takes `#[ignite(form_layout = post_layout)]`.
+
+`slug_from("slug", "title")` (on `RuntimeResource` and `FieldConditions`) fills the slug with the title's slug as the user types, until the user edits the slug by hand, as Filament's documented slug example (`afterStateUpdated` with `Str::slug`). The server still checks the value in `validate`.
+
+`Ignite::unsaved_changes_alerts()`, as Filament's panel option of the same name, asks "Are you sure you want to leave? Without saving, everything is going to be lost." when the user leaves a create or edit form they changed and did not save. It is off by default, as in Filament.
+
 ## Brand and navigation
 
 The panel's brand and its sidebar are options of the panel and of each resource, as Filament's panel and resources set them. They are compiled into the panel's views, so they work in a release build too; an app does not copy the views to change them.

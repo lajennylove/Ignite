@@ -1,0 +1,10 @@
+/*
+ * The classes of a form layout (FormLayout, as Filament's columns() and columnSpan()), which
+ * src/views.rs writes from a form's columns and spans, and the full content width
+ * (Width::Full). Only a form page with a layout loads this stylesheet, so the other pages keep
+ * the panel's stylesheet as it was. The breakpoints are Tailwind's, as in app.css.
+ */
+@import "tailwindcss/theme.css" theme(reference);
+@import "tailwindcss/utilities.css" layer(utilities) source(none);
+
+@source inline("grid-cols-[minmax(0,1fr)] lg:grid-cols-{1..12} lg:col-span-{1..12} col-span-full max-w-none content-start items-start");

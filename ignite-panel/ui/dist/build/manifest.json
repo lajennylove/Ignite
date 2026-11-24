@@ -260,10 +260,25 @@
       "assets/tabler-icons.laundry-D49B2jvm.woff2"
     ]
   },
+  "resources/css/form.css": {
+    "file": "assets/form-D4gWreF3.css",
+    "name": "form",
+    "names": [
+      "form.css"
+    ],
+    "src": "resources/css/form.css",
+    "isEntry": true
+  },
   "resources/js/app.js": {
     "file": "assets/app-Doh2sRhG.js",
     "name": "app",
     "src": "resources/js/app.js",
+    "isEntry": true
+  },
+  "resources/js/form.js": {
+    "file": "assets/form-DueBRdj6.js",
+    "name": "form",
+    "src": "resources/js/form.js",
     "isEntry": true
   }
 }

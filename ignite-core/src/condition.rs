@@ -124,6 +124,8 @@ pub struct FieldConditions {
     hidden: HashMap<String, Rule>,
     visible: HashMap<String, Rule>,
     live: BTreeSet<String>,
+    /// The field each slug field is filled from, by slug field name.
+    slugs: HashMap<String, String>,
 }
 
 impl fmt::Debug for FieldConditions {
@@ -133,6 +135,7 @@ impl fmt::Debug for FieldConditions {
             .field("hidden", &names(&self.hidden))
             .field("visible", &names(&self.visible))
             .field("live", &self.live)
+            .field("slugs", &self.slugs)
             .finish()
     }
 }
@@ -183,6 +186,26 @@ impl FieldConditions {
     pub fn live(mut self, field: impl Into<String>) -> Self {
         self.live.insert(field.into());
         self
+    }
+
+    /// Fills the field `field` with the slug of the field `source` as the user types, until the
+    /// user edits `field` by hand, as Filament's documented slug pattern:
+    /// `->afterStateUpdated(...)` on the title sets `slug` to `Str::slug($state)` unless the slug
+    /// no longer matches `Str::slug($old)`. Filament writes that with a closure on the server;
+    /// the panel's script does it in the browser, so it needs no round trip. The slug is the
+    /// text in lowercase ASCII, accents removed, with each run of other characters turned into
+    /// one `-`, as `Str::slug` gives it. The value is not checked: `validate` still checks it.
+    ///
+    /// On the edit form, a slug that is not the slug of the stored title counts as edited by
+    /// hand, so it is not replaced.
+    pub fn slug_from(mut self, field: impl Into<String>, source: impl Into<String>) -> Self {
+        self.slugs.insert(field.into(), source.into());
+        self
+    }
+
+    /// The field `field` is filled from by [`slug_from`](Self::slug_from), if any.
+    pub fn slug_source(&self, field: &str) -> Option<&str> {
+        self.slugs.get(field).map(String::as_str)
     }
 
     /// Whether `field` is live.
