@@ -7,9 +7,9 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use ignite_core::{
-    ActingUser, ColumnDef, Database, FieldConditions, FieldDef, FieldErrors, FieldKindDef,
-    FormInput, FormLayout, IgniteResource, LatestRecords, ListQuery, RegisteredResource, Row,
-    StatWidget,
+    ActingUser, ColumnBadges, ColumnDef, Database, FieldConditions, FieldDef, FieldErrors,
+    FieldKindDef, FormInput, FormLayout, IgniteResource, LatestRecords, ListQuery,
+    RegisteredResource, Row, StatWidget, Tab,
 };
 use orbit_orm::Error;
 use serde::Serialize;
@@ -40,6 +40,12 @@ pub(crate) trait Erased: Send + Sync {
     fn conditions(&self) -> &FieldConditions;
     /// The layout of the create and edit forms.
     fn form_layout(&self) -> &FormLayout;
+    /// The tabs of the list page, in display order.
+    fn tabs(&self) -> &[Tab];
+    /// The key of the tab shown when the list has no `tab` parameter, if set.
+    fn default_active_tab(&self) -> Option<&str>;
+    /// The list columns shown as coloured badges.
+    fn column_badges(&self) -> &ColumnBadges;
     /// One page of records as JSON, and the total count.
     /// The resource's queries are given the signed-in `user`: they call its `*_for` methods.
     async fn list(
@@ -90,6 +96,8 @@ pub(crate) struct Adapter<R> {
     columns: Vec<ColumnDef>,
     conditions: FieldConditions,
     form_layout: FormLayout,
+    tabs: Vec<Tab>,
+    column_badges: ColumnBadges,
     resource: PhantomData<fn() -> R>,
 }
 
@@ -100,6 +108,8 @@ impl<R: IgniteResource> Adapter<R> {
             columns: R::columns().iter().copied().map(ColumnDef::from).collect(),
             conditions: R::conditions(),
             form_layout: R::form_layout(),
+            tabs: R::tabs(),
+            column_badges: R::column_badges(),
             resource: PhantomData,
         }
     }
@@ -195,6 +205,18 @@ impl<R: IgniteResource> Erased for Adapter<R> {
 
     fn form_layout(&self) -> &FormLayout {
         &self.form_layout
+    }
+
+    fn tabs(&self) -> &[Tab] {
+        &self.tabs
+    }
+
+    fn default_active_tab(&self) -> Option<&str> {
+        R::default_active_tab()
+    }
+
+    fn column_badges(&self) -> &ColumnBadges {
+        &self.column_badges
     }
 
     async fn list(
@@ -543,6 +565,18 @@ impl Erased for RuntimeAdapter {
 
     fn form_layout(&self) -> &FormLayout {
         self.0.form_layout()
+    }
+
+    fn tabs(&self) -> &[Tab] {
+        self.0.tabs()
+    }
+
+    fn default_active_tab(&self) -> Option<&str> {
+        self.0.default_active_tab()
+    }
+
+    fn column_badges(&self) -> &ColumnBadges {
+        self.0.column_badges()
     }
 
     async fn list(

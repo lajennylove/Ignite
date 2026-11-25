@@ -30,7 +30,7 @@ export default defineConfig({
         laravel({
             publicDirectory: 'dist',
             buildDirectory: 'build',
-            input: ['resources/css/app.css', 'resources/js/app.js', 'resources/css/form.css', 'resources/js/form.js'],
+            input: ['resources/css/app.css', 'resources/js/app.js', 'resources/css/form.css', 'resources/js/form.js', 'resources/css/list.css'],
             // The panel's views are read at run time, so a view edit reloads the page.
             refresh: ['../views/**/*.propel'],
         }),

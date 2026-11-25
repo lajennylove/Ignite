@@ -269,6 +269,15 @@
     "src": "resources/css/form.css",
     "isEntry": true
   },
+  "resources/css/list.css": {
+    "file": "assets/list-CZk4a2Q-.css",
+    "name": "list",
+    "names": [
+      "list.css"
+    ],
+    "src": "resources/css/list.css",
+    "isEntry": true
+  },
   "resources/js/app.js": {
     "file": "assets/app-Doh2sRhG.js",
     "name": "app",

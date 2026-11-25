@@ -214,6 +214,7 @@ fn the_derived_model_reads_its_rows() {
                 per_page: 20,
                 search: None,
                 sort: None,
+                filter: ignite_core::ListFilter::new(),
             },
         ))
         .unwrap();

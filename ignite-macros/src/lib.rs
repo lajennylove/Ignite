@@ -27,6 +27,9 @@ use syn::{
 /// - `#[ignite(navigation_parent_item = "Posts")]`: the navigation entry the resource is listed under, as Filament's `$navigationParentItem`: the parent's label or slug, in the same navigation group. Defaults to none: the resource is an entry of its own.
 /// - `#[ignite(navigation_icon = "post")]`: the name of the entry's icon, as Filament's `$navigationIcon`: what the resource is (`post`, `page`, `media`, `comment`, `users`, `settings`, or a name of the app's own), not a CSS class. The admin theme maps the name to its icon. Defaults to the theme's generic resource icon.
 /// - `#[ignite(conditions = post_conditions)]`: the conditions that show or hide the form's fields, and the live fields, as Filament's `visible()`, `hidden()` and `live()`: the path of a `fn() -> ignite_core::FieldConditions`. Defaults to none: every field shows. A field that a condition may hide should be an `Option`, so it is NULL on create and keeps its stored value on update.
+/// - `#[ignite(tabs = post_tabs)]`: the tabs of the list page, as Filament's `getTabs()`: the path of a `fn() -> Vec<ignite_core::Tab>`. The list query applies the active tab's conditions. Defaults to none: the list has no tabs.
+/// - `#[ignite(default_active_tab = "drafts")]`: the key of the tab shown when the list has no `tab` parameter, as Filament's `getDefaultActiveTab()`. Defaults to the first tab.
+/// - `#[ignite(badges = post_badges)]`: the list columns shown as coloured badges, as Filament's `badge()` and `color()` on a text column: the path of a `fn() -> ignite_core::ColumnBadges`. Defaults to none: every cell is plain text.
 /// - `#[ignite(form_layout = post_layout)]`: the layout of the create and edit forms, as Filament's `Grid`, `Section`, `Group`, `columns()` and `columnSpan()`: the path of a `fn() -> ignite_core::FormLayout`. Defaults to none: the form renders as one card of fields.
 ///
 /// Field attributes:
@@ -204,7 +207,7 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
         }
     };
 
-    let (table, title, singular, latest, navigation, conditions, form_layout) =
+    let (table, title, singular, latest, navigation, conditions, form_layout, list_attrs) =
         struct_attrs(input)?;
     let table_name = table
         .segments
@@ -255,6 +258,8 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
             }
         }
     });
+
+    let list_methods = list_attrs.methods();
 
     let form_fields: Vec<&Field> = fields.iter().filter(|f| f.ident != pk_ident).collect();
     let input_name = format_ident!("{}Input", name);
@@ -467,8 +472,8 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
                     .search
                     .as_ref()
                     .map(|s| format!("%{}%", ::ignite_core::escape_like(s)));
-                let mut rows = <#name as ::orbit_orm::Model>::query();
-                let mut count = <#name as ::orbit_orm::Model>::query();
+                let mut rows = query.filter.apply(<#name as ::orbit_orm::Model>::query());
+                let mut count = query.filter.apply(<#name as ::orbit_orm::Model>::query());
                 #search_filter
 
                 let asc = !matches!(query.sort, ::core::option::Option::Some((_, ::ignite_core::Direction::Desc)));
@@ -500,6 +505,7 @@ fn expand(input: &DeriveInput) -> syn::Result<TokenStream2> {
 
             #conditions_method
             #form_layout_method
+            #list_methods
 
             async fn latest(
                 db: &::ignite_core::Database,
@@ -680,8 +686,8 @@ impl Navigation {
 }
 
 /// What the struct-level attributes give: the table, the title, the singular name, the
-/// dashboard table, the navigation, and the paths of the functions that give the conditions
-/// and the form layout.
+/// dashboard table, the navigation, the paths of the functions that give the conditions
+/// and the form layout, and the list page's tabs and badges.
 type StructAttrs = (
     syn::Path,
     Option<String>,
@@ -690,7 +696,44 @@ type StructAttrs = (
     Navigation,
     Option<syn::Path>,
     Option<syn::Path>,
+    ListAttrs,
 );
+
+/// The list page's attributes: the tabs, the default tab and the badge columns.
+#[derive(Default)]
+struct ListAttrs {
+    tabs: Option<syn::Path>,
+    default_active_tab: Option<String>,
+    badges: Option<syn::Path>,
+}
+
+impl ListAttrs {
+    /// The `tabs`, `default_active_tab` and `column_badges` methods of the attributes given.
+    fn methods(&self) -> TokenStream2 {
+        let tabs = self.tabs.as_ref().map(|path| {
+            quote! {
+                fn tabs() -> ::std::vec::Vec<::ignite_core::Tab> {
+                    #path()
+                }
+            }
+        });
+        let default = self.default_active_tab.as_ref().map(|key| {
+            quote! {
+                fn default_active_tab() -> ::core::option::Option<&'static str> {
+                    ::core::option::Option::Some(#key)
+                }
+            }
+        });
+        let badges = self.badges.as_ref().map(|path| {
+            quote! {
+                fn column_badges() -> ::ignite_core::ColumnBadges {
+                    #path()
+                }
+            }
+        });
+        quote! { #tabs #default #badges }
+    }
+}
 
 /// Reads `#[ignite(...)]` on the struct: the table, the title, the singular name, the
 /// dashboard table, the navigation, the conditions and the form layout.
@@ -702,6 +745,7 @@ fn struct_attrs(input: &DeriveInput) -> syn::Result<StructAttrs> {
     let mut navigation = Navigation::default();
     let mut conditions = None;
     let mut form_layout = None;
+    let mut list = ListAttrs::default();
     for attr in input.attrs.iter().filter(|a| a.path().is_ident("ignite")) {
         attr.parse_nested_meta(|meta| {
             if meta.path.is_ident("table") {
@@ -746,9 +790,18 @@ fn struct_attrs(input: &DeriveInput) -> syn::Result<StructAttrs> {
             } else if meta.path.is_ident("form_layout") {
                 form_layout = Some(meta.value()?.parse::<syn::Path>()?);
                 Ok(())
+            } else if meta.path.is_ident("tabs") {
+                list.tabs = Some(meta.value()?.parse::<syn::Path>()?);
+                Ok(())
+            } else if meta.path.is_ident("default_active_tab") {
+                list.default_active_tab = Some(meta.value()?.parse::<LitStr>()?.value());
+                Ok(())
+            } else if meta.path.is_ident("badges") {
+                list.badges = Some(meta.value()?.parse::<syn::Path>()?);
+                Ok(())
             } else {
                 Err(meta.error(
-                    "unknown ignite attribute on the struct; expected `table`, `title`, `singular`, `latest_records`, `navigation_label`, `navigation_group`, `navigation_sort`, `navigation_parent_item`, `navigation_icon`, `conditions` or `form_layout`",
+                    "unknown ignite attribute on the struct; expected `table`, `title`, `singular`, `latest_records`, `navigation_label`, `navigation_group`, `navigation_sort`, `navigation_parent_item`, `navigation_icon`, `conditions`, `form_layout`, `tabs`, `default_active_tab` or `badges`",
                 ))
             }
         })?;
@@ -767,6 +820,7 @@ fn struct_attrs(input: &DeriveInput) -> syn::Result<StructAttrs> {
         navigation,
         conditions,
         form_layout,
+        list,
     ))
 }
 

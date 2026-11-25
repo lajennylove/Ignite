@@ -9,6 +9,7 @@ use crate::condition::FieldConditions;
 use crate::field::{Column, Field};
 use crate::form::{FieldErrors, FormInput};
 use crate::layout::FormLayout;
+use crate::list::{ColumnBadges, Tab};
 use crate::policy::ActingUser;
 use crate::query::{ListQuery, Page};
 use crate::widget::{LatestRecords, StatWidget};
@@ -126,6 +127,30 @@ pub trait IgniteResource: Send + Sync + 'static {
     /// one card of fields, as before.
     fn form_layout() -> FormLayout {
         FormLayout::new()
+    }
+
+    /// The tabs of the list page, in display order, as Filament's `getTabs()` on a List page:
+    /// each [`Tab`] has a key, a label and the conditions its rows meet, and shows the number
+    /// of rows it matches for the current search. The list's `tab` query parameter chooses
+    /// one. The panel reads them once, when it is built. The default is none: the list has no
+    /// tabs, as before. `#[derive(IgniteResource)]` writes it for `#[ignite(tabs = path)]`.
+    fn tabs() -> Vec<Tab> {
+        Vec::new()
+    }
+
+    /// The key of the tab a list request without a `tab` parameter shows, as Filament's
+    /// `getDefaultActiveTab()`. The default, `None` (or a key that is not a tab), is the first
+    /// tab. `#[derive(IgniteResource)]` writes it for `#[ignite(default_active_tab = "key")]`.
+    fn default_active_tab() -> Option<&'static str> {
+        None
+    }
+
+    /// The list columns that show their value as a coloured badge, as Filament's `badge()`
+    /// and `color()` on a text column (see [`ColumnBadges`]). The panel reads them once, when
+    /// it is built. The default is none: every cell is plain text. `#[derive(IgniteResource)]`
+    /// writes it for `#[ignite(badges = path)]`.
+    fn column_badges() -> ColumnBadges {
+        ColumnBadges::new()
     }
 
     /// The choices of a [`FieldKind::Lookup`](crate::FieldKind::Lookup) field, as

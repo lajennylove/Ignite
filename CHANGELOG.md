@@ -8,6 +8,23 @@ All notable changes to Ignite are listed here. The format follows
 
 ### Added
 
+- List tabs, as Filament's `getTabs()` on a List page: `ignite_core::Tab` (`make`, `label`,
+  `filter`, `where_eq`, `where_ne`, `where_in`, `where_null`, `where_not_null`), its conditions
+  as `ListFilter` (with `apply` on an Orbit query and `matches` on a row) and
+  `FilterCondition`, and `active_tab`. `IgniteResource::tabs()` and `default_active_tab()`
+  (default: none), `RuntimeResource::tab` and `default_active_tab`, and the derive's
+  `#[ignite(tabs = path)]` and `#[ignite(default_active_tab = "key")]`. The `tab` query
+  parameter chooses the tab, as Filament's `?tab=`; the first tab is the default. Each tab shows
+  the number of rows it matches for the current search, as "Drafts (3)", and its link keeps
+  the search and sort. The tabs are plain links, so they work without JavaScript.
+- Column badges, as Filament's `badge()` and `color()` on a text column: `ColumnBadges`
+  (`badge`, `badge_color`) with `BadgeColor` (`Gray`, `Info`, `Success`, `Warning`, `Danger`,
+  `Primary`, the default). `IgniteResource::column_badges()`, `RuntimeResource::badge` and
+  `badge_color`, and the derive's `#[ignite(badges = path)]`. A badge cell renders
+  `<span class="ig-badge ig-badge-<color>">`, with its value escaped.
+- A list with tabs or badges loads the panel's `list.css`; a list without them renders exactly
+  as before.
+
 - Child navigation entries, as Filament's `$navigationParentItem`:
   `IgniteResource::NAVIGATION_PARENT_ITEM`, the derive's
   `#[ignite(navigation_parent_item = "Posts")]` and `RuntimeResource::navigation_parent_item`
@@ -63,6 +80,12 @@ All notable changes to Ignite are listed here. The format follows
 
 ### Changed
 
+- **Breaking:** `ListQuery` has a new public field, `filter`, the active tab's conditions, so
+  code that builds a `ListQuery` with a struct literal must set it (`ListFilter::new()` for
+  none). A hand-written `list` (or `RuntimeData::list`) of a resource with tabs must apply it;
+  the panel counts a tab's rows by asking for `per_page` 0.
+- `RuntimeResource` has the new public fields `tabs`, `default_active_tab` and
+  `column_badges`.
 - The sign-in page sends a user who is already signed in, by the session or by the remember
   cookie, to the panel's dashboard, as Laravel's `guest` middleware
   (`RedirectIfAuthenticated`). A signed-out user sees the page as before, and a sign-in attempt

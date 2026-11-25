@@ -6,7 +6,7 @@
 
 @section('ignite_stylesheets')@include('ignite::partials.stylesheets')@endsection
 
-@section('ignite_head')@if (theme_style)<style>{!! $theme_style !!}</style>@endif@endsection
+@section('ignite_head')@if (theme_style)<style>{!! $theme_style !!}</style>@endif@if (has_list_styles)@vite(['ui::resources/css/list.css'])@endif@endsection
 
 @section('ignite_html')data-theme="{{ $theme }}"@endsection
 
@@ -36,11 +36,18 @@
     @if (can_create)
       <a class="ig-btn ig-btn-primary" href="{{ $new_url }}">New {{ $singular }}</a>
     @endif
-  </div>
+  </div>@if (has_tabs)
+
+  <nav class="ig-tabs" aria-label="{{ $title }}">
+    @foreach (tab in tabs)
+      <a class="{{ $tab.class }}" href="{{ $tab.url }}"@if (tab.active) aria-current="page"@endif>{{ $tab.label }} <span class="ig-tab-count">({{ $tab.count }})</span></a>
+    @endforeach
+  </nav>@endif
 
   <section class="ig-card p-0">
     <form class="flex flex-wrap items-center gap-3 border-b border-border p-5" method="get" action="{{ $index_url }}">
-      <input class="ig-input max-w-sm flex-[1_1_14rem]" type="search" name="q" value="{{ $search }}" placeholder="Search">
+      <input class="ig-input max-w-sm flex-[1_1_14rem]" type="search" name="q" value="{{ $search }}" placeholder="Search">@if (has_tab_param)
+      <input type="hidden" name="tab" value="{{ $tab_param }}">@endif
       <button type="submit" class="ig-btn ig-btn-outline">Search</button>
     </form>
 
@@ -64,7 +71,7 @@
           @forelse (row in rows)
             <tr>
               @foreach (cell in row.cells)
-                <td>{{ $cell.text }}</td>
+                <td>@if (cell.badge)<span class="ig-badge ig-badge-{{ $cell.color }}">{{ $cell.text }}</span>@else{{ $cell.text }}@endif</td>
               @endforeach
               <td class="whitespace-nowrap text-right">
                 @if (row.can_update)

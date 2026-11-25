@@ -30,6 +30,7 @@ use crate::condition::{FieldConditions, FormContext, Operation};
 use crate::field::{self as check, Block, Column, Field, FieldKind};
 use crate::form::{FieldErrors, FormInput};
 use crate::layout::FormLayout;
+use crate::list::{BadgeColor, ColumnBadges, Tab};
 use crate::policy::ActingUser;
 use crate::query::{ListQuery, Page};
 
@@ -51,7 +52,9 @@ pub type RuntimeFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, Error>> + 
 /// so a source that does not depend on the user implements only those.
 pub trait RuntimeData: Send + Sync + 'static {
     /// Returns one page of rows that match `query`. The sort key, when there is one, is a
-    /// sortable column of the resource.
+    /// sortable column of the resource. The rows and the total must meet the active tab's
+    /// conditions in [`ListQuery::filter`] (see [`ListFilter`](crate::ListFilter)); a
+    /// `per_page` of 0 asks only for the total, to count a tab's rows.
     fn list<'a>(&'a self, db: &'a Database, query: &'a ListQuery) -> RuntimeFuture<'a, Page<Row>>;
     /// Returns the row with `id`, or `None` if there is no such row.
     fn find<'a>(&'a self, db: &'a Database, id: i64) -> RuntimeFuture<'a, Option<Row>>;
@@ -415,6 +418,15 @@ pub struct RuntimeResource {
     /// The layout of the create and edit forms, as Filament's layout components. See
     /// [`FormLayout`]. The default has none: the form renders as one card of fields.
     pub form_layout: FormLayout,
+    /// The tabs of the list page, in display order, as Filament's `getTabs()`. See
+    /// [`IgniteResource::tabs`](crate::IgniteResource::tabs). The default is none.
+    pub tabs: Vec<Tab>,
+    /// The key of the tab shown when the list has no `tab` parameter, as Filament's
+    /// `getDefaultActiveTab()`. `None`, the default, is the first tab.
+    pub default_active_tab: Option<String>,
+    /// The list columns shown as coloured badges, as Filament's `badge()` and `color()`. See
+    /// [`ColumnBadges`]. The default is none.
+    pub column_badges: ColumnBadges,
 }
 
 impl fmt::Debug for RuntimeResource {
@@ -433,6 +445,9 @@ impl fmt::Debug for RuntimeResource {
             .field("navigation_icon", &self.navigation_icon)
             .field("conditions", &self.conditions)
             .field("form_layout", &self.form_layout)
+            .field("tabs", &self.tabs)
+            .field("default_active_tab", &self.default_active_tab)
+            .field("column_badges", &self.column_badges)
             .finish_non_exhaustive()
     }
 }
@@ -460,6 +475,9 @@ impl RuntimeResource {
             navigation_icon: None,
             conditions: FieldConditions::new(),
             form_layout: FormLayout::new(),
+            tabs: Vec::new(),
+            default_active_tab: None,
+            column_badges: ColumnBadges::new(),
         }
     }
 
@@ -568,6 +586,41 @@ impl RuntimeResource {
     /// Filament's layout components. See [`FormLayout`].
     pub fn form_layout(mut self, layout: FormLayout) -> Self {
         self.form_layout = layout;
+        self
+    }
+
+    /// Adds a tab to the list page after the others, as a [`Tab`] in Filament's `getTabs()`.
+    /// The [`RuntimeData`] list is given the active tab's conditions in
+    /// [`ListQuery::filter`]: apply them with [`ListFilter::apply`](crate::ListFilter::apply)
+    /// or [`ListFilter::matches`](crate::ListFilter::matches).
+    pub fn tab(mut self, tab: Tab) -> Self {
+        self.tabs.push(tab);
+        self
+    }
+
+    /// Sets the tab shown when the list has no `tab` parameter, by its key, as Filament's
+    /// `getDefaultActiveTab()`. Without it, the first tab is shown.
+    pub fn default_active_tab(mut self, key: impl Into<String>) -> Self {
+        self.default_active_tab = Some(key.into());
+        self
+    }
+
+    /// Shows the column `column` as a badge in the primary colour, as Filament's `->badge()`.
+    /// See [`ColumnBadges::badge`].
+    pub fn badge(mut self, column: impl Into<String>) -> Self {
+        self.column_badges = self.column_badges.badge(column);
+        self
+    }
+
+    /// Shows the column `column` as a badge whose colour `color` picks from the cell's state,
+    /// as Filament's `->badge()->color(fn (string $state) => ...)`. See
+    /// [`ColumnBadges::badge_color`].
+    pub fn badge_color(
+        mut self,
+        column: impl Into<String>,
+        color: impl Fn(&str) -> BadgeColor + Send + Sync + 'static,
+    ) -> Self {
+        self.column_badges = self.column_badges.badge_color(column, color);
         self
     }
 }
@@ -821,6 +874,21 @@ impl RegisteredResource {
     /// The layout of the create and edit forms.
     pub fn form_layout(&self) -> &FormLayout {
         &self.resource.form_layout
+    }
+
+    /// The tabs of the list page, in display order.
+    pub fn tabs(&self) -> &[Tab] {
+        &self.resource.tabs
+    }
+
+    /// The key of the tab shown when the list has no `tab` parameter, if set.
+    pub fn default_active_tab(&self) -> Option<&str> {
+        self.resource.default_active_tab.as_deref()
+    }
+
+    /// The list columns shown as coloured badges.
+    pub fn column_badges(&self) -> &ColumnBadges {
+        &self.resource.column_badges
     }
 
     /// [`validate`](Self::validate) for a form whose fields `hidden` are hidden (see

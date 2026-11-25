@@ -41,7 +41,7 @@ use crate::views::{
     admin_theme_options, cell_text, compiled, content_width_class, editor_for, field_views,
     form_field_views, layout_columns, layout_grid_class, live_values, record_form, render_page,
     CardView, CellView, ColumnHead, DashboardPage, FormChoices, FormPage, HeaderView, IndexPage,
-    LatestRow, LatestTable, Layout, LoginPage, ProfilePage, RowView,
+    LatestRow, LatestTable, Layout, LoginPage, ProfilePage, RowView, TabView,
 };
 
 /// The largest form body the panel reads.
@@ -877,10 +877,11 @@ async fn avatar(
 
 // Rocket takes each query parameter as an argument, so the list has many.
 #[allow(clippy::too_many_arguments)]
-#[get("/<slug>?<q>&<sort>&<dir>&<page>")]
+#[get("/<slug>?<q>&<tab>&<sort>&<dir>&<page>")]
 async fn index(
     slug: &str,
     q: Option<String>,
+    tab: Option<String>,
     sort: Option<String>,
     dir: Option<String>,
     page: Option<String>,
@@ -907,11 +908,21 @@ async fn index(
     let page_no = page.and_then(|p| p.parse::<i64>().ok()).unwrap_or(1).max(1);
     // A resource that declares 0 rows per page would divide by zero below, so it shows 1.
     let per_page = resource.per_page().max(1);
+    // The tab, as Filament's `?tab=`: the requested one, or the default. A resource without
+    // tabs ignores the parameter, so its list and its links are as before.
+    let tabs = resource.tabs();
+    let requested_tab = tab
+        .as_deref()
+        .map(str::trim)
+        .filter(|key| !key.is_empty() && !tabs.is_empty());
+    let active = ignite_core::active_tab(tabs, requested_tab, resource.default_active_tab());
+    let tab_param = requested_tab.or(active.map(|t| t.key.as_str()));
     let query = ListQuery {
         page: page_no,
         per_page,
         search: (!search.is_empty()).then(|| search.clone()),
         sort: sort.clone().map(|key| (key, direction)),
+        filter: active.map(|t| t.filter.clone()).unwrap_or_default(),
     };
 
     let keys: Vec<&str> = columns.iter().map(|c| c.key.as_str()).collect();
@@ -920,6 +931,18 @@ async fn index(
         .list(db.inner(), user, &query)
         .await
         .map_err(db_status)?;
+    let tab_views = tab_views(
+        resource.as_ref(),
+        db.inner(),
+        user,
+        &query,
+        active.map(|t| t.key.as_str()),
+        total,
+        &index_url,
+    )
+    .await
+    .map_err(db_status)?;
+    let badges = resource.column_badges();
     let lookups = lookup_choices(db.inner(), user, resource.as_ref(), &keys)
         .await
         .map_err(db_status)?;
@@ -934,8 +957,14 @@ async fn index(
         rows.push(RowView {
             cells: columns
                 .iter()
-                .map(|c| CellView {
-                    text: choice_text(record.get(&c.key), lookups.get(&c.key)),
+                .map(|c| {
+                    let text = choice_text(record.get(&c.key), lookups.get(&c.key));
+                    // A badge shows the cell's value; an empty cell has no badge, as in
+                    // Filament. Its colour is picked from the stored value.
+                    match badges.color(&c.key, &cell_text(record.get(&c.key))) {
+                        Some(color) if !text.is_empty() => CellView::badge(text, color),
+                        _ => CellView::plain(text),
+                    }
                 })
                 .collect(),
             edit_url: format!("{index_url}/{id}/edit"),
@@ -959,7 +988,13 @@ async fn index(
             ColumnHead {
                 label: c.label.clone(),
                 sortable: c.sortable,
-                sort_url: list_url(&index_url, &search, Some((c.key.as_str(), next)), 1),
+                sort_url: list_url(
+                    &index_url,
+                    &search,
+                    tab_param,
+                    Some((c.key.as_str(), next)),
+                    1,
+                ),
                 indicator,
             }
         })
@@ -1007,9 +1042,14 @@ async fn index(
         page: page_no,
         last_page,
         has_prev: page_no > 1,
-        prev_url: list_url(&index_url, &search, sort_pair, page_no - 1),
+        prev_url: list_url(&index_url, &search, tab_param, sort_pair, page_no - 1),
         has_next: page_no < last_page,
-        next_url: list_url(&index_url, &search, sort_pair, page_no + 1),
+        next_url: list_url(&index_url, &search, tab_param, sort_pair, page_no + 1),
+        has_tabs: !tab_views.is_empty(),
+        tabs: tab_views,
+        has_tab_param: tab_param.is_some(),
+        tab_param: tab_param.unwrap_or_default().to_string(),
+        has_list_styles: !tabs.is_empty() || !badges.is_empty(),
     };
     Ok(render_page(
         "ignite::index",
@@ -1532,11 +1572,20 @@ fn record_id(record: &Value) -> Result<i64, Status> {
     })
 }
 
-/// The list URL with the search, sort and page kept in the query string.
-fn list_url(base: &str, search: &str, sort: Option<(&str, &str)>, page: i64) -> String {
+/// The list URL with the search, tab, sort and page kept in the query string.
+fn list_url(
+    base: &str,
+    search: &str,
+    tab: Option<&str>,
+    sort: Option<(&str, &str)>,
+    page: i64,
+) -> String {
     let mut query = form_urlencoded::Serializer::new(String::new());
     if !search.is_empty() {
         query.append_pair("q", search);
+    }
+    if let Some(tab) = tab {
+        query.append_pair("tab", tab);
     }
     if let Some((key, dir)) = sort {
         query.append_pair("sort", key).append_pair("dir", dir);
@@ -1687,6 +1736,59 @@ fn choice_text(value: Option<&Value>, choices: Option<&Vec<(String, String)>>) -
         .unwrap_or(stored)
 }
 
+/// The tabs of a list, as Filament renders `getTabs()`: each with its label, the number of
+/// rows it matches for the current search, and its link, which keeps the search and sort and
+/// goes back to page 1, as Filament resets the page when the tab changes. The active tab's
+/// count is the list's `total`; each other tab is counted with a query for its total only.
+/// None for a resource without tabs.
+async fn tab_views(
+    resource: &dyn Erased,
+    db: &Database,
+    user: &ActingUser,
+    query: &ListQuery,
+    active: Option<&str>,
+    total: i64,
+    index_url: &str,
+) -> Result<Vec<TabView>, OrbitError> {
+    let search = query.search.as_deref().unwrap_or_default();
+    let dir_name = |direction: &Direction| match direction {
+        Direction::Asc => "asc",
+        Direction::Desc => "desc",
+    };
+    let sort = query
+        .sort
+        .as_ref()
+        .map(|(key, direction)| (key.as_str(), dir_name(direction)));
+    let mut views = Vec::with_capacity(resource.tabs().len());
+    for tab in resource.tabs() {
+        let is_active = active == Some(tab.key.as_str());
+        let count = if is_active {
+            total
+        } else {
+            let count_query = ListQuery {
+                page: 1,
+                per_page: 0,
+                search: query.search.clone(),
+                sort: None,
+                filter: tab.filter.clone(),
+            };
+            resource.list(db, user, &count_query).await?.1
+        };
+        views.push(TabView {
+            label: tab.label.clone(),
+            count,
+            url: list_url(index_url, search, Some(&tab.key), sort, 1),
+            active: is_active,
+            class: if is_active {
+                "ig-tab ig-tab-active"
+            } else {
+                "ig-tab"
+            },
+        });
+    }
+    Ok(views)
+}
+
 /// Builds a dashboard table from a resource's declaration and its newest records.
 /// A declared key that is not a column shows its key as the heading.
 fn latest_table(
@@ -1711,9 +1813,7 @@ fn latest_table(
             cells: declared
                 .columns
                 .iter()
-                .map(|key| CellView {
-                    text: choice_text(record.get(*key), lookups.get(*key)),
-                })
+                .map(|key| CellView::plain(choice_text(record.get(*key), lookups.get(*key))))
                 .collect(),
         })
         .collect();

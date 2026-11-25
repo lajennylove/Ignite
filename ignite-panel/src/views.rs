@@ -606,6 +606,29 @@ pub(crate) struct IndexPage {
     pub(crate) prev_url: String,
     pub(crate) has_next: bool,
     pub(crate) next_url: String,
+    /// Whether the list has tabs, as Filament's `getTabs()`: the tab links show above the
+    /// table.
+    pub(crate) has_tabs: bool,
+    pub(crate) tabs: Vec<TabView>,
+    /// Whether the links and the search form keep a `tab` parameter, and its value.
+    pub(crate) has_tab_param: bool,
+    pub(crate) tab_param: String,
+    /// Whether the page loads `resources/css/list.css`, which styles the tabs and the badge
+    /// colours: only a list with tabs or badge columns does, so the others keep the panel's
+    /// stylesheet as it was.
+    pub(crate) has_list_styles: bool,
+}
+
+/// One tab of a list page: its label, the number of rows it matches for the current search,
+/// and its link.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct TabView {
+    pub(crate) label: String,
+    pub(crate) count: i64,
+    pub(crate) url: String,
+    pub(crate) active: bool,
+    /// `ig-tab`, with `ig-tab-active` for the active tab.
+    pub(crate) class: &'static str,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -628,9 +651,36 @@ pub(crate) struct RowView {
     pub(crate) can_delete: bool,
 }
 
+/// One cell of a list: its text, shown plain, or as a coloured badge, as Filament's
+/// `badge()` and `color()` on a text column.
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct CellView {
     pub(crate) text: String,
+    /// Whether the text shows as a badge.
+    pub(crate) badge: bool,
+    /// The badge's colour name, such as `gray` or `success`: its class is `ig-badge-<color>`.
+    /// Empty for a plain cell.
+    pub(crate) color: &'static str,
+}
+
+impl CellView {
+    /// A cell of plain text.
+    pub(crate) fn plain(text: String) -> Self {
+        CellView {
+            text,
+            badge: false,
+            color: "",
+        }
+    }
+
+    /// A cell whose text shows as a badge of `color`.
+    pub(crate) fn badge(text: String, color: ignite_core::BadgeColor) -> Self {
+        CellView {
+            text,
+            badge: true,
+            color: color.as_str(),
+        }
+    }
 }
 
 /// The create and edit forms.

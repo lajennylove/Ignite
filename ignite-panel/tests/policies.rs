@@ -742,6 +742,7 @@ fn the_defaults_pass_through_without_the_user_and_allow_every_action() {
         per_page: 20,
         search: None,
         sort: None,
+        filter: Default::default(),
     };
     let row = Row::from_iter([("title".to_string(), json!("Dune"))]);
     t.run(async {

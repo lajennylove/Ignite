@@ -1,4 +1,7 @@
-//! What the list view asks for: the page, the search text and the sort.
+//! What the list view asks for: the page, the search text, the sort and the active tab's
+//! conditions.
+
+use crate::list::ListFilter;
 
 /// The sort direction of a list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -9,8 +12,8 @@ pub enum Direction {
     Desc,
 }
 
-/// What the list view asks a resource for. Only `search` and `sort` come from
-/// the user, through the query string.
+/// What the list view asks a resource for. Only `search`, `sort` and the tab whose `filter`
+/// applies come from the user, through the query string.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ListQuery {
     /// The page to return, 1-based.
@@ -22,6 +25,14 @@ pub struct ListQuery {
     /// The column key to sort by and the direction, if the user chose one.
     /// The key is one of the resource's sortable columns.
     pub sort: Option<(String, Direction)>,
+    /// The conditions of the active [`Tab`](crate::Tab), as Filament's `modifyQueryUsing()`:
+    /// the rows and the total must meet them, beside the search. Empty when the resource has
+    /// no tabs, or the tab has no conditions. `#[derive(IgniteResource)]` applies it; a
+    /// hand-written list applies it with [`ListFilter::apply`] or [`ListFilter::matches`].
+    ///
+    /// To count each tab's rows, the panel asks for page 1 with `per_page` 0: only the total
+    /// is read.
+    pub filter: ListFilter,
 }
 
 impl ListQuery {
@@ -65,6 +76,7 @@ mod tests {
             per_page,
             search: None,
             sort: None,
+            filter: ListFilter::new(),
         }
     }
 
