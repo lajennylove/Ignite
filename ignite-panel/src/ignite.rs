@@ -13,6 +13,7 @@ use rocket::{Build, Request, Response, Rocket};
 use crate::brand::{self, Brand};
 use crate::erased::{Adapter, Erased, RuntimeAdapter};
 use crate::mail::{Mailer, NotConfigured};
+use crate::navigation::NavigationGroup;
 use crate::proxy::TrustedProxies;
 use crate::routes;
 use crate::session;
@@ -72,7 +73,10 @@ pub(crate) struct Registry {
     pub(crate) brand: Brand,
     /// The navigation groups in the order the sidebar shows them (see
     /// [`Ignite::navigation_groups`]).
-    pub(crate) navigation_groups: Vec<String>,
+    pub(crate) navigation_groups: Vec<NavigationGroup>,
+    /// Whether a group that does not say collapses (see
+    /// [`Ignite::collapsible_navigation_groups`]).
+    pub(crate) collapsible_navigation_groups: bool,
 }
 
 impl Registry {
@@ -148,7 +152,8 @@ pub struct Ignite {
     user_callbacks: UserCallbacks,
     storage: PathBuf,
     brand: Brand,
-    navigation_groups: Vec<String>,
+    navigation_groups: Vec<NavigationGroup>,
+    collapsible_navigation_groups: bool,
 }
 
 impl Ignite {
@@ -217,6 +222,7 @@ impl Ignite {
             storage: PathBuf::from(users::DEFAULT_STORAGE_DIR),
             brand: Brand::default(),
             navigation_groups: Vec::new(),
+            collapsible_navigation_groups: true,
         }
     }
 
@@ -497,16 +503,31 @@ impl Ignite {
     /// is not listed here comes after the listed ones. Each call adds to the list, as in
     /// Filament.
     ///
+    /// A group is a label, or a [`NavigationGroup`] that also says whether the group is
+    /// collapsible or starts collapsed, as Filament's panel takes labels or `NavigationGroup`
+    /// objects.
+    ///
     /// ```ignore
     /// Ignite::new().navigation_groups(["Content", "Shop", "Settings"])
+    /// Ignite::new().navigation_groups([NavigationGroup::make("Settings").collapsed(true)])
     /// ```
     pub fn navigation_groups<I, S>(mut self, groups: I) -> Self
     where
         I: IntoIterator<Item = S>,
-        S: Into<String>,
+        S: Into<NavigationGroup>,
     {
         self.navigation_groups
             .extend(groups.into_iter().map(Into::into));
+        self
+    }
+
+    /// Whether every navigation group is collapsible, as Filament's panel
+    /// `collapsibleNavigationGroups()`: its heading collapses and expands its entries, and the
+    /// browser remembers which groups the user collapsed. The default is `true`, as in
+    /// Filament; `false` renders each group under a plain heading. A [`NavigationGroup`] that
+    /// says otherwise wins.
+    pub fn collapsible_navigation_groups(mut self, collapsible: bool) -> Self {
+        self.collapsible_navigation_groups = collapsible;
         self
     }
 
@@ -537,6 +558,7 @@ impl Ignite {
             storage,
             brand,
             navigation_groups,
+            collapsible_navigation_groups,
         } = self;
         // Users created or deleted from now on run the app's callbacks.
         users::install_callbacks(user_callbacks);
@@ -567,6 +589,7 @@ impl Ignite {
                 runtime_permissions: Mutex::new(HashSet::new()),
                 brand,
                 navigation_groups,
+                collapsible_navigation_groups,
             };
             Ok(rocket
                 .manage(db)

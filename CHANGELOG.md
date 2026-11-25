@@ -4,6 +4,29 @@ All notable changes to Ignite are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Child navigation entries, as Filament's `$navigationParentItem`:
+  `IgniteResource::NAVIGATION_PARENT_ITEM`, the derive's
+  `#[ignite(navigation_parent_item = "Posts")]` and `RuntimeResource::navigation_parent_item`
+  name the parent entry by label or slug. A child is listed under its parent, sorted by its
+  `NAVIGATION_SORT`, and shows when the parent or one of its children is the current page. As
+  in Filament, the parent must be in the same group and not a child itself; a child whose
+  parent is not in the sidebar is not listed. The dashboard can be a parent.
+- Collapsible navigation groups, as Filament's: `NavigationGroup::make(label)` with
+  `collapsible(bool)` and `collapsed(bool)`, passed to `Ignite::navigation_groups` beside
+  plain labels, and `Ignite::collapsible_navigation_groups(bool)` for every group. The
+  browser remembers the collapsed groups (localStorage `ignite:sidebar:collapsed_groups`, as
+  Filament's), the group of the current page shows expanded, and without JavaScript every
+  group is expanded. As in Filament, groups are collapsible by default;
+  `collapsible_navigation_groups(false)` (or `collapsible(false)` on a group) keeps the plain
+  headings of 0.6.2.
+- The navigation view values `children`, `has_children`, `has_active_child` and `expanded` on
+  each entry, `collapsible`, `collapsed`, `active` and `items_id` on each section, and
+  `nav_collapsible`, for themes.
+
 ## [0.6.3] - 2026-11-23
 
 ### Added

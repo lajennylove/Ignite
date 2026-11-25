@@ -61,6 +61,14 @@ pub trait IgniteResource: Send + Sync + 'static {
     /// comes first. The default, `None`, comes before any number. In a group, resources with
     /// the same place are listed by label; without a group, in the order they were added.
     const NAVIGATION_SORT: Option<i32> = None;
+    /// The navigation entry the resource is listed under, as Filament's
+    /// `$navigationParentItem`: the parent's navigation label (or its slug, as Filament also
+    /// takes the parent's class). The entry shows under its parent, as a submenu does, sorted
+    /// among the other children by [`NAVIGATION_SORT`](Self::NAVIGATION_SORT). As in Filament,
+    /// the parent must be in the same navigation group and must not be a child itself, and an
+    /// entry whose parent is not in the sidebar (unknown, or one the user may not see) is not
+    /// listed. The default, `None`, lists the resource as an entry of its own.
+    const NAVIGATION_PARENT_ITEM: Option<&'static str> = None;
     /// The name of the resource's navigation icon, as Filament's `$navigationIcon`: a name
     /// that says what the resource is, such as `"post"`, `"page"`, `"media"`, `"comment"`,
     /// `"users"` or `"settings"`, or a name of the app's own, such as a custom post type's

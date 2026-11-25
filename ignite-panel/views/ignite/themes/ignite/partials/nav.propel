@@ -7,8 +7,11 @@
   </a>
   <nav class="flex flex-col gap-1 px-4 pb-6" aria-label="Main">
     <p class="ig-caption mt-2">Menu</p>
-    @foreach (section in nav_sections)@if (section.has_heading)<p class="ig-caption mt-5">{{ $section.heading }}</p>
-    @endif@foreach (group in section.items)
+    @foreach (section in nav_sections)@if (section.has_heading)@if (section.collapsible)<div class="flex flex-col gap-1" data-ig-nav-group="{{ $section.heading }}"@if (section.collapsed) data-ig-nav-collapsed@endif@if (section.active) data-ig-nav-active@endif>
+    <button type="button" class="ig-caption mt-5 flex w-full items-center justify-between" aria-expanded="true" aria-controls="{{ $section.items_id }}" data-ig-nav-toggle>{{ $section.heading }}<i class="ti ti-chevron-down text-lg transition-transform" aria-hidden="true"></i></button>
+    <div id="{{ $section.items_id }}" class="flex flex-col gap-1">
+    @else<p class="ig-caption mt-5">{{ $section.heading }}</p>
+    @endif@endif@foreach (group in section.items)
       @if (group.active)
         <a class="ig-nav-link ig-nav-link-active" href="{{ $group.url }}" aria-current="page"><i class="{{ $group.icon }} text-lg"></i>{{ $group.title }}</a>
       @else
@@ -16,8 +19,57 @@
       @endif
       @if (group.has_add)
         <a class="ig-nav-link py-1.5 pl-11 text-[13px]" href="{{ $group.add_url }}">Add new</a>
-      @endif
-    @endforeach@endforeach
+      @endif@if (group.expanded)@foreach (child in group.children)
+        @if (child.active)<a class="ig-nav-link ig-nav-link-active py-1.5 pl-11 text-[13px]" href="{{ $child.url }}" aria-current="page">{{ $child.title }}</a>@else<a class="ig-nav-link py-1.5 pl-11 text-[13px]" href="{{ $child.url }}">{{ $child.title }}</a>@endif
+      @endforeach@endif
+    @endforeach@if (section.collapsible)</div>
+    </div>
+    @endif@endforeach
   </nav>
-</aside>
+@if (nav_collapsible)  <script>
+  // Collapsible navigation groups, as Filament's: the heading collapses or expands the group,
+  // and the browser remembers the collapsed groups by label (localStorage, as Filament's
+  // `filament:sidebar:collapsed_groups`). A group starts collapsed when the panel says so and
+  // nothing is saved yet. The group of the current page shows expanded. Without JavaScript
+  // every group shows its entries.
+  (() => {
+    const key = 'ignite:sidebar:collapsed_groups';
+    let saved = null;
+    try {
+      saved = JSON.parse(window.localStorage.getItem(key));
+    } catch (error) {}
+    const groups = Array.from(document.querySelectorAll('[data-ig-nav-group]'));
+    let collapsed = Array.isArray(saved)
+      ? saved
+      : groups.filter((group) => group.hasAttribute('data-ig-nav-collapsed')).map((group) => group.dataset.igNavGroup);
+    const save = () => {
+      try {
+        window.localStorage.setItem(key, JSON.stringify(collapsed));
+      } catch (error) {}
+    };
+    if (!Array.isArray(saved)) {
+      save();
+    }
+    const show = (group, expanded) => {
+      const button = group.querySelector('[data-ig-nav-toggle]');
+      button.setAttribute('aria-expanded', String(expanded));
+      document.getElementById(button.getAttribute('aria-controls')).hidden = !expanded;
+      button.querySelector('i').style.transform = expanded ? '' : 'rotate(-90deg)';
+    };
+    groups.forEach((group) => {
+      const label = group.dataset.igNavGroup;
+      show(group, group.hasAttribute('data-ig-nav-active') || !collapsed.includes(label));
+      group.querySelector('[data-ig-nav-toggle]').addEventListener('click', (event) => {
+        const expanded = event.currentTarget.getAttribute('aria-expanded') !== 'true';
+        collapsed = collapsed.filter((other) => other !== label);
+        if (!expanded) {
+          collapsed.push(label);
+        }
+        save();
+        show(group, expanded);
+      });
+    });
+  })();
+  </script>
+@endif</aside>
 @endif

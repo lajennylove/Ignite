@@ -66,9 +66,20 @@
 //! `stylesheets`, set with [`Ignite::brand_name`](crate::Ignite::brand_name) and the methods beside it),
 //! `nav_sections` (the sidebar in sections, each with `has_heading`, `heading` and `items`, as
 //! [`Ignite::navigation_groups`](crate::Ignite::navigation_groups) orders them) and `nav` (the
-//! same entries in one list). Each entry has `title`, `url`, `active`, `has_add`, `add_url`,
-//! `icon` (the CSS classes of the entry's icon, as the theme resolves it) and `icon_name` (the
-//! icon's name, such as `post`, or empty for a resource that names none).
+//! same entries in one list, each child after its parent). Each entry has `title`, `url`,
+//! `active`, `has_add`, `add_url`, `icon` (the CSS classes of the entry's icon, as the theme
+//! resolves it) and `icon_name` (the icon's name, such as `post`, or empty for a resource that
+//! names none).
+//!
+//! An entry of `nav_sections` also has `children` (the entries listed under it with
+//! `NAVIGATION_PARENT_ITEM`, as Filament's child items, in order), `has_children`,
+//! `has_active_child` and `expanded` (the entry or one of its children is the current page:
+//! Filament shows the children then). A section also has `collapsible` (the heading collapses
+//! the group, as Filament's collapsible navigation groups), `collapsed` (the group starts
+//! collapsed), `active` (the group holds the current page) and `items_id` (the `id` for the
+//! heading's `aria-controls`), and `nav_collapsible` says whether any section is collapsible.
+//! The `ignite` theme's `partials.nav` renders each group expanded, and its script collapses
+//! the groups the browser remembers, so without JavaScript every group shows its entries.
 //!
 //! # Icons
 //!
