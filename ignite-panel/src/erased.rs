@@ -8,7 +8,8 @@ use std::sync::Arc;
 
 use ignite_core::{
     ActingUser, ColumnDef, Database, FieldConditions, FieldDef, FieldErrors, FieldKindDef,
-    FormInput, IgniteResource, LatestRecords, ListQuery, RegisteredResource, Row, StatWidget,
+    FormInput, FormLayout, IgniteResource, LatestRecords, ListQuery, RegisteredResource, Row,
+    StatWidget,
 };
 use orbit_orm::Error;
 use serde::Serialize;
@@ -37,6 +38,8 @@ pub(crate) trait Erased: Send + Sync {
     fn columns(&self) -> &[ColumnDef];
     /// The conditions that show or hide the form's fields.
     fn conditions(&self) -> &FieldConditions;
+    /// The layout of the create and edit forms.
+    fn form_layout(&self) -> &FormLayout;
     /// One page of records as JSON, and the total count.
     /// The resource's queries are given the signed-in `user`: they call its `*_for` methods.
     async fn list(
@@ -86,6 +89,7 @@ pub(crate) struct Adapter<R> {
     fields: Vec<FieldDef>,
     columns: Vec<ColumnDef>,
     conditions: FieldConditions,
+    form_layout: FormLayout,
     resource: PhantomData<fn() -> R>,
 }
 
@@ -95,6 +99,7 @@ impl<R: IgniteResource> Adapter<R> {
             fields: R::fields().iter().copied().map(FieldDef::from).collect(),
             columns: R::columns().iter().copied().map(ColumnDef::from).collect(),
             conditions: R::conditions(),
+            form_layout: R::form_layout(),
             resource: PhantomData,
         }
     }
@@ -186,6 +191,10 @@ impl<R: IgniteResource> Erased for Adapter<R> {
 
     fn conditions(&self) -> &FieldConditions {
         &self.conditions
+    }
+
+    fn form_layout(&self) -> &FormLayout {
+        &self.form_layout
     }
 
     async fn list(
@@ -530,6 +539,10 @@ impl Erased for RuntimeAdapter {
 
     fn conditions(&self) -> &FieldConditions {
         self.0.conditions()
+    }
+
+    fn form_layout(&self) -> &FormLayout {
+        self.0.form_layout()
     }
 
     async fn list(

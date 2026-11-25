@@ -67,6 +67,9 @@ pub(crate) struct Registry {
     pub(crate) mailer: Arc<dyn Mailer>,
     /// The app's own URL without a trailing slash, for the links in email (see `IGNITE_APP_URL`).
     pub(crate) app_url: Option<String>,
+    /// Whether a changed form asks before the user leaves it (see
+    /// [`Ignite::unsaved_changes_alerts`]).
+    pub(crate) unsaved_changes_alerts: bool,
     /// The slugs of the runtime resources whose permission rows this panel has registered.
     pub(crate) runtime_permissions: Mutex<HashSet<String>>,
     /// The brand the app set: the name, the logo and the favicon (see [`Ignite::brand_name`]).
@@ -149,6 +152,7 @@ pub struct Ignite {
     trusted_proxies: TrustedProxies,
     mailer: Arc<dyn Mailer>,
     app_url: Option<String>,
+    unsaved_changes_alerts: bool,
     user_callbacks: UserCallbacks,
     storage: PathBuf,
     brand: Brand,
@@ -218,6 +222,7 @@ impl Ignite {
             trusted_proxies,
             mailer: Arc::new(NotConfigured),
             app_url,
+            unsaved_changes_alerts: false,
             user_callbacks: UserCallbacks::default(),
             storage: PathBuf::from(users::DEFAULT_STORAGE_DIR),
             brand: Brand::default(),
@@ -429,6 +434,17 @@ impl Ignite {
         crate::cli::run(&args.into_iter().collect::<Vec<_>>())
     }
 
+    /// Asks before the user leaves a create or edit form they have changed and not saved, as
+    /// Filament's `unsavedChangesAlerts()`: "Are you sure you want to leave? Without saving,
+    /// everything is going to be lost." The panel's script asks when the user follows a link or
+    /// closes or reloads the page (the browser shows its own wording for those). A form that
+    /// has not changed leaves without asking, and saving it does not ask. A form shown again
+    /// because its save failed counts as changed. The default, as in Filament, is off.
+    pub fn unsaved_changes_alerts(mut self) -> Self {
+        self.unsaved_changes_alerts = true;
+        self
+    }
+
     /// Sets the brand name, as Filament's `brandName`: the text at the top of the navigation
     /// and in the sign-in bar, and the end of every page title (`Users · <name>`). The default
     /// is `Ignite`, shown beside the Ignite mark. A name set here shows without the mark; with
@@ -554,6 +570,7 @@ impl Ignite {
             trusted_proxies,
             mailer,
             app_url,
+            unsaved_changes_alerts,
             user_callbacks,
             storage,
             brand,
@@ -586,6 +603,7 @@ impl Ignite {
                 trusted_proxies,
                 mailer,
                 app_url,
+                unsaved_changes_alerts,
                 runtime_permissions: Mutex::new(HashSet::new()),
                 brand,
                 navigation_groups,

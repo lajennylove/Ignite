@@ -13,7 +13,7 @@
 @yield('ignite_aside')
 <div class="flex min-h-screen min-w-0 flex-col @yield('ignite_column')">
   @yield('ignite_bar')
-  <main class="mx-auto w-full max-w-[1536px] flex-1 px-5 py-6">
+  <main class="mx-auto w-full @yield('ignite_content_width', 'max-w-[1536px]') flex-1 px-5 py-6">
     @yield('ignite_flash')
     @yield('content')
   </main>

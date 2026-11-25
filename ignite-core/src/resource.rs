@@ -8,6 +8,7 @@ use serde::Serialize;
 use crate::condition::FieldConditions;
 use crate::field::{Column, Field};
 use crate::form::{FieldErrors, FormInput};
+use crate::layout::FormLayout;
 use crate::policy::ActingUser;
 use crate::query::{ListQuery, Page};
 use crate::widget::{LatestRecords, StatWidget};
@@ -116,6 +117,15 @@ pub trait IgniteResource: Send + Sync + 'static {
     /// of the derive: left out on update, it keeps its stored value.
     fn conditions() -> FieldConditions {
         FieldConditions::new()
+    }
+
+    /// The layout of the create and edit forms: the grid's columns, and the sections and
+    /// groups that place the fields in it, as a Filament resource's `form()` schema with
+    /// `Grid`, `Section`, `Group`, `columns()` and `columnSpan()` (see [`FormLayout`]). The
+    /// panel reads it once, when it is built. The default has no layout: the form renders as
+    /// one card of fields, as before.
+    fn form_layout() -> FormLayout {
+        FormLayout::new()
     }
 
     /// The choices of a [`FieldKind::Lookup`](crate::FieldKind::Lookup) field, as

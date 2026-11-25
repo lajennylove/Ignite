@@ -6,7 +6,7 @@
 
 @section('ignite_stylesheets')@include('ignite::partials.stylesheets')@endsection
 
-@section('ignite_head')@if (theme_style)<style>{!! $theme_style !!}</style>@endif@endsection
+@section('ignite_head')@if (theme_style)<style>{!! $theme_style !!}</style>@endif@if (has_layout)@vite(['ui::resources/css/form.css'])@endif@endsection
 
 @section('ignite_html')data-theme="{{ $theme }}"@endsection
 
@@ -15,6 +15,8 @@
 @endsection
 
 @section('ignite_column')ig-with-sidebar@endsection
+
+@section('ignite_content_width'){{ $content_width }}@endsection
 
 @section('ignite_bar')
   <header class="sticky top-0 z-20 flex items-center border-b border-border bg-page px-5 py-3">
@@ -33,10 +35,10 @@
 @section('content')
   <h1 class="mb-6">{{ $heading }}</h1>
 
-  <form class="ig-card grid max-w-2xl gap-5" method="post" action="{{ $action }}"@if (has_live) data-ignite-live-url="{{ $live_url }}"@endif>
+  <form class="@if (has_layout)grid gap-5@else{{-- no layout: one card, as before --}}ig-card grid max-w-2xl gap-5@endif" method="post" action="{{ $action }}"@if (has_live) data-ignite-live-url="{{ $live_url }}"@endif@if (unsaved_changes_alert) data-ignite-unsaved-changes-alert@endif@if (has_unsaved_changes) data-ignite-unsaved@endif>
     <input type="hidden" name="_token" value="{{ $csrf_token }}">
 
-    <div class="grid gap-5" data-ignite-fields>
+    <div class="@if (has_layout){{ $layout_class }}@else{{-- no layout --}}grid gap-5@endif" data-ignite-fields>@if (has_layout)@include('ignite::partials.form_layout')@endif
       @if (has_live)
         <input type="hidden" name="_ignite_shown" value="{{ $shown_fields }}">
       @endif
@@ -49,7 +51,7 @@
       <button type="submit" class="ig-btn ig-btn-primary">{{ $submit_label }}</button>
       <a class="ig-btn ig-btn-outline" href="{{ $back_url }}">Cancel</a>
     </div>
-  </form>
+  </form>@if (has_form_script)@vite(['ui::resources/js/form.js'])@endif
   @if (has_editor)
     <script src="{{ $editor_script }}" defer></script>
   @endif

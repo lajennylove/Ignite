@@ -26,6 +26,23 @@ All notable changes to Ignite are listed here. The format follows
 - The navigation view values `children`, `has_children`, `has_active_child` and `expanded` on
   each entry, `collapsible`, `collapsed`, `active` and `items_id` on each section, and
   `nav_collapsible`, for themes.
+- Form layouts, as Filament's `Grid`, `Section`, `Group`, `columns()` and `columnSpan()`:
+  `ignite_core::FormLayout` (`columns`, `schema`, `max_content_width`), `Section` (`make`,
+  `description`, `schema`, `column_span`, `column_span_full`), `Group` (`make`, `column_span`,
+  `column_span_full`), `Component`, `ColumnSpan` and `Width` (`ScreenTwoExtraLarge`, `Full`).
+  `IgniteResource::form_layout()` (default: none), `RuntimeResource::form_layout` and its
+  `form_layout` field, `RegisteredResource::form_layout`, and the derive's
+  `#[ignite(form_layout = path)]`. A form with a layout loads the panel's `form.css`; a form
+  without one renders exactly as before.
+- `Width::Full` removes the 1536px cap of the page's content: the layout's `<main>` takes its
+  width class from the `ignite_content_width` section, `max-w-[1536px]` by default.
+- Slug fields, as Filament's slug example: `FieldConditions::slug_from(field, source)` and
+  `RuntimeResource::slug_from`. The input is marked `data-ignite-slug-from="<source>"`.
+- Unsaved changes alerts, as Filament's `unsavedChangesAlerts()`:
+  `Ignite::unsaved_changes_alerts()`, off by default. The form is marked
+  `data-ignite-unsaved-changes-alert`, and `data-ignite-unsaved` when it is shown again after a
+  failed save. The behaviour is in the panel's new `form.js`, which a form page loads only when
+  it needs it.
 
 ## [0.6.3] - 2026-11-23
 

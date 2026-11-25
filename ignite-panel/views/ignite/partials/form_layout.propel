@@ -1,0 +1,22 @@
+{{-- The fields of a form with a layout (FormLayout, as Filament's layout components): one column of the form's grid per top-level section or group, which takes its column span, and in each column its cards, one under the other, so a sidebar stacks its sections. --}}
+@foreach (column in layout_columns)
+      <div class="{{ $column.class }}">
+  @foreach (section in column.sections)
+        <section class="ig-card grid min-w-0 gap-5">
+    @if (section.has_heading)
+          <header>
+            <h2 class="m-0">{{ $section.heading }}</h2>
+      @if (section.has_description)
+            <p class="mt-1.5 mb-0 text-sm">{{ $section.description }}</p>
+      @endif
+          </header>
+    @elseif (section.has_description)
+          <p class="m-0 text-sm">{{ $section.description }}</p>
+    @endif
+    @foreach (field in section.fields)
+      @include('ignite::partials.field')
+    @endforeach
+        </section>
+  @endforeach
+      </div>
+@endforeach

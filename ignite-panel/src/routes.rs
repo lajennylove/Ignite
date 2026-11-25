@@ -38,10 +38,10 @@ use crate::sessions;
 use crate::throttle;
 use crate::users;
 use crate::views::{
-    admin_theme_options, cell_text, compiled, editor_for, field_views, form_field_views,
-    live_values, record_form, render_page, CardView, CellView, ColumnHead, DashboardPage,
-    FormChoices, FormPage, HeaderView, IndexPage, LatestRow, LatestTable, Layout, LoginPage,
-    ProfilePage, RowView,
+    admin_theme_options, cell_text, compiled, content_width_class, editor_for, field_views,
+    form_field_views, layout_columns, layout_grid_class, live_values, record_form, render_page,
+    CardView, CellView, ColumnHead, DashboardPage, FormChoices, FormPage, HeaderView, IndexPage,
+    LatestRow, LatestTable, Layout, LoginPage, ProfilePage, RowView,
 };
 
 /// The largest form body the panel reads.
@@ -1358,6 +1358,22 @@ fn form_view(
         .collect::<Vec<_>>()
         .join(",");
     let editor = editor_for(resource.fields());
+    // The form script asks before a changed form is left, and fills slug fields.
+    let has_form_script =
+        registry.unsaved_changes_alerts || fields.iter().any(|field| field.has_slug_from);
+    // A form with a layout places its fields in the layout's columns and cards; a form
+    // without one renders them in one card, as before.
+    let form_layout = resource.form_layout();
+    let has_layout = !form_layout.is_empty();
+    let (fields, columns, layout_class) = if has_layout {
+        (
+            Vec::new(),
+            layout_columns(form_layout, fields),
+            layout_grid_class(form_layout),
+        )
+    } else {
+        (fields, Vec::new(), String::new())
+    };
     let page = FormPage {
         home_url: layout.home_url,
         signed_in: layout.signed_in,
@@ -1385,6 +1401,13 @@ fn form_view(
         submit_label: target.submit_label,
         back_url: format!("{}/{}", registry.mount, resource.slug()),
         fields,
+        has_layout,
+        layout_class,
+        layout_columns: columns,
+        content_width: content_width_class(form_layout),
+        unsaved_changes_alert: registry.unsaved_changes_alerts,
+        has_unsaved_changes: registry.unsaved_changes_alerts && !errors.is_empty(),
+        has_form_script,
         has_live,
         live_url: target.live_url,
         shown_fields,
