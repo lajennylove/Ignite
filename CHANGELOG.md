@@ -4,7 +4,7 @@ All notable changes to Ignite are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.6.4] - 2026-11-26
 
 ### Added
 
@@ -24,7 +24,6 @@ All notable changes to Ignite are listed here. The format follows
   `<span class="ig-badge ig-badge-<color>">`, with its value escaped.
 - A list with tabs or badges loads the panel's `list.css`; a list without them renders exactly
   as before.
-
 - Child navigation entries, as Filament's `$navigationParentItem`:
   `IgniteResource::NAVIGATION_PARENT_ITEM`, the derive's
   `#[ignite(navigation_parent_item = "Posts")]` and `RuntimeResource::navigation_parent_item`
@@ -61,6 +60,27 @@ All notable changes to Ignite are listed here. The format follows
   failed save. The behaviour is in the panel's new `form.js`, which a form page loads only when
   it needs it.
 
+### Changed
+
+- **Breaking:** `ListQuery` has a new public field, `filter`, the active tab's conditions, so
+  code that builds a `ListQuery` with a struct literal must set it (`ListFilter::new()` for
+  none). A hand-written `list` (or `RuntimeData::list`) of a resource with tabs must apply it;
+  the panel counts a tab's rows by asking for `per_page` 0.
+- **Breaking:** navigation groups are collapsible by default, as in Filament:
+  `Ignite::collapsible_navigation_groups` defaults to `true`. A sidebar that should keep the
+  plain group headings of 0.6.3 calls `collapsible_navigation_groups(false)` (or
+  `collapsible(false)` on a `NavigationGroup`), which renders the same HTML as before.
+- **Breaking:** the sidebar HTML changed. In the `ignite` theme's navigation partial, a
+  collapsible group is a `<div data-ig-nav-group>` whose heading is a
+  `<button data-ig-nav-toggle>` (in place of `<p class="ig-caption">`) that controls the
+  group's entries (`id="{items_id}"`); a child entry is printed under its parent; and the
+  collapse script follows the navigation. A theme, a stylesheet or a test that reads the
+  sidebar's markup must follow it.
+- `RuntimeResource` has the new public fields `navigation_parent_item`, `form_layout`, `tabs`,
+  `default_active_tab` and `column_badges`.
+- The `ignite` theme's layout takes the width class of its `<main>` from the
+  `ignite_content_width` section; the default, `max-w-[1536px]`, renders as before.
+
 ## [0.6.3] - 2026-11-23
 
 ### Added
@@ -80,12 +100,6 @@ All notable changes to Ignite are listed here. The format follows
 
 ### Changed
 
-- **Breaking:** `ListQuery` has a new public field, `filter`, the active tab's conditions, so
-  code that builds a `ListQuery` with a struct literal must set it (`ListFilter::new()` for
-  none). A hand-written `list` (or `RuntimeData::list`) of a resource with tabs must apply it;
-  the panel counts a tab's rows by asking for `per_page` 0.
-- `RuntimeResource` has the new public fields `tabs`, `default_active_tab` and
-  `column_badges`.
 - The sign-in page sends a user who is already signed in, by the session or by the remember
   cookie, to the panel's dashboard, as Laravel's `guest` middleware
   (`RedirectIfAuthenticated`). A signed-out user sees the page as before, and a sign-in attempt
