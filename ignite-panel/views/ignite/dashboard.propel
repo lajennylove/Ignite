@@ -45,9 +45,15 @@
         <p class="m-0 text-sm">{{ $card.description }}</p>@endif
       </div>
     @empty
-      <p class="col-span-full">Nothing to show yet.</p>
+      @if (has_widgets)@else<p class="col-span-full">Nothing to show yet.</p>@endif
     @endforelse
-  </div>
+  </div>@if (has_widgets)
+
+  <div class="mt-8 grid min-w-0 gap-6 grid-cols-[minmax(0,1fr)] lg:grid-cols-2">
+    @foreach (widget in widgets)
+      @if (widget.is_list)@include('ignite::partials.widgets.list')@endif@if (widget.is_form)@include('ignite::partials.widgets.form')@endif
+    @endforeach
+  </div>@endif
 
   @foreach (table in tables)
     <section class="ig-card mt-8 p-0">

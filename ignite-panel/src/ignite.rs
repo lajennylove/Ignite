@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
-use ignite_core::{Database, Field, IgniteResource, StatsOverviewWidget};
+use ignite_core::{Database, Field, FormWidget, IgniteResource, ListWidget, StatsOverviewWidget};
 use orbit_orm::{PoolOptions, Transaction};
 use rocket::catchers;
 use rocket::fairing::{self, AdHoc, Fairing, Info, Kind};
@@ -85,6 +85,15 @@ pub(crate) struct Registry {
     pub(crate) collapsible_navigation_groups: bool,
     /// The dashboard widgets of the panel's own (see [`Ignite::widget`]).
     pub(crate) widgets: Vec<Arc<dyn StatsOverviewWidget>>,
+    /// The list and form widgets of the dashboard, in the order they were added (see
+    /// [`Ignite::list_widget`] and [`Ignite::form_widget`]).
+    pub(crate) dashboard_widgets: Vec<DashboardWidget>,
+}
+
+/// A dashboard widget that renders its own view: a list or a form.
+pub(crate) enum DashboardWidget {
+    List(ListWidget),
+    Form(FormWidget),
 }
 
 impl Registry {
@@ -165,6 +174,7 @@ pub struct Ignite {
     navigation_items: Vec<NavigationItem>,
     collapsible_navigation_groups: bool,
     widgets: Vec<Arc<dyn StatsOverviewWidget>>,
+    dashboard_widgets: Vec<DashboardWidget>,
 }
 
 impl Ignite {
@@ -237,6 +247,7 @@ impl Ignite {
             navigation_items: Vec::new(),
             collapsible_navigation_groups: true,
             widgets: Vec::new(),
+            dashboard_widgets: Vec::new(),
         }
     }
 
@@ -583,6 +594,26 @@ impl Ignite {
         self
     }
 
+    /// Adds a list widget to the dashboard, as a Filament custom widget with its own view: a
+    /// title and rows of a label, a value and a link, such as WordPress's "Activity" and
+    /// "Recently Published" boxes (see [`ListWidget`]). The list and form widgets show after
+    /// the stat cards, in the order they were added, each to the users its
+    /// [`can_view`](ListWidget::can_view) allows. The `ignite` theme renders it with
+    /// `partials.widgets.list`, which a theme can replace.
+    pub fn list_widget(mut self, widget: ListWidget) -> Self {
+        self.dashboard_widgets.push(DashboardWidget::List(widget));
+        self
+    }
+
+    /// Adds a form widget to the dashboard: a short form that creates a record of a resource,
+    /// such as WordPress's "Quick Draft" (see [`FormWidget`]). It shows only to a user who may
+    /// create a record of the resource, and not at all when no resource has its slug. The
+    /// `ignite` theme renders it with `partials.widgets.form`, which a theme can replace.
+    pub fn form_widget(mut self, widget: FormWidget) -> Self {
+        self.dashboard_widgets.push(DashboardWidget::Form(widget));
+        self
+    }
+
     /// Changes the URL prefix of the panel. The default is `/admin`.
     pub fn mount(mut self, path: &str) -> Self {
         self.mount = path.trim_end_matches('/').to_string();
@@ -614,6 +645,7 @@ impl Ignite {
             navigation_items,
             collapsible_navigation_groups,
             widgets,
+            dashboard_widgets,
         } = self;
         // Users created or deleted from now on run the app's callbacks.
         users::install_callbacks(user_callbacks);
@@ -648,6 +680,7 @@ impl Ignite {
                 navigation_items,
                 collapsible_navigation_groups,
                 widgets,
+                dashboard_widgets,
             };
             Ok(rocket
                 .manage(db)

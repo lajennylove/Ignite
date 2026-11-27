@@ -1,0 +1,16 @@
+{{-- A list widget of the dashboard (ListWidget): its title and its rows, each a label with an optional link and value, as WordPress's "Activity" and "Recently Published" boxes. --}}
+<section class="ig-card" aria-labelledby="{{ $widget.title_id }}">
+  <h2 class="mb-5" id="{{ $widget.title_id }}">{{ $widget.title }}</h2>
+  @if (widget.has_rows)
+    <ul class="m-0 grid p-0" role="list">
+      @foreach (row in widget.rows)
+        <li class="flex items-center justify-between gap-4 border-b border-border py-2">
+          <span class="min-w-0">@if (row.has_url)<a href="{{ $row.url }}">{{ $row.label }}</a>@else{{ $row.label }}@endif</span>@if (row.has_value)
+          <span class="shrink-0 text-sm">{{ $row.value }}</span>@endif
+        </li>
+      @endforeach
+    </ul>
+  @else
+    <p class="m-0 text-sm">{{ $widget.empty_state }}</p>
+  @endif
+</section>

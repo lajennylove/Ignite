@@ -490,7 +490,99 @@ pub(crate) struct DashboardPage {
     pub(crate) brand: BrandView,
     pub(crate) title: &'static str,
     pub(crate) cards: Vec<CardView>,
+    /// The list and form widgets (`Ignite::list_widget`, `Ignite::form_widget`), in the order
+    /// they were added, after the cards.
+    pub(crate) has_widgets: bool,
+    pub(crate) widgets: Vec<WidgetView>,
     pub(crate) tables: Vec<LatestTable>,
+}
+
+/// A list or form widget of the dashboard, as its partial (`partials.widgets.list` or
+/// `partials.widgets.form`) reads it.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct WidgetView {
+    pub(crate) is_list: bool,
+    pub(crate) is_form: bool,
+    pub(crate) title: String,
+    /// The `id` of the title, for the section's `aria-labelledby`.
+    pub(crate) title_id: String,
+    /// A list widget's rows, and the text shown without any.
+    pub(crate) rows: Vec<ListRowView>,
+    pub(crate) has_rows: bool,
+    pub(crate) empty_state: String,
+    /// A form widget's form: where it posts, its fields, its hidden values and its button.
+    pub(crate) action: String,
+    pub(crate) csrf_token: String,
+    pub(crate) back_url: String,
+    pub(crate) fields: Vec<FieldView>,
+    pub(crate) hidden: Vec<HiddenView>,
+    pub(crate) submit_label: String,
+}
+
+impl WidgetView {
+    /// A list widget's view.
+    pub(crate) fn list(
+        index: usize,
+        widget: &ignite_core::ListWidget,
+        rows: &[ignite_core::ListWidgetRow],
+    ) -> Self {
+        WidgetView {
+            rows: rows.iter().map(ListRowView::new).collect(),
+            has_rows: !rows.is_empty(),
+            empty_state: widget.get_empty_state().to_string(),
+            is_list: true,
+            ..WidgetView::empty(index, widget.get_title())
+        }
+    }
+
+    /// A widget's view with no rows and no form.
+    pub(crate) fn empty(index: usize, title: &str) -> Self {
+        WidgetView {
+            is_list: false,
+            is_form: false,
+            title: title.to_string(),
+            title_id: format!("ig-widget-{index}"),
+            rows: Vec::new(),
+            has_rows: false,
+            empty_state: String::new(),
+            action: String::new(),
+            csrf_token: String::new(),
+            back_url: String::new(),
+            fields: Vec::new(),
+            hidden: Vec::new(),
+            submit_label: String::new(),
+        }
+    }
+}
+
+/// One row of a list widget.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct ListRowView {
+    pub(crate) label: String,
+    pub(crate) has_value: bool,
+    pub(crate) value: String,
+    /// Whether the label links, to a path or an `http(s)` URL only.
+    pub(crate) has_url: bool,
+    pub(crate) url: String,
+}
+
+impl ListRowView {
+    fn new(row: &ignite_core::ListWidgetRow) -> Self {
+        ListRowView {
+            label: row.get_label().to_string(),
+            has_value: row.get_value().is_some(),
+            value: row.get_value().unwrap_or_default().to_string(),
+            has_url: row.get_url().is_some(),
+            url: row.get_url().unwrap_or_default().to_string(),
+        }
+    }
+}
+
+/// A value a form sends without showing it.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct HiddenView {
+    pub(crate) name: String,
+    pub(crate) value: String,
 }
 
 /// A dashboard table of a resource's newest records.

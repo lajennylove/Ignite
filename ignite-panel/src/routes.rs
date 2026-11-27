@@ -27,7 +27,7 @@ use serde_json::Value;
 use crate::authz::Action;
 
 use crate::erased::{self, Erased};
-use crate::ignite::Registry;
+use crate::ignite::{DashboardWidget, Registry};
 use crate::profile;
 use crate::proxy::{self, TrustedProxies};
 use crate::session::{
@@ -39,9 +39,10 @@ use crate::throttle;
 use crate::users;
 use crate::views::{
     admin_theme_options, cell_text, compiled, content_width_class, editor_for, field_views,
-    form_field_views, layout_columns, layout_grid_class, live_values, record_form, render_page,
-    CardView, CellView, ColumnHead, DashboardPage, FormChoices, FormPage, HeaderView, IndexPage,
-    LatestRow, LatestTable, Layout, LoginPage, ProfilePage, RowActionView, RowView, TabView,
+    field_views_with, form_field_views, layout_columns, layout_grid_class, live_values,
+    record_form, render_page, CardView, CellView, ColumnHead, DashboardPage, FormChoices, FormPage,
+    HeaderView, HiddenView, IndexPage, LatestRow, LatestTable, Layout, LoginPage, ProfilePage,
+    RowActionView, RowView, TabView, WidgetView,
 };
 
 /// The largest form body the panel reads.
@@ -164,6 +165,7 @@ async fn dashboard(
         })
         .collect();
 
+    let widgets = dashboard_widgets(registry, &session, db.inner(), &token).await?;
     let layout = Layout::new(registry, Some(&session), "", flash, token.clone());
     let page = DashboardPage {
         home_url: layout.home_url,
@@ -192,6 +194,8 @@ async fn dashboard(
             .enumerate()
             .map(|(index, stat)| CardView::new(index, stat))
             .collect(),
+        has_widgets: !widgets.is_empty(),
+        widgets,
         tables,
     };
     Ok(render_page(
@@ -199,6 +203,80 @@ async fn dashboard(
         &page,
         compiled::dashboard::render,
     ))
+}
+
+/// The list and form widgets of the dashboard the signed-in user sees, in the order they were
+/// added: a list widget its `can_view` allows, and a form widget whose resource exists and lets
+/// the user create a record.
+async fn dashboard_widgets(
+    registry: &Registry,
+    session: &AdminUser,
+    db: &Database,
+    token: &str,
+) -> Result<Vec<WidgetView>, Status> {
+    let user = session.acting_user();
+    let mut views = Vec::new();
+    for (index, widget) in registry.dashboard_widgets.iter().enumerate() {
+        match widget {
+            DashboardWidget::List(widget) => {
+                if !widget.is_visible_to(user) {
+                    continue;
+                }
+                let rows = widget.load(db, user).await.map_err(db_status)?;
+                views.push(WidgetView::list(index, widget, &rows));
+            }
+            DashboardWidget::Form(widget) => {
+                let slug = widget.get_resource();
+                let Some(resource) = registry.find(slug) else {
+                    continue;
+                };
+                if !session.may(slug, Action::Create) {
+                    continue;
+                }
+                let names = widget.get_fields();
+                let defs: Vec<FieldDef> = if names.is_empty() {
+                    resource.fields().to_vec()
+                } else {
+                    names
+                        .iter()
+                        .filter_map(|name| resource.fields().iter().find(|f| &f.name == name))
+                        .cloned()
+                        .collect()
+                };
+                let shown: Vec<&str> = defs.iter().map(|f| f.name.as_str()).collect();
+                let lookups = lookup_choices(db, user, resource.as_ref(), &shown)
+                    .await
+                    .map_err(db_status)?;
+                let choices = FormChoices {
+                    lookups,
+                    media: HashMap::new(),
+                };
+                views.push(WidgetView {
+                    is_form: true,
+                    action: format!("{}/{}", registry.mount, resource.slug()),
+                    csrf_token: token.to_string(),
+                    back_url: registry.mount.clone(),
+                    fields: field_views_with(
+                        &defs,
+                        &FormInput::default(),
+                        &FieldErrors::new(),
+                        &choices,
+                    ),
+                    hidden: widget
+                        .get_hidden()
+                        .iter()
+                        .map(|(name, value)| HiddenView {
+                            name: name.clone(),
+                            value: value.clone(),
+                        })
+                        .collect(),
+                    submit_label: widget.get_submit_label().to_string(),
+                    ..WidgetView::empty(index, widget.get_title())
+                });
+            }
+        }
+    }
+    Ok(views)
 }
 
 /// Serves the panel's built stylesheet and script, under `{mount}/build`. The names are
@@ -1261,7 +1339,13 @@ async fn create(
     match outcome {
         Ok(_) => {
             set_flash(cookies, &registry.secret, "Record created.");
-            Ok(Reply::Redirect(Box::new(Redirect::to(index_url))))
+            // A dashboard form widget comes back to the dashboard; nothing else is followed.
+            let target = if form.get("_back") == Some(registry.mount.as_str()) {
+                registry.mount.clone()
+            } else {
+                index_url
+            };
+            Ok(Reply::Redirect(Box::new(Redirect::to(target))))
         }
         Err(errors) => {
             let form = live_values(resource.fields(), None, &form);

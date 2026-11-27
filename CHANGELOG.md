@@ -18,6 +18,26 @@ All notable changes to Ignite are listed here. The format follows
   of the profile page. The page values `theme_switcher` (every page) and
   `has_theme_switcher_note` with `theme_switcher_note` (the profile). Existing themes do not
   change.
+- Dashboard widgets that render their own view, as Filament's custom widgets: a list widget,
+  `ignite_core::ListWidget` (`make(title)`, `rows(|db, user| ...)`, `rows_from(data, query,
+  map)` to take the rows from a `RuntimeData`'s `list_for`, `empty_state(text)` and
+  `can_view(rule)`), whose rows are `ListWidgetRow` (`make(label)`, `value`, `url`), for
+  WordPress's "Activity" and "Recently Published"; and a form widget, `ignite_core::FormWidget`
+  (`make(title, slug)`, `fields([...])`, `hidden(name, value)`, `submit_label`), whose form
+  takes the resource's fields and posts to its create route, for WordPress's "Quick Draft".
+  `Ignite::list_widget` and `Ignite::form_widget` add them; they show after the stat cards, in
+  the order they were added. The `ignite` theme renders them with `partials.widgets.list` and
+  `partials.widgets.form`, escaping every value; a link that is not a path or an `http(s)` URL
+  is not linked (`ignite_core::widget::safe_url`). A form widget shows only to a user who may
+  create a record of its resource. The dashboard has the theme values `has_widgets` and
+  `widgets`.
+- A resource's create form comes back to the dashboard after its save when it sends
+  `_back` set to the panel's mount (the form widget does); any other `_back` is ignored.
+
+### Changed
+
+- The 0.6.6 stat cards are unchanged. The empty dashboard's "Nothing to show yet." is left out
+  when the dashboard has list or form widgets.
 
 ## [0.6.6] - 2026-11-27
 

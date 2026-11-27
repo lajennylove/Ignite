@@ -108,7 +108,10 @@ fn a_theme_without_dark_mode_hides_the_switch_and_renders_light() {
     assert!(!dashboard.contains("data-theme=\"dark\""));
     let profile = body(&client, "/admin/profile");
     assert!(profile.contains("Admin theme"), "the theme choice stays");
-    assert!(!profile.contains(NOTE), "no line about a switch it does not have");
+    assert!(
+        !profile.contains(NOTE),
+        "no line about a switch it does not have"
+    );
     assert!(!profile.contains("data-theme-toggle"));
 
     // The stored choice is kept for a theme with a dark mode.
