@@ -5,6 +5,7 @@
 //! update and delete its rows. The `ignite-panel` crate turns a set of
 //! resources into Rocket routes.
 
+pub mod action;
 pub mod condition;
 pub mod editor;
 pub mod field;
@@ -20,6 +21,7 @@ pub mod runtime_resource;
 mod value;
 pub mod widget;
 
+pub use action::{ActionAbility, ActionResult, RowAction, DEFAULT_CONFIRMATION};
 pub use condition::{FieldConditions, FormContext, Operation};
 pub use editor::{editor_script, register_editor};
 pub use field::{Block, Column, Field, FieldKind};

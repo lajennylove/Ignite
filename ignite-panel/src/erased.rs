@@ -9,7 +9,7 @@ use std::sync::Arc;
 use ignite_core::{
     ActingUser, ColumnBadges, ColumnDef, Database, FieldConditions, FieldDef, FieldErrors,
     FieldKindDef, FormInput, FormLayout, IgniteResource, LatestRecords, ListQuery,
-    RegisteredResource, Row, StatWidget, Tab,
+    RegisteredResource, Row, RowAction, StatWidget, Tab,
 };
 use orbit_orm::Error;
 use serde::Serialize;
@@ -52,6 +52,8 @@ pub(crate) trait Erased: Send + Sync {
     fn tab_counts_follow_search(&self) -> bool;
     /// Whether a tab whose count is 0 is left out.
     fn hide_empty_tabs(&self) -> bool;
+    /// The actions on each row of the list, in display order.
+    fn row_actions(&self) -> &[RowAction];
     /// One page of records as JSON, and the total count.
     /// The resource's queries are given the signed-in `user`: they call its `*_for` methods.
     async fn list(
@@ -104,6 +106,7 @@ pub(crate) struct Adapter<R> {
     form_layout: FormLayout,
     tabs: Vec<Tab>,
     column_badges: ColumnBadges,
+    row_actions: Vec<RowAction>,
     resource: PhantomData<fn() -> R>,
 }
 
@@ -116,6 +119,7 @@ impl<R: IgniteResource> Adapter<R> {
             form_layout: R::form_layout(),
             tabs: R::tabs(),
             column_badges: R::column_badges(),
+            row_actions: R::row_actions(),
             resource: PhantomData,
         }
     }
@@ -235,6 +239,10 @@ impl<R: IgniteResource> Erased for Adapter<R> {
 
     fn hide_empty_tabs(&self) -> bool {
         R::hide_empty_tabs()
+    }
+
+    fn row_actions(&self) -> &[RowAction] {
+        &self.row_actions
     }
 
     async fn list(
@@ -607,6 +615,10 @@ impl Erased for RuntimeAdapter {
 
     fn hide_empty_tabs(&self) -> bool {
         self.0.hide_empty_tabs()
+    }
+
+    fn row_actions(&self) -> &[RowAction] {
+        self.0.row_actions()
     }
 
     async fn list(

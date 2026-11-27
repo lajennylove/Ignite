@@ -26,6 +26,7 @@ use std::sync::{Arc, PoisonError, RwLock};
 use orbit_orm::{Database, Error};
 use serde_json::{Map, Value};
 
+use crate::action::RowAction;
 use crate::condition::{FieldConditions, FormContext, Operation};
 use crate::field::{self as check, Block, Column, Field, FieldKind};
 use crate::form::{FieldErrors, FormInput};
@@ -440,6 +441,9 @@ pub struct RuntimeResource {
     /// The default is `true`. See
     /// [`IgniteResource::hide_empty_tabs`](crate::IgniteResource::hide_empty_tabs).
     pub hide_empty_tabs: bool,
+    /// The actions on each row of the list page, in display order, as Filament's
+    /// `recordActions()`. See [`RowAction`]. The default is none.
+    pub row_actions: Vec<RowAction>,
 }
 
 impl fmt::Debug for RuntimeResource {
@@ -465,6 +469,7 @@ impl fmt::Debug for RuntimeResource {
             .field("column_badges", &self.column_badges)
             .field("tab_counts_follow_search", &self.tab_counts_follow_search)
             .field("hide_empty_tabs", &self.hide_empty_tabs)
+            .field("row_actions", &self.row_actions)
             .finish_non_exhaustive()
     }
 }
@@ -499,6 +504,7 @@ impl RuntimeResource {
             column_badges: ColumnBadges::new(),
             tab_counts_follow_search: false,
             hide_empty_tabs: true,
+            row_actions: Vec::new(),
         }
     }
 
@@ -665,6 +671,13 @@ impl RuntimeResource {
     /// [`IgniteResource::hide_empty_tabs`](crate::IgniteResource::hide_empty_tabs).
     pub fn hide_empty_tabs(mut self, hide: bool) -> Self {
         self.hide_empty_tabs = hide;
+        self
+    }
+
+    /// Adds an action on each row of the list, after the others, as an action in Filament's
+    /// `recordActions()`. See [`RowAction`].
+    pub fn row_action(mut self, action: RowAction) -> Self {
+        self.row_actions.push(action);
         self
     }
 
@@ -990,6 +1003,11 @@ impl RegisteredResource {
     /// Whether a tab whose count is 0 is left out.
     pub fn hide_empty_tabs(&self) -> bool {
         self.resource.hide_empty_tabs
+    }
+
+    /// The actions on each row of the list, in display order.
+    pub fn row_actions(&self) -> &[RowAction] {
+        &self.resource.row_actions
     }
 
     /// [`validate`](Self::validate) for a form whose fields `hidden` are hidden (see

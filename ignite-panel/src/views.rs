@@ -734,6 +734,9 @@ pub(crate) struct IndexPage {
     /// colours: only a list with tabs or badge columns does, so the others keep the panel's
     /// stylesheet as it was.
     pub(crate) has_list_styles: bool,
+    /// The list's address with its search, tab, sort and page, which a row action's form sends
+    /// back as `_back`, so the list shows the same page after the action.
+    pub(crate) return_url: String,
 }
 
 /// One tab of a list page: its label, the number of rows it matches for the current search,
@@ -766,6 +769,26 @@ pub(crate) struct RowView {
     pub(crate) can_update: bool,
     /// Whether the record shows its Delete button, as `can_update` for the delete.
     pub(crate) can_delete: bool,
+    /// The resource's row actions shown on this record (`IgniteResource::row_actions`), in
+    /// order: those whose visibility rule holds for it and, for a POST, that the user may run.
+    pub(crate) actions: Vec<RowActionView>,
+    pub(crate) has_actions: bool,
+}
+
+/// One row action on a record of the list: a link, or a form that posts to the panel.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct RowActionView {
+    pub(crate) label: String,
+    /// Whether the action posts: it renders as a form with the CSRF token.
+    pub(crate) is_post: bool,
+    /// The link, or the address the form posts to.
+    pub(crate) url: String,
+    /// Whether the form asks before it is sent (`data-confirm`), and the question.
+    pub(crate) has_confirm: bool,
+    pub(crate) confirm: String,
+    /// The button's classes: the panel's danger button for `BadgeColor::Danger`, its plain
+    /// button otherwise, with `ig-action-<color>` when the action has a colour.
+    pub(crate) class: String,
 }
 
 /// One cell of a list: its text, shown plain, or as a coloured badge, as Filament's

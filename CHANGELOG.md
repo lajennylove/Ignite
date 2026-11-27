@@ -21,6 +21,21 @@ All notable changes to Ignite are listed here. The format follows
   `navigation_create_label(label)`, and the derive's `#[ignite(navigation_create_item = false)]`
   and `#[ignite(navigation_create_label = "Add New Post")]`. As before, the link is listed only
   for a user who may create a record.
+- Row actions, as Filament's table actions (`recordActions()`): `ignite_core::RowAction`
+  (`make(name)`, `label`, `url(template)` with `{key}` placeholders filled from the record,
+  `action(handler)` for a POST, `requires_confirmation`, `modal_description`, `visible`,
+  `hidden`, `visible_when(ListFilter)`, `color(BadgeColor)`, `authorize(ActionAbility)` and
+  `success_notification_title`), with `ActionAbility` (`Update`, the default, or `Delete`) and
+  `ActionResult` (`Ok(())`, or `Err(message)` to refuse). `IgniteResource::row_actions()`,
+  `RuntimeResource::row_action` and the derive's `#[ignite(row_actions = path)]`. The list
+  renders each action on the rows its rule shows it on, after Edit; a POST action is a form to
+  `{mount}/{slug}/{id}/actions/{name}` with the CSRF token and a confirmation when it asks
+  for one. The panel runs it only with the CSRF token, the resource's update (or delete)
+  ability, the policy's answer for the record and the action's rule for the record (403
+  otherwise; 419 without the token), and shows the refusal or the success message as the
+  flash, back on the same list page (`_back`). A list without row actions renders as before.
+- The theme values `actions` and `has_actions` on each row of the list (each action with
+  `label`, `is_post`, `url`, `has_confirm`, `confirm` and `class`), and `return_url`.
 - The theme values `add_label`, `has_sub_items`, `sub_items`, `open`, `closed`,
   `aria_expanded` and `sub_items_id` on each entry of `nav_sections`.
 
@@ -31,8 +46,8 @@ All notable changes to Ignite are listed here. The format follows
   the child entries of a closed group are now in the page (hidden) instead of left out; the
   sidebar has a small style and script for the toggles. A theme that overrides
   `partials.nav` keeps working: `children`, `has_add`, `add_url` and `expanded` are unchanged.
-- **Breaking:** `RuntimeResource` has the new public fields `navigation_create_item` and
-  `navigation_create_label`, so code that builds it with a struct literal must set them.
+- **Breaking:** `RuntimeResource` has the new public fields `navigation_create_item`,
+  `navigation_create_label` and `row_actions`, so code that builds it with a struct literal must set them.
 - The navigation API of 0.6.5 (`NavigationGroup`, `NavigationItem`, `navigation_parent_item`)
   works as before.
 

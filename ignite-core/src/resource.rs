@@ -5,6 +5,7 @@ use std::future::Future;
 use orbit_orm::{Database, Error};
 use serde::Serialize;
 
+use crate::action::RowAction;
 use crate::condition::FieldConditions;
 use crate::field::{Column, Field};
 use crate::form::{FieldErrors, FormInput};
@@ -178,6 +179,15 @@ pub trait IgniteResource: Send + Sync + 'static {
     /// writes it for `#[ignite(badges = path)]`.
     fn column_badges() -> ColumnBadges {
         ColumnBadges::new()
+    }
+
+    /// The actions on each row of the list page, in display order, as Filament's
+    /// `recordActions()`: links, or POSTs that run a task on the record, each with its label,
+    /// confirmation, visibility rule, colour and ability (see [`RowAction`]). The panel reads
+    /// them once, when it is built. The default is none: each row has its Edit and Delete
+    /// buttons only. `#[derive(IgniteResource)]` writes it for `#[ignite(row_actions = path)]`.
+    fn row_actions() -> Vec<RowAction> {
+        Vec::new()
     }
 
     /// The choices of a [`FieldKind::Lookup`](crate::FieldKind::Lookup) field, as

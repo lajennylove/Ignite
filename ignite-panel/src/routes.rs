@@ -41,7 +41,7 @@ use crate::views::{
     admin_theme_options, cell_text, compiled, content_width_class, editor_for, field_views,
     form_field_views, layout_columns, layout_grid_class, live_values, record_form, render_page,
     CardView, CellView, ColumnHead, DashboardPage, FormChoices, FormPage, HeaderView, IndexPage,
-    LatestRow, LatestTable, Layout, LoginPage, ProfilePage, RowView, TabView,
+    LatestRow, LatestTable, Layout, LoginPage, ProfilePage, RowActionView, RowView, TabView,
 };
 
 /// The largest form body the panel reads.
@@ -86,7 +86,8 @@ pub(crate) fn all() -> Vec<Route> {
         edit_form,
         edit_form_live,
         update,
-        destroy
+        destroy,
+        run_row_action
     ];
     all.extend(crate::password_reset::all());
     all
@@ -980,6 +981,18 @@ async fn index(
     let mut rows = Vec::with_capacity(records.len());
     for record in &records {
         let id = record_id(record)?;
+        let record_can_update =
+            can_update && record_allowed(db, slug, &session, Action::Update, record).await?;
+        let record_can_delete =
+            can_delete && record_allowed(db, slug, &session, Action::Delete, record).await?;
+        let actions = row_action_views(
+            resource.as_ref(),
+            record,
+            id,
+            &index_url,
+            record_can_update,
+            record_can_delete,
+        );
         rows.push(RowView {
             cells: shown
                 .iter()
@@ -1004,10 +1017,10 @@ async fn index(
                 .collect(),
             edit_url: format!("{index_url}/{id}/edit"),
             delete_url: format!("{index_url}/{id}/delete"),
-            can_update: can_update
-                && record_allowed(db, slug, &session, Action::Update, record).await?,
-            can_delete: can_delete
-                && record_allowed(db, slug, &session, Action::Delete, record).await?,
+            can_update: record_can_update,
+            can_delete: record_can_delete,
+            has_actions: !actions.is_empty(),
+            actions,
         });
     }
 
@@ -1085,6 +1098,7 @@ async fn index(
         has_tab_param: tab_param.is_some(),
         tab_param: tab_param.unwrap_or_default().to_string(),
         has_list_styles: !tabs.is_empty() || !badges.is_empty(),
+        return_url: list_url(&index_url, &search, tab_param, sort_pair, page_no),
     };
     Ok(render_page(
         "ignite::index",
@@ -1379,6 +1393,135 @@ async fn destroy(
     }
     set_flash(cookies, &registry.secret, "Record deleted.");
     Ok(Redirect::to(index_url))
+}
+
+/// Runs the row action `name` of the resource at `slug` on the record `id`, as a Filament
+/// table action's `action()`: the action's form posts here with the CSRF token. The user needs
+/// the action's ability on the resource (update by default, or delete) and the policy's
+/// answer for the record, as the Edit and Delete buttons do, and the action must be visible on
+/// the record: 403 otherwise. An unknown action, or one that is a link, is 404. The handler's
+/// refusal shows as the flash message, and so does the action's success message; the list
+/// shows again at the address the form sent back (`_back`), or at its first page.
+#[post("/<slug>/<id>/actions/<name>", data = "<body>")]
+#[allow(clippy::too_many_arguments)]
+async fn run_row_action(
+    slug: &str,
+    id: &str,
+    name: &str,
+    body: Data<'_>,
+    session: AdminUser,
+    cookies: &CookieJar<'_>,
+    registry: &State<Registry>,
+    db: &State<Database>,
+) -> Result<Redirect, Status> {
+    let resource = registry.find(slug).ok_or(Status::NotFound)?;
+    let action = resource
+        .row_actions()
+        .iter()
+        .find(|action| action.name() == name && action.is_post())
+        .cloned()
+        .ok_or(Status::NotFound)?;
+    let ability = ability_of(&action);
+    authorize(registry, &session, slug, ability)?;
+    let form = read_form(body).await?;
+    check_csrf(cookies, &registry.secret, form.get("_token"))?;
+    let id = parse_id(id)?;
+    let index_url = format!("{}/{}", registry.mount, resource.slug());
+
+    let record = authorize_record(db, &session, &resource, id, ability).await?;
+    let row = record.as_object().cloned().unwrap_or_default();
+    if !action.is_visible(&row) {
+        return Err(Status::Forbidden);
+    }
+    let outcome = action
+        .run(db.inner(), session.acting_user(), id, &row)
+        .await
+        .map_err(db_status)?;
+    match outcome {
+        Ok(()) => {
+            if let Some(message) = action.success_message() {
+                set_flash(cookies, &registry.secret, message);
+            }
+        }
+        Err(message) => set_flash(cookies, &registry.secret, &message),
+    }
+    Ok(Redirect::to(back_url(form.get("_back"), &index_url)))
+}
+
+/// The panel's ability for a row action's [`ActionAbility`](ignite_core::ActionAbility).
+fn ability_of(action: &ignite_core::RowAction) -> Action {
+    match action.ability() {
+        ignite_core::ActionAbility::Update => Action::Update,
+        ignite_core::ActionAbility::Delete => Action::Delete,
+    }
+}
+
+/// Where a row action sends the user back: `back` when it is the list at `index_url` (with a
+/// query string or none), else the list itself, so the form cannot redirect elsewhere.
+fn back_url(back: Option<&str>, index_url: &str) -> String {
+    match back {
+        Some(back)
+            if back
+                .strip_prefix(index_url)
+                .is_some_and(|rest| rest.is_empty() || rest.starts_with('?'))
+                && !back.contains(['\\', '\r', '\n']) =>
+        {
+            back.to_string()
+        }
+        _ => index_url.to_string(),
+    }
+}
+
+/// The row actions of `resource` shown on `record`, whose id is `id`: those whose rule holds
+/// for it, and for a POST, those whose ability the user holds on the record (`can_update`,
+/// `can_delete`).
+fn row_action_views(
+    resource: &dyn Erased,
+    record: &Value,
+    id: i64,
+    index_url: &str,
+    can_update: bool,
+    can_delete: bool,
+) -> Vec<RowActionView> {
+    let empty = serde_json::Map::new();
+    let row = record.as_object().unwrap_or(&empty);
+    resource
+        .row_actions()
+        .iter()
+        .filter(|action| action.is_visible(row))
+        .filter_map(|action| {
+            let url = if action.is_post() {
+                let allowed = match action.ability() {
+                    ignite_core::ActionAbility::Update => can_update,
+                    ignite_core::ActionAbility::Delete => can_delete,
+                };
+                if !allowed {
+                    return None;
+                }
+                format!("{index_url}/{id}/actions/{}", action.name())
+            } else {
+                action.url_for(row)?
+            };
+            let color = action.get_color();
+            let base = if color == Some(ignite_core::BadgeColor::Danger) {
+                "ig-btn ig-btn-danger px-3 py-1"
+            } else {
+                "ig-btn ig-btn-ghost px-3 py-1"
+            };
+            let class = match color {
+                Some(color) => format!("{base} ig-action-{}", color.as_str()),
+                None => base.to_string(),
+            };
+            Some(RowActionView {
+                label: action.get_label(),
+                is_post: action.is_post(),
+                url,
+                has_confirm: action.is_post() && action.confirmation().is_some(),
+                confirm: action.confirmation().unwrap_or_default().to_string(),
+                class,
+            })
+        })
+        .collect()
 }
 
 /// Where a create or edit form posts, and its heading and button.
