@@ -46,6 +46,10 @@ pub(crate) trait Erased: Send + Sync {
     fn default_active_tab(&self) -> Option<&str>;
     /// The list columns shown as coloured badges.
     fn column_badges(&self) -> &ColumnBadges;
+    /// Whether each tab's count is for the current search.
+    fn tab_counts_follow_search(&self) -> bool;
+    /// Whether a tab whose count is 0 is left out.
+    fn hide_empty_tabs(&self) -> bool;
     /// One page of records as JSON, and the total count.
     /// The resource's queries are given the signed-in `user`: they call its `*_for` methods.
     async fn list(
@@ -217,6 +221,14 @@ impl<R: IgniteResource> Erased for Adapter<R> {
 
     fn column_badges(&self) -> &ColumnBadges {
         &self.column_badges
+    }
+
+    fn tab_counts_follow_search(&self) -> bool {
+        R::tab_counts_follow_search()
+    }
+
+    fn hide_empty_tabs(&self) -> bool {
+        R::hide_empty_tabs()
     }
 
     async fn list(
@@ -577,6 +589,14 @@ impl Erased for RuntimeAdapter {
 
     fn column_badges(&self) -> &ColumnBadges {
         self.0.column_badges()
+    }
+
+    fn tab_counts_follow_search(&self) -> bool {
+        self.0.tab_counts_follow_search()
+    }
+
+    fn hide_empty_tabs(&self) -> bool {
+        self.0.hide_empty_tabs()
     }
 
     async fn list(

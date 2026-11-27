@@ -931,12 +931,16 @@ async fn index(
         .list(db.inner(), user, &query)
         .await
         .map_err(db_status)?;
+    // The default tab, which always shows: the declared default when it is a tab, or the
+    // first, as `active_tab` picks it without a `tab` parameter.
+    let default_tab = ignite_core::active_tab(tabs, None, resource.default_active_tab());
     let tab_views = tab_views(
         resource.as_ref(),
         db.inner(),
         user,
         &query,
         active.map(|t| t.key.as_str()),
+        default_tab.map(|t| t.key.as_str()),
         total,
         &index_url,
     )
@@ -1736,17 +1740,20 @@ fn choice_text(value: Option<&Value>, choices: Option<&Vec<(String, String)>>) -
         .unwrap_or(stored)
 }
 
-/// The tabs of a list, as Filament renders `getTabs()`: each with its label, the number of
-/// rows it matches for the current search, and its link, which keeps the search and sort and
-/// goes back to page 1, as Filament resets the page when the tab changes. The active tab's
-/// count is the list's `total`; each other tab is counted with a query for its total only.
-/// None for a resource without tabs.
+/// The tabs of the list page, with the number of rows each one matches. As a Filament tab's
+/// `badge()` counts the tab's own query, a count is for all of the tab's rows, whatever the
+/// search, unless the resource's counts follow the search
+/// ([`tab_counts_follow_search`](ignite_core::IgniteResource::tab_counts_follow_search)). The
+/// active tab's count is the list's `total` when it is the same number. A tab whose count is 0
+/// is left out when the resource hides empty tabs, except the default tab and the active one.
+#[allow(clippy::too_many_arguments)]
 async fn tab_views(
     resource: &dyn Erased,
     db: &Database,
     user: &ActingUser,
     query: &ListQuery,
     active: Option<&str>,
+    default: Option<&str>,
     total: i64,
     index_url: &str,
 ) -> Result<Vec<TabView>, OrbitError> {
@@ -1759,21 +1766,31 @@ async fn tab_views(
         .sort
         .as_ref()
         .map(|(key, direction)| (key.as_str(), dir_name(direction)));
+    // The counts' search: the list's, or none.
+    let count_search = if resource.tab_counts_follow_search() {
+        query.search.clone()
+    } else {
+        None
+    };
+    let hide_empty = resource.hide_empty_tabs();
     let mut views = Vec::with_capacity(resource.tabs().len());
     for tab in resource.tabs() {
         let is_active = active == Some(tab.key.as_str());
-        let count = if is_active {
+        let count = if is_active && count_search == query.search {
             total
         } else {
             let count_query = ListQuery {
                 page: 1,
                 per_page: 0,
-                search: query.search.clone(),
+                search: count_search.clone(),
                 sort: None,
                 filter: tab.filter.clone(),
             };
             resource.list(db, user, &count_query).await?.1
         };
+        if hide_empty && count == 0 && !is_active && default != Some(tab.key.as_str()) {
+            continue;
+        }
         views.push(TabView {
             label: tab.label.clone(),
             count,

@@ -427,6 +427,14 @@ pub struct RuntimeResource {
     /// The list columns shown as coloured badges, as Filament's `badge()` and `color()`. See
     /// [`ColumnBadges`]. The default is none.
     pub column_badges: ColumnBadges,
+    /// Whether each tab's count is for the current search. The default is `false`: a tab
+    /// counts all its rows. See
+    /// [`IgniteResource::tab_counts_follow_search`](crate::IgniteResource::tab_counts_follow_search).
+    pub tab_counts_follow_search: bool,
+    /// Whether a tab whose count is 0 is left out, except the default tab and the tab shown.
+    /// The default is `true`. See
+    /// [`IgniteResource::hide_empty_tabs`](crate::IgniteResource::hide_empty_tabs).
+    pub hide_empty_tabs: bool,
 }
 
 impl fmt::Debug for RuntimeResource {
@@ -448,6 +456,8 @@ impl fmt::Debug for RuntimeResource {
             .field("tabs", &self.tabs)
             .field("default_active_tab", &self.default_active_tab)
             .field("column_badges", &self.column_badges)
+            .field("tab_counts_follow_search", &self.tab_counts_follow_search)
+            .field("hide_empty_tabs", &self.hide_empty_tabs)
             .finish_non_exhaustive()
     }
 }
@@ -478,6 +488,8 @@ impl RuntimeResource {
             tabs: Vec::new(),
             default_active_tab: None,
             column_badges: ColumnBadges::new(),
+            tab_counts_follow_search: false,
+            hide_empty_tabs: true,
         }
     }
 
@@ -602,6 +614,22 @@ impl RuntimeResource {
     /// `getDefaultActiveTab()`. Without it, the first tab is shown.
     pub fn default_active_tab(mut self, key: impl Into<String>) -> Self {
         self.default_active_tab = Some(key.into());
+        self
+    }
+
+    /// Whether each tab's count is for the current search. The default, `false`, counts all
+    /// of a tab's rows. See
+    /// [`IgniteResource::tab_counts_follow_search`](crate::IgniteResource::tab_counts_follow_search).
+    pub fn tab_counts_follow_search(mut self, follow: bool) -> Self {
+        self.tab_counts_follow_search = follow;
+        self
+    }
+
+    /// Whether a tab whose count is 0 is left out, except the default tab and the tab shown.
+    /// The default is `true`; `false` renders every tab. See
+    /// [`IgniteResource::hide_empty_tabs`](crate::IgniteResource::hide_empty_tabs).
+    pub fn hide_empty_tabs(mut self, hide: bool) -> Self {
+        self.hide_empty_tabs = hide;
         self
     }
 
@@ -889,6 +917,16 @@ impl RegisteredResource {
     /// The list columns shown as coloured badges.
     pub fn column_badges(&self) -> &ColumnBadges {
         &self.resource.column_badges
+    }
+
+    /// Whether each tab's count is for the current search.
+    pub fn tab_counts_follow_search(&self) -> bool {
+        self.resource.tab_counts_follow_search
+    }
+
+    /// Whether a tab whose count is 0 is left out.
+    pub fn hide_empty_tabs(&self) -> bool {
+        self.resource.hide_empty_tabs
     }
 
     /// [`validate`](Self::validate) for a form whose fields `hidden` are hidden (see

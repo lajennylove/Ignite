@@ -1,5 +1,6 @@
 //! The tabs of a list page, as Filament's `getTabs()`: each tab shows its label and the number
-//! of rows it matches for the current search, the `tab` query parameter chooses one, and its
+//! of rows it matches (all of them, whatever the search, as a Filament tab's badge counts its
+//! own query; see `lists_counts.rs`), the `tab` query parameter chooses one, and its
 //! conditions restrict the rows, beside the search, sort and page. A resource without tabs
 //! renders as before. Runs against the test database.
 
@@ -131,35 +132,31 @@ fn the_tab_parameter_marks_its_tab_and_restricts_the_rows() {
 }
 
 #[test]
-fn the_counts_are_the_rows_each_tab_shows_for_the_current_search() {
+fn the_counts_are_each_tab_s_rows_whatever_the_search() {
     let _guard = setup();
     let client = client();
     let page = body(&client, "/admin/list_posts?q=Alph&tab=drafts");
     assert!(page.contains(&tab_link(
         "/admin/list_posts?q=Alph&amp;tab=all",
         "All",
-        2,
+        5,
         false
     )));
     assert!(page.contains(&tab_link(
         "/admin/list_posts?q=Alph&amp;tab=drafts",
         "Drafts",
-        1,
+        3,
         true
     )));
     assert!(page.contains(&tab_link(
         "/admin/list_posts?q=Alph&amp;tab=published",
         "Published",
-        1,
+        2,
         false
     )));
+    // The list itself shows only the rows of the tab that match the search.
     assert_eq!(titles(&page), ["Alpha"]);
-
-    // Each tab's count is the number of rows the tab lists for the same search.
-    for (tab, count) in [("all", 2), ("drafts", 1), ("published", 1)] {
-        let page = body(&client, &format!("/admin/list_posts?q=Alph&tab={tab}"));
-        assert_eq!(titles(&page).len(), count, "the rows of the tab {tab}");
-    }
+    assert!(page.contains("1 in total"));
 }
 
 #[test]
@@ -300,11 +297,12 @@ fn a_runtime_resource_has_tabs_and_a_default_tab() {
         "the default tab filters the rows"
     );
 
+    // The counts are the tabs' rows, whatever the search.
     let page = body(&client, "/admin/tab_notes?tab=all&q=P");
     assert!(page.contains(&tab_link(
         "/admin/tab_notes?q=P&amp;tab=all",
         "All",
-        2,
+        3,
         true
     )));
     assert!(page.contains(&tab_link(

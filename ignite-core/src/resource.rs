@@ -131,7 +131,8 @@ pub trait IgniteResource: Send + Sync + 'static {
 
     /// The tabs of the list page, in display order, as Filament's `getTabs()` on a List page:
     /// each [`Tab`] has a key, a label and the conditions its rows meet, and shows the number
-    /// of rows it matches for the current search. The list's `tab` query parameter chooses
+    /// of rows it matches (see [`tab_counts_follow_search`](Self::tab_counts_follow_search)). The
+    /// list's `tab` query parameter chooses
     /// one. The panel reads them once, when it is built. The default is none: the list has no
     /// tabs, as before. `#[derive(IgniteResource)]` writes it for `#[ignite(tabs = path)]`.
     fn tabs() -> Vec<Tab> {
@@ -143,6 +144,23 @@ pub trait IgniteResource: Send + Sync + 'static {
     /// tab. `#[derive(IgniteResource)]` writes it for `#[ignite(default_active_tab = "key")]`.
     fn default_active_tab() -> Option<&'static str> {
         None
+    }
+
+    /// Whether each tab's count is for the current search. The default, `false`, counts every
+    /// row of the tab, whatever the search, as a Filament tab's `badge()` counts its own query,
+    /// which the table's search does not narrow; the list itself still shows only the rows
+    /// that match. Without a search the counts are the same either way.
+    /// `#[derive(IgniteResource)]` writes it for `#[ignite(tab_counts_follow_search = true)]`.
+    fn tab_counts_follow_search() -> bool {
+        false
+    }
+
+    /// Whether a tab whose count is 0 is left out of the list page. The default, `true`,
+    /// leaves it out, except the default tab (the [`default_active_tab`](Self::default_active_tab),
+    /// or the first) and the tab being shown, which always render. `false` renders every tab.
+    /// `#[derive(IgniteResource)]` writes it for `#[ignite(hide_empty_tabs = false)]`.
+    fn hide_empty_tabs() -> bool {
+        true
     }
 
     /// The list columns that show their value as a coloured badge, as Filament's `badge()`

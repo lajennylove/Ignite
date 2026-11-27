@@ -29,6 +29,8 @@ use syn::{
 /// - `#[ignite(conditions = post_conditions)]`: the conditions that show or hide the form's fields, and the live fields, as Filament's `visible()`, `hidden()` and `live()`: the path of a `fn() -> ignite_core::FieldConditions`. Defaults to none: every field shows. A field that a condition may hide should be an `Option`, so it is NULL on create and keeps its stored value on update.
 /// - `#[ignite(tabs = post_tabs)]`: the tabs of the list page, as Filament's `getTabs()`: the path of a `fn() -> Vec<ignite_core::Tab>`. The list query applies the active tab's conditions. Defaults to none: the list has no tabs.
 /// - `#[ignite(default_active_tab = "drafts")]`: the key of the tab shown when the list has no `tab` parameter, as Filament's `getDefaultActiveTab()`. Defaults to the first tab.
+/// - `#[ignite(tab_counts_follow_search = true)]`: each tab's count is for the current search. Defaults to `false`: a tab counts all its rows, as a Filament tab's `badge()` counts its own query.
+/// - `#[ignite(hide_empty_tabs = false)]`: renders the tabs whose count is 0 too. Defaults to `true`: an empty tab is left out, except the default tab and the tab shown.
 /// - `#[ignite(badges = post_badges)]`: the list columns shown as coloured badges, as Filament's `badge()` and `color()` on a text column: the path of a `fn() -> ignite_core::ColumnBadges`. Defaults to none: every cell is plain text.
 /// - `#[ignite(form_layout = post_layout)]`: the layout of the create and edit forms, as Filament's `Grid`, `Section`, `Group`, `columns()` and `columnSpan()`: the path of a `fn() -> ignite_core::FormLayout`. Defaults to none: the form renders as one card of fields.
 ///
@@ -705,6 +707,8 @@ struct ListAttrs {
     tabs: Option<syn::Path>,
     default_active_tab: Option<String>,
     badges: Option<syn::Path>,
+    tab_counts_follow_search: Option<bool>,
+    hide_empty_tabs: Option<bool>,
 }
 
 impl ListAttrs {
@@ -731,7 +735,21 @@ impl ListAttrs {
                 }
             }
         });
-        quote! { #tabs #default #badges }
+        let follow = self.tab_counts_follow_search.map(|follow| {
+            quote! {
+                fn tab_counts_follow_search() -> bool {
+                    #follow
+                }
+            }
+        });
+        let hide = self.hide_empty_tabs.map(|hide| {
+            quote! {
+                fn hide_empty_tabs() -> bool {
+                    #hide
+                }
+            }
+        });
+        quote! { #tabs #default #badges #follow #hide }
     }
 }
 
@@ -799,9 +817,15 @@ fn struct_attrs(input: &DeriveInput) -> syn::Result<StructAttrs> {
             } else if meta.path.is_ident("badges") {
                 list.badges = Some(meta.value()?.parse::<syn::Path>()?);
                 Ok(())
+            } else if meta.path.is_ident("tab_counts_follow_search") {
+                list.tab_counts_follow_search = Some(meta.value()?.parse::<syn::LitBool>()?.value);
+                Ok(())
+            } else if meta.path.is_ident("hide_empty_tabs") {
+                list.hide_empty_tabs = Some(meta.value()?.parse::<syn::LitBool>()?.value);
+                Ok(())
             } else {
                 Err(meta.error(
-                    "unknown ignite attribute on the struct; expected `table`, `title`, `singular`, `latest_records`, `navigation_label`, `navigation_group`, `navigation_sort`, `navigation_parent_item`, `navigation_icon`, `conditions`, `form_layout`, `tabs`, `default_active_tab` or `badges`",
+                    "unknown ignite attribute on the struct; expected `table`, `title`, `singular`, `latest_records`, `navigation_label`, `navigation_group`, `navigation_sort`, `navigation_parent_item`, `navigation_icon`, `conditions`, `form_layout`, `tabs`, `default_active_tab`, `badges`, `tab_counts_follow_search` or `hide_empty_tabs`",
                 ))
             }
         })?;
