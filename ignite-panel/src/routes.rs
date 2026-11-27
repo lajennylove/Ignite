@@ -132,11 +132,17 @@ async fn dashboard(
         .into_iter()
         .filter(|r| session.may(r.slug(), Action::ViewAny))
         .collect();
-    let mut widgets = Vec::new();
+    // The panel's own widgets first, as Filament's panel `widgets()`, each for the users its
+    // `can_view` allows, then each resource's cards.
+    let user = session.acting_user();
+    let mut stats = Vec::new();
+    for widget in registry.widgets.iter().filter(|w| w.can_view(user)) {
+        stats.extend(widget.stats(db.inner(), user).await.map_err(db_status)?);
+    }
     let mut tables = Vec::new();
     for resource in &resources {
         let database = db.inner();
-        widgets.extend(resource.widgets(database).await.map_err(db_status)?);
+        stats.extend(resource.stats(database, user).await.map_err(db_status)?);
         if let Some(declared) = resource.latest_records() {
             let limit = declared.limit.max(1);
             let records = resource.latest(database, limit).await.map_err(db_status)?;
@@ -180,10 +186,10 @@ async fn dashboard(
         admin_theme: layout.admin_theme,
         brand: layout.brand,
         title: "Dashboard",
-        cards: widgets
-            .into_iter()
+        cards: stats
+            .iter()
             .enumerate()
-            .map(|(index, w)| CardView::new(index, w.label, w.value.to_string()))
+            .map(|(index, stat)| CardView::new(index, stat))
             .collect(),
         tables,
     };

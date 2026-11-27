@@ -43,6 +43,15 @@ All notable changes to Ignite are listed here. The format follows
   against the sign-in throttle. Wrong credentials keep "The email or password is incorrect."
   The login page has the theme values `has_email_error`, `email_error`, `has_password_error`
   and `password_error`.
+- Dashboard widgets, as Filament's stats overview widget: `ignite_core::Stat`
+  (`Stat::make(label, value)` and `description`), the card's title being its label;
+  `IgniteResource::stats(db, user)` (by default the cards of `widgets`, as before),
+  `RuntimeData::stats(db, user)` (default none), and the panel's own widgets,
+  `StatsOverviewWidget` (`stats(db, user)` and `can_view(user)`, as Filament's `getStats()`
+  and `canView()`) passed to `Ignite::widget`, as Filament's panel `widgets()`. The dashboard
+  shows the panel's cards first, then each resource's, in its grid, with the description under
+  the value; a resource's cards still show only to a user who may view its records. The cards
+  have the theme values `has_description` and `description`.
 - The theme values `add_label`, `has_sub_items`, `sub_items`, `open`, `closed`,
   `aria_expanded` and `sub_items_id` on each entry of `nav_sections`.
 
@@ -55,6 +64,8 @@ All notable changes to Ignite are listed here. The format follows
   `partials.nav` keeps working: `children`, `has_add`, `add_url` and `expanded` are unchanged.
 - **Breaking:** `RuntimeResource` has the new public fields `navigation_create_item`,
   `navigation_create_label` and `row_actions`, so code that builds it with a struct literal must set them.
+- The empty dashboard says "Nothing to show yet." instead of the developer note "No stats
+  yet. A resource shows its cards here by implementing `widgets`."
 - The navigation API of 0.6.5 (`NavigationGroup`, `NavigationItem`, `navigation_parent_item`)
   works as before.
 

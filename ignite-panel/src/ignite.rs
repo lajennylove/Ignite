@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
-use ignite_core::{Database, Field, IgniteResource};
+use ignite_core::{Database, Field, IgniteResource, StatsOverviewWidget};
 use orbit_orm::{PoolOptions, Transaction};
 use rocket::catchers;
 use rocket::fairing::{self, AdHoc, Fairing, Info, Kind};
@@ -83,6 +83,8 @@ pub(crate) struct Registry {
     /// Whether a group that does not say collapses (see
     /// [`Ignite::collapsible_navigation_groups`]).
     pub(crate) collapsible_navigation_groups: bool,
+    /// The dashboard widgets of the panel's own (see [`Ignite::widget`]).
+    pub(crate) widgets: Vec<Arc<dyn StatsOverviewWidget>>,
 }
 
 impl Registry {
@@ -162,6 +164,7 @@ pub struct Ignite {
     navigation_groups: Vec<NavigationGroup>,
     navigation_items: Vec<NavigationItem>,
     collapsible_navigation_groups: bool,
+    widgets: Vec<Arc<dyn StatsOverviewWidget>>,
 }
 
 impl Ignite {
@@ -233,6 +236,7 @@ impl Ignite {
             navigation_groups: Vec::new(),
             navigation_items: Vec::new(),
             collapsible_navigation_groups: true,
+            widgets: Vec::new(),
         }
     }
 
@@ -569,6 +573,16 @@ impl Ignite {
         self
     }
 
+    /// Adds a dashboard widget of the panel's own, as Filament's panel `widgets()`: a
+    /// [`StatsOverviewWidget`] whose cards ([`Stat`](ignite_core::Stat)s) the dashboard shows
+    /// in its grid, before the resources' cards, to the users its
+    /// [`can_view`](StatsOverviewWidget::can_view) allows. Each call adds a widget after the
+    /// others.
+    pub fn widget(mut self, widget: impl StatsOverviewWidget) -> Self {
+        self.widgets.push(Arc::new(widget));
+        self
+    }
+
     /// Changes the URL prefix of the panel. The default is `/admin`.
     pub fn mount(mut self, path: &str) -> Self {
         self.mount = path.trim_end_matches('/').to_string();
@@ -599,6 +613,7 @@ impl Ignite {
             navigation_groups,
             navigation_items,
             collapsible_navigation_groups,
+            widgets,
         } = self;
         // Users created or deleted from now on run the app's callbacks.
         users::install_callbacks(user_callbacks);
@@ -632,6 +647,7 @@ impl Ignite {
                 navigation_groups,
                 navigation_items,
                 collapsible_navigation_groups,
+                widgets,
             };
             Ok(rocket
                 .manage(db)

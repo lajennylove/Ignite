@@ -41,10 +41,11 @@
       <div class="ig-card ig-tone-{{ $card.tone }} flex flex-col items-center gap-2 text-center shadow-none">
         <i class="ti {{ $card.icon }} text-4xl"></i>
         <p class="m-0 font-semibold">{{ $card.label }}</p>
-        <p class="m-0 text-2xl font-semibold">{{ $card.value }}</p>
+        <p class="m-0 text-2xl font-semibold">{{ $card.value }}</p>@if (card.has_description)
+        <p class="m-0 text-sm">{{ $card.description }}</p>@endif
       </div>
     @empty
-      <p class="col-span-full">No stats yet. A resource shows its cards here by implementing <code>widgets</code>.</p>
+      <p class="col-span-full">Nothing to show yet.</p>
     @endforelse
   </div>
 

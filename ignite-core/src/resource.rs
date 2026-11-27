@@ -13,7 +13,7 @@ use crate::layout::FormLayout;
 use crate::list::{ColumnBadges, Tab};
 use crate::policy::ActingUser;
 use crate::query::{ListQuery, Page};
-use crate::widget::{LatestRecords, StatWidget};
+use crate::widget::{LatestRecords, Stat, StatWidget};
 
 /// Checks at compile time that `table` is `expected`. The derive uses it to check that the
 /// `table` attribute names the same table as the Orbit model's `TABLE`.
@@ -95,6 +95,25 @@ pub trait IgniteResource: Send + Sync + 'static {
     fn widgets(db: &Database) -> impl Future<Output = Result<Vec<StatWidget>, Error>> + Send {
         let _ = db;
         async { Ok(Vec::new()) }
+    }
+
+    /// The dashboard cards of the resource for the signed-in `user`, as the stats of a
+    /// Filament stats overview widget: each [`Stat`] has a title, a value and an optional
+    /// description. The panel shows them only to a user who may view the resource's records.
+    /// The default is the cards of [`widgets`](Self::widgets), so a resource that implements
+    /// `widgets` shows them as before.
+    fn stats(
+        db: &Database,
+        user: &ActingUser,
+    ) -> impl Future<Output = Result<Vec<Stat>, Error>> + Send {
+        let _ = user;
+        async move {
+            Ok(Self::widgets(db)
+                .await?
+                .into_iter()
+                .map(Stat::from)
+                .collect())
+        }
     }
 
     /// The dashboard table of the newest records, or `None` for no table (added in v1).

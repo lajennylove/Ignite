@@ -41,4 +41,4 @@ pub use runtime_resource::{
     BlockDef, ColumnDef, FieldDef, FieldKindDef, RegisteredResource, Row, RuntimeData,
     RuntimeError, RuntimeFuture, RuntimeResource, MAX_FIELD_NAME,
 };
-pub use widget::{LatestRecords, StatWidget};
+pub use widget::{LatestRecords, Stat, StatWidget, StatsOverviewWidget};

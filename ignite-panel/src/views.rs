@@ -522,20 +522,25 @@ const CARD_ICONS: [&str; 6] = [
     "ti-id-badge-2",
 ];
 
+/// One card of the dashboard: a [`Stat`](ignite_core::Stat)'s title, value and description.
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct CardView {
-    pub(crate) label: &'static str,
+    pub(crate) label: String,
     pub(crate) value: String,
+    pub(crate) has_description: bool,
+    pub(crate) description: String,
     pub(crate) tone: &'static str,
     pub(crate) icon: &'static str,
 }
 
 impl CardView {
-    /// The tile at `index` of the dashboard, with its tone and icon.
-    pub(crate) fn new(index: usize, label: &'static str, value: String) -> Self {
+    /// The tile at `index` of the dashboard for `stat`, with its tone and icon.
+    pub(crate) fn new(index: usize, stat: &ignite_core::Stat) -> Self {
         CardView {
-            label,
-            value,
+            label: stat.get_label().to_string(),
+            value: stat.get_value().to_string(),
+            has_description: stat.get_description().is_some(),
+            description: stat.get_description().unwrap_or_default().to_string(),
             tone: CARD_TONES[index % CARD_TONES.len()],
             icon: CARD_ICONS[index % CARD_ICONS.len()],
         }

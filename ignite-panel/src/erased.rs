@@ -9,7 +9,7 @@ use std::sync::Arc;
 use ignite_core::{
     ActingUser, ColumnBadges, ColumnDef, Database, FieldConditions, FieldDef, FieldErrors,
     FieldKindDef, FormInput, FormLayout, IgniteResource, LatestRecords, ListQuery,
-    RegisteredResource, Row, RowAction, StatWidget, Tab,
+    RegisteredResource, Row, RowAction, Stat, Tab,
 };
 use orbit_orm::Error;
 use serde::Serialize;
@@ -82,8 +82,8 @@ pub(crate) trait Erased: Send + Sync {
         hidden: &BTreeSet<String>,
     ) -> Result<Result<Value, FieldErrors>, Error>;
     async fn delete(&self, db: &Database, user: &ActingUser, id: i64) -> Result<u64, Error>;
-    /// The dashboard cards this resource provides.
-    async fn widgets(&self, db: &Database) -> Result<Vec<StatWidget>, Error>;
+    /// The dashboard cards this resource provides for `user`.
+    async fn stats(&self, db: &Database, user: &ActingUser) -> Result<Vec<Stat>, Error>;
     /// The dashboard table this resource declares, if any.
     fn latest_records(&self) -> Option<LatestRecords>;
     /// The newest records as JSON, up to `limit`.
@@ -310,8 +310,8 @@ impl<R: IgniteResource> Erased for Adapter<R> {
         R::delete_for(db, user, id).await
     }
 
-    async fn widgets(&self, db: &Database) -> Result<Vec<StatWidget>, Error> {
-        R::widgets(db).await
+    async fn stats(&self, db: &Database, user: &ActingUser) -> Result<Vec<Stat>, Error> {
+        R::stats(db, user).await
     }
 
     fn latest_records(&self) -> Option<LatestRecords> {
@@ -680,9 +680,9 @@ impl Erased for RuntimeAdapter {
         self.0.resource().data.delete_for(db, user, id).await
     }
 
-    /// A runtime resource has no dashboard cards.
-    async fn widgets(&self, _db: &Database) -> Result<Vec<StatWidget>, Error> {
-        Ok(Vec::new())
+    /// The cards its data source gives (none by default).
+    async fn stats(&self, db: &Database, user: &ActingUser) -> Result<Vec<Stat>, Error> {
+        self.0.resource().data.stats(db, user).await
     }
 
     /// A runtime resource has no dashboard table.

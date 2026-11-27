@@ -156,6 +156,18 @@ pub trait RuntimeData: Send + Sync + 'static {
         self.delete(db, id)
     }
 
+    /// The dashboard cards of the resource for the signed-in `user`, as
+    /// [`IgniteResource::stats`](crate::IgniteResource::stats). The panel shows them only to a
+    /// user who may view the resource's records. The default is none.
+    fn stats<'a>(
+        &'a self,
+        db: &'a Database,
+        user: &'a ActingUser,
+    ) -> RuntimeFuture<'a, Vec<crate::widget::Stat>> {
+        let _ = (db, user);
+        Box::pin(async { Ok(Vec::new()) })
+    }
+
     /// [`options`](Self::options) for the signed-in `user`: the panel fills the form's
     /// selects with these choices and checks a submitted value against them, so a choice left
     /// out cannot be saved, as a Filament select whose options depend on the user. The default
