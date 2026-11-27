@@ -67,9 +67,16 @@
 //! `nav_sections` (the sidebar in sections, each with `has_heading`, `heading` and `items`, as
 //! [`Ignite::navigation_groups`](crate::Ignite::navigation_groups) orders them) and `nav` (the
 //! same entries in one list, each child after its parent). Each entry has `title`, `url`,
-//! `active`, `has_add`, `add_url`, `icon` (the CSS classes of the entry's icon, as the theme
-//! resolves it) and `icon_name` (the icon's name, such as `post`, or empty for a resource that
-//! names none).
+//! `active`, `has_add`, `add_url`, `add_label` (the create link's label), `icon` (the CSS
+//! classes of the entry's icon, as the theme resolves it) and `icon_name` (the icon's name, such
+//! as `post`, or empty for a resource that names none).
+//!
+//! An entry of `nav_sections` with a create link or children is a group, as a WordPress menu
+//! with its submenu: `has_sub_items`, `sub_items` (its links in order, each with `title`, `url`
+//! and `active`: the create link, then each child and the child's create link), `open` and
+//! `closed` (the entry or one of its children is the current page), `aria_expanded` (`"true"`
+//! or `"false"`) and `sub_items_id` (the `id` for the toggle's `aria-controls`). The `ignite`
+//! theme renders a closed group's links `hidden`, with a toggle beside the entry that shows them.
 //!
 //! An entry of `nav_sections` also has `children` (the entries listed under it with
 //! `NAVIGATION_PARENT_ITEM`, as Filament's child items, in order), `has_children`,

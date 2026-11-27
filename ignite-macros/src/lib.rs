@@ -26,6 +26,8 @@ use syn::{
 /// - `#[ignite(navigation_sort = 2)]`: the entry's place, as Filament's `$navigationSort`: lower first. Defaults to none, which comes before any number.
 /// - `#[ignite(navigation_parent_item = "Posts")]`: the navigation entry the resource is listed under, as Filament's `$navigationParentItem`: the parent's label or slug, in the same navigation group. Defaults to none: the resource is an entry of its own.
 /// - `#[ignite(navigation_icon = "post")]`: the name of the entry's icon, as Filament's `$navigationIcon`: what the resource is (`post`, `page`, `media`, `comment`, `users`, `settings`, or a name of the app's own), not a CSS class. The admin theme maps the name to its icon. Defaults to the theme's generic resource icon.
+/// - `#[ignite(navigation_create_item = false)]`: leaves the create link out of the resource's navigation group. Defaults to `true`: the entry's group lists a link to the create page, for a user who may create a record.
+/// - `#[ignite(navigation_create_label = "Add New Post")]`: the label of that create link. Defaults to `"Add new"`.
 /// - `#[ignite(conditions = post_conditions)]`: the conditions that show or hide the form's fields, and the live fields, as Filament's `visible()`, `hidden()` and `live()`: the path of a `fn() -> ignite_core::FieldConditions`. Defaults to none: every field shows. A field that a condition may hide should be an `Option`, so it is NULL on create and keeps its stored value on update.
 /// - `#[ignite(tabs = post_tabs)]`: the tabs of the list page, as Filament's `getTabs()`: the path of a `fn() -> Vec<ignite_core::Tab>`. The list query applies the active tab's conditions. Defaults to none: the list has no tabs.
 /// - `#[ignite(default_active_tab = "drafts")]`: the key of the tab shown when the list has no `tab` parameter, as Filament's `getDefaultActiveTab()`. Defaults to the first tab.
@@ -663,6 +665,8 @@ struct Navigation {
     sort: Option<i32>,
     parent_item: Option<String>,
     icon: Option<String>,
+    create_item: Option<bool>,
+    create_label: Option<String>,
 }
 
 impl Navigation {
@@ -683,7 +687,13 @@ impl Navigation {
         let icon = self.icon.as_ref().map(|icon| {
             quote! { const NAVIGATION_ICON: ::core::option::Option<&'static str> = ::core::option::Option::Some(#icon); }
         });
-        quote! { #label #group #sort #parent_item #icon }
+        let create_item = self.create_item.map(|listed| {
+            quote! { const NAVIGATION_CREATE_ITEM: bool = #listed; }
+        });
+        let create_label = self.create_label.as_ref().map(|label| {
+            quote! { const NAVIGATION_CREATE_LABEL: &'static str = #label; }
+        });
+        quote! { #label #group #sort #parent_item #icon #create_item #create_label }
     }
 }
 
@@ -787,6 +797,12 @@ fn struct_attrs(input: &DeriveInput) -> syn::Result<StructAttrs> {
             } else if meta.path.is_ident("navigation_parent_item") {
                 navigation.parent_item = Some(meta.value()?.parse::<LitStr>()?.value());
                 Ok(())
+            } else if meta.path.is_ident("navigation_create_item") {
+                navigation.create_item = Some(meta.value()?.parse::<syn::LitBool>()?.value);
+                Ok(())
+            } else if meta.path.is_ident("navigation_create_label") {
+                navigation.create_label = Some(meta.value()?.parse::<LitStr>()?.value());
+                Ok(())
             } else if meta.path.is_ident("navigation_icon") {
                 let icon = meta.value()?.parse::<LitStr>()?;
                 let name = icon.value();
@@ -825,7 +841,7 @@ fn struct_attrs(input: &DeriveInput) -> syn::Result<StructAttrs> {
                 Ok(())
             } else {
                 Err(meta.error(
-                    "unknown ignite attribute on the struct; expected `table`, `title`, `singular`, `latest_records`, `navigation_label`, `navigation_group`, `navigation_sort`, `navigation_parent_item`, `navigation_icon`, `conditions`, `form_layout`, `tabs`, `default_active_tab`, `badges`, `tab_counts_follow_search` or `hide_empty_tabs`",
+                    "unknown ignite attribute on the struct; expected `table`, `title`, `singular`, `latest_records`, `navigation_label`, `navigation_group`, `navigation_sort`, `navigation_parent_item`, `navigation_icon`, `navigation_create_item`, `navigation_create_label`, `conditions`, `form_layout`, `tabs`, `default_active_tab`, `badges`, `tab_counts_follow_search` or `hide_empty_tabs`",
                 ))
             }
         })?;

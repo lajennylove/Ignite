@@ -4,6 +4,38 @@ All notable changes to Ignite are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Navigation groups that open and close, as WordPress's admin menu with its submenus: a
+  navigation entry with a create link or child entries (`navigation_parent_item`) is a group, and
+  a toggle beside the entry (`data-ig-nav-item-toggle`, with `aria-expanded` and
+  `aria-controls`) shows or hides its links. The group of the current page starts open; the
+  others render their links `hidden`, so without JavaScript only the current page's group shows
+  them, as before.
+- A resource's create link is part of its group: listed below the resource, before its child
+  entries, and each child entry's create link follows the child. `IgniteResource`'s
+  `NAVIGATION_CREATE_ITEM` (default `true`) and `NAVIGATION_CREATE_LABEL` (default
+  `"Add new"`), `RuntimeResource::navigation_create_item(bool)` and
+  `navigation_create_label(label)`, and the derive's `#[ignite(navigation_create_item = false)]`
+  and `#[ignite(navigation_create_label = "Add New Post")]`. As before, the link is listed only
+  for a user who may create a record.
+- The theme values `add_label`, `has_sub_items`, `sub_items`, `open`, `closed`,
+  `aria_expanded` and `sub_items_id` on each entry of `nav_sections`.
+
+### Changed
+
+- **Breaking:** the sidebar's HTML. An entry with a create link or children is wrapped in
+  `<div data-ig-nav-item>` with its toggle, and its links in a `<div id="ig-nav-items-…">`;
+  the child entries of a closed group are now in the page (hidden) instead of left out; the
+  sidebar has a small style and script for the toggles. A theme that overrides
+  `partials.nav` keeps working: `children`, `has_add`, `add_url` and `expanded` are unchanged.
+- **Breaking:** `RuntimeResource` has the new public fields `navigation_create_item` and
+  `navigation_create_label`, so code that builds it with a struct literal must set them.
+- The navigation API of 0.6.5 (`NavigationGroup`, `NavigationItem`, `navigation_parent_item`)
+  works as before.
+
 ## [0.6.5] - 2026-11-26
 
 ### Added

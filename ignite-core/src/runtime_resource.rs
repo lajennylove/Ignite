@@ -412,6 +412,11 @@ pub struct RuntimeResource {
     /// The name of the navigation entry's icon, such as `post`, as Filament's
     /// `$navigationIcon`. See [`IgniteResource::NAVIGATION_ICON`](crate::IgniteResource::NAVIGATION_ICON).
     pub navigation_icon: Option<String>,
+    /// Whether the navigation entry lists a link to the create page. The default is `true`.
+    /// See [`IgniteResource::NAVIGATION_CREATE_ITEM`](crate::IgniteResource::NAVIGATION_CREATE_ITEM).
+    pub navigation_create_item: bool,
+    /// The label of the create link. `None`, the default, is `"Add new"`.
+    pub navigation_create_label: Option<String>,
     /// The conditions that show or hide the form's fields, and the live fields, as
     /// Filament's `visible()`, `hidden()` and `live()`. See [`FieldConditions`].
     pub conditions: FieldConditions,
@@ -451,6 +456,8 @@ impl fmt::Debug for RuntimeResource {
             .field("navigation_sort", &self.navigation_sort)
             .field("navigation_parent_item", &self.navigation_parent_item)
             .field("navigation_icon", &self.navigation_icon)
+            .field("navigation_create_item", &self.navigation_create_item)
+            .field("navigation_create_label", &self.navigation_create_label)
             .field("conditions", &self.conditions)
             .field("form_layout", &self.form_layout)
             .field("tabs", &self.tabs)
@@ -483,6 +490,8 @@ impl RuntimeResource {
             navigation_sort: None,
             navigation_parent_item: None,
             navigation_icon: None,
+            navigation_create_item: true,
+            navigation_create_label: None,
             conditions: FieldConditions::new(),
             form_layout: FormLayout::new(),
             tabs: Vec::new(),
@@ -542,6 +551,20 @@ impl RuntimeResource {
     /// See [`IgniteResource::NAVIGATION_ICON`](crate::IgniteResource::NAVIGATION_ICON).
     pub fn navigation_icon(mut self, name: impl Into<String>) -> Self {
         self.navigation_icon = Some(name.into());
+        self
+    }
+
+    /// Whether the navigation entry lists a link to the create page, under the entry, in its
+    /// group. See [`IgniteResource::NAVIGATION_CREATE_ITEM`](crate::IgniteResource::NAVIGATION_CREATE_ITEM).
+    pub fn navigation_create_item(mut self, listed: bool) -> Self {
+        self.navigation_create_item = listed;
+        self
+    }
+
+    /// Sets the label of the create link, such as `"Add New Post"`. See
+    /// [`IgniteResource::NAVIGATION_CREATE_LABEL`](crate::IgniteResource::NAVIGATION_CREATE_LABEL).
+    pub fn navigation_create_label(mut self, label: impl Into<String>) -> Self {
+        self.navigation_create_label = Some(label.into());
         self
     }
 
@@ -871,6 +894,16 @@ impl RegisteredResource {
     /// The name of the navigation entry's icon, if set.
     pub fn navigation_icon(&self) -> Option<&str> {
         self.resource.navigation_icon.as_deref()
+    }
+
+    /// The label of the navigation entry's create link, or `None` when it lists none.
+    pub fn navigation_create_item(&self) -> Option<&str> {
+        self.resource.navigation_create_item.then(|| {
+            self.resource
+                .navigation_create_label
+                .as_deref()
+                .unwrap_or("Add new")
+        })
     }
 
     /// The form fields, in display order.

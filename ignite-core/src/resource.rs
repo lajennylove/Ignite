@@ -79,6 +79,15 @@ pub trait IgniteResource: Send + Sync + 'static {
     /// its generic resource icon for a name it does not know. The default, `None`, shows the
     /// theme's generic resource icon.
     const NAVIGATION_ICON: Option<&'static str> = None;
+    /// Whether the resource's navigation entry lists a link to its create page, as a Filament
+    /// resource has a create page (`getUrl('create')`). The link is part of the entry's group in
+    /// the sidebar: it is listed under the entry, before its child entries, and shows and hides
+    /// with them. It is listed only for a user who may create a record. The default, `true`,
+    /// lists it; `false` leaves it out, such as for a taxonomy whose terms are added elsewhere.
+    const NAVIGATION_CREATE_ITEM: bool = true;
+    /// The label of the create link ([`NAVIGATION_CREATE_ITEM`](Self::NAVIGATION_CREATE_ITEM)),
+    /// such as `"Add New Post"`. The default is `"Add new"`.
+    const NAVIGATION_CREATE_LABEL: &'static str = "Add new";
 
     /// Stat cards for the dashboard, in display order. The default is none.
     /// Override it to show counts, such as the total number of rows.

@@ -117,6 +117,11 @@ pub(crate) struct Layout {
 }
 
 /// One entry of the sidebar: a list, and a link to add a record when the resource has forms.
+///
+/// An entry with a create link or child entries is a group, as a WordPress menu with its
+/// submenu: its `sub_items` (the create link, then each child entry followed by its own create
+/// link) show only while the group is open, and the toggle beside the entry opens and closes
+/// it. A group is open when the entry or one of its children is the current page.
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct NavGroup {
     pub(crate) title: String,
@@ -126,9 +131,25 @@ pub(crate) struct NavGroup {
     /// none.
     pub(crate) icon_name: String,
     pub(crate) url: String,
+    /// Whether the entry has a create link: the resource lists one (`NAVIGATION_CREATE_ITEM`)
+    /// and the user may create a record.
     pub(crate) has_add: bool,
     pub(crate) add_url: String,
+    /// The create link's label (`NAVIGATION_CREATE_LABEL`), such as "Add new".
+    pub(crate) add_label: String,
     pub(crate) active: bool,
+    /// The links of the entry's group, in order: its create link, then each child entry and
+    /// that child's create link.
+    pub(crate) sub_items: Vec<NavLink>,
+    pub(crate) has_sub_items: bool,
+    /// Whether the group shows its `sub_items`: the entry or one of its children is the current
+    /// page. `closed` is the opposite, and `aria_expanded` is `"true"` or `"false"`, for the
+    /// toggle.
+    pub(crate) open: bool,
+    pub(crate) closed: bool,
+    pub(crate) aria_expanded: &'static str,
+    /// The `id` of the element that holds `sub_items`, for the toggle's `aria-controls`.
+    pub(crate) sub_items_id: String,
     /// The entries listed under this one (Filament's child items), in order. A child has none.
     pub(crate) children: Vec<NavGroup>,
     pub(crate) has_children: bool,
@@ -155,12 +176,52 @@ impl NavGroup {
     /// The entry `item` with the entries listed under it.
     fn with_children(node: Node<NavGroup>) -> NavGroup {
         let has_active_child = node.children.iter().any(|child| child.active);
+        let mut sub_items = Vec::new();
+        if node.item.has_add {
+            sub_items.push(NavLink::create_link(&node.item));
+        }
+        for child in &node.children {
+            sub_items.push(NavLink {
+                title: child.title.clone(),
+                url: child.url.clone(),
+                active: child.active,
+            });
+            if child.has_add {
+                sub_items.push(NavLink::create_link(child));
+            }
+        }
+        let open = !sub_items.is_empty() && (node.item.active || has_active_child);
         NavGroup {
             has_children: !node.children.is_empty(),
             expanded: !node.children.is_empty() && (node.item.active || has_active_child),
             has_active_child,
             children: node.children,
+            has_sub_items: !sub_items.is_empty(),
+            sub_items,
+            open,
+            closed: !open,
+            aria_expanded: if open { "true" } else { "false" },
             ..node.item
+        }
+    }
+}
+
+/// One link of a navigation entry's group: a child entry, or a create link.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct NavLink {
+    pub(crate) title: String,
+    pub(crate) url: String,
+    /// Whether the link is the current page.
+    pub(crate) active: bool,
+}
+
+impl NavLink {
+    /// The create link of `entry`.
+    fn create_link(entry: &NavGroup) -> NavLink {
+        NavLink {
+            title: entry.add_label.clone(),
+            url: entry.add_url.clone(),
+            active: false,
         }
     }
 }
@@ -227,7 +288,14 @@ impl Layout {
                     url,
                     has_add: false,
                     add_url: String::new(),
+                    add_label: String::new(),
                     active: false,
+                    sub_items: Vec::new(),
+                    has_sub_items: false,
+                    open: false,
+                    closed: true,
+                    aria_expanded: "false",
+                    sub_items_id: String::new(),
                     children: Vec::new(),
                     has_children: false,
                     has_active_child: false,
@@ -282,8 +350,13 @@ impl Layout {
                                 parent: r.navigation_parent_item().map(str::to_string),
                                 item: (
                                     NavGroup {
-                                        has_add: user.may(r.slug(), Action::Create),
+                                        has_add: r.navigation_create_item().is_some()
+                                            && user.may(r.slug(), Action::Create),
                                         add_url: format!("{}/{}/new", registry.mount, r.slug()),
+                                        add_label: r
+                                            .navigation_create_item()
+                                            .unwrap_or_default()
+                                            .to_string(),
                                         active: section == r.slug(),
                                         ..entry_view(
                                             r.navigation_label(),
@@ -309,6 +382,11 @@ impl Layout {
                             .items
                             .into_iter()
                             .filter_map(NavGroup::from_node)
+                            .enumerate()
+                            .map(|(item, group)| NavGroup {
+                                sub_items_id: format!("ig-nav-items-{index}-{item}"),
+                                ..group
+                            })
                             .collect();
                         // A group the panel does not declare follows the panel's default. A
                         // group declared twice takes the options of its last declaration.

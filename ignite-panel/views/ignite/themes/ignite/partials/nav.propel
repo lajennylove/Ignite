@@ -12,20 +12,39 @@
     <div id="{{ $section.items_id }}" class="flex flex-col gap-1">
     @else<p class="ig-caption mt-5">{{ $section.heading }}</p>
     @endif@endif@foreach (group in section.items)
-      @if (group.active)
+      @if (group.has_sub_items)<div class="flex flex-col gap-1" data-ig-nav-item@if (group.open) data-ig-nav-open@endif>
+      <div class="flex items-center gap-1">
+      @endif@if (group.active)
         <a class="ig-nav-link ig-nav-link-active" href="{{ $group.url }}" aria-current="page"><i class="{{ $group.icon }} text-lg"></i>{{ $group.title }}</a>
       @else
         <a class="ig-nav-link" href="{{ $group.url }}"><i class="{{ $group.icon }} text-lg"></i>{{ $group.title }}</a>
+      @endif@if (group.has_sub_items)
+        <button type="button" class="ig-nav-link shrink-0" aria-expanded="{{ $group.aria_expanded }}" aria-controls="{{ $group.sub_items_id }}" aria-label="{{ $group.title }} menu" data-ig-nav-item-toggle><i class="ti ti-chevron-down text-lg transition-transform" aria-hidden="true"></i></button>
+      </div>
+      <div id="{{ $group.sub_items_id }}" class="flex flex-col gap-1"@if (group.closed) hidden@endif>
+      @foreach (link in group.sub_items)
+        @if (link.active)<a class="ig-nav-link ig-nav-link-active py-1.5 pl-11 text-[13px]" href="{{ $link.url }}" aria-current="page">{{ $link.title }}</a>@else<a class="ig-nav-link py-1.5 pl-11 text-[13px]" href="{{ $link.url }}">{{ $link.title }}</a>@endif
+      @endforeach
+      </div>
+      </div>
       @endif
-      @if (group.has_add)
-        <a class="ig-nav-link py-1.5 pl-11 text-[13px]" href="{{ $group.add_url }}">Add new</a>
-      @endif@if (group.expanded)@foreach (child in group.children)
-        @if (child.active)<a class="ig-nav-link ig-nav-link-active py-1.5 pl-11 text-[13px]" href="{{ $child.url }}" aria-current="page">{{ $child.title }}</a>@else<a class="ig-nav-link py-1.5 pl-11 text-[13px]" href="{{ $child.url }}">{{ $child.title }}</a>@endif
-      @endforeach@endif
     @endforeach@if (section.collapsible)</div>
     </div>
     @endif@endforeach
   </nav>
+  <style>[data-ig-nav-item] > div > a { flex: 1 1 0%; min-width: 0; } [data-ig-nav-item-toggle][aria-expanded="false"] i { transform: rotate(-90deg); }</style>
+  <script>
+  // A navigation entry's group, as a WordPress menu with its submenu: the toggle beside the
+  // entry shows or hides its create link and its child entries. The group of the current page
+  // starts open; without JavaScript it is the only one that shows its links.
+  document.querySelectorAll('[data-ig-nav-item-toggle]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const open = button.getAttribute('aria-expanded') !== 'true';
+      button.setAttribute('aria-expanded', String(open));
+      document.getElementById(button.getAttribute('aria-controls')).hidden = !open;
+    });
+  });
+  </script>
 @if (nav_collapsible)  <script>
   // Collapsible navigation groups, as Filament's: the heading collapses or expands the group,
   // and the browser remembers the collapsed groups by label (localStorage, as Filament's

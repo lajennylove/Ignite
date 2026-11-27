@@ -32,6 +32,8 @@ pub(crate) trait Erased: Send + Sync {
     fn navigation_parent_item(&self) -> Option<&str>;
     /// The CSS classes of the navigation entry's icon, if set.
     fn navigation_icon(&self) -> Option<&str>;
+    /// The label of the navigation entry's create link, or `None` when it lists none.
+    fn navigation_create_item(&self) -> Option<&str>;
     /// The form fields, owned, so static and runtime resources render the same way.
     fn fields(&self) -> &[FieldDef];
     /// The list columns, owned.
@@ -193,6 +195,10 @@ impl<R: IgniteResource> Erased for Adapter<R> {
 
     fn navigation_icon(&self) -> Option<&str> {
         R::NAVIGATION_ICON
+    }
+
+    fn navigation_create_item(&self) -> Option<&str> {
+        R::NAVIGATION_CREATE_ITEM.then_some(R::NAVIGATION_CREATE_LABEL)
     }
 
     fn fields(&self) -> &[FieldDef] {
@@ -561,6 +567,10 @@ impl Erased for RuntimeAdapter {
 
     fn navigation_icon(&self) -> Option<&str> {
         self.0.navigation_icon()
+    }
+
+    fn navigation_create_item(&self) -> Option<&str> {
+        self.0.navigation_create_item()
     }
 
     fn fields(&self) -> &[FieldDef] {

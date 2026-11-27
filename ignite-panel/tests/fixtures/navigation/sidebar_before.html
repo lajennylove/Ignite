@@ -9,30 +9,53 @@
       
         <a class="ig-nav-link" href="/admin"><i class="ti ti-layout-dashboard text-lg"></i>Dashboard</a>
       
-      
     
+      <div class="flex flex-col gap-1" data-ig-nav-item>
+      <div class="flex items-center gap-1">
       
         <a class="ig-nav-link" href="/admin/widgets"><i class="ti ti-table text-lg"></i>Widgets</a>
       
+        <button type="button" class="ig-nav-link shrink-0" aria-expanded="false" aria-controls="ig-nav-items-0-1" aria-label="Widgets menu" data-ig-nav-item-toggle><i class="ti ti-chevron-down text-lg transition-transform" aria-hidden="true"></i></button>
+      </div>
+      <div id="ig-nav-items-0-1" class="flex flex-col gap-1" hidden>
       
         <a class="ig-nav-link py-1.5 pl-11 text-[13px]" href="/admin/widgets/new">Add new</a>
+      
+      </div>
+      </div>
       
     <div class="flex flex-col gap-1" data-ig-nav-group="Content" data-ig-nav-active>
     <button type="button" class="ig-caption mt-5 flex w-full items-center justify-between" aria-expanded="true" aria-controls="ig-nav-group-1" data-ig-nav-toggle>Content<i class="ti ti-chevron-down text-lg transition-transform" aria-hidden="true"></i></button>
     <div id="ig-nav-group-1" class="flex flex-col gap-1">
     
+      <div class="flex flex-col gap-1" data-ig-nav-item data-ig-nav-open>
+      <div class="flex items-center gap-1">
       
         <a class="ig-nav-link ig-nav-link-active" href="/admin/tree_posts" aria-current="page"><i class="ti ti-table text-lg"></i>Posts</a>
       
+        <button type="button" class="ig-nav-link shrink-0" aria-expanded="true" aria-controls="ig-nav-items-1-0" aria-label="Posts menu" data-ig-nav-item-toggle><i class="ti ti-chevron-down text-lg transition-transform" aria-hidden="true"></i></button>
+      </div>
+      <div id="ig-nav-items-1-0" class="flex flex-col gap-1">
       
         <a class="ig-nav-link py-1.5 pl-11 text-[13px]" href="/admin/tree_posts/new">Add new</a>
       
+      </div>
+      </div>
+      
     
+      <div class="flex flex-col gap-1" data-ig-nav-item>
+      <div class="flex items-center gap-1">
       
         <a class="ig-nav-link" href="/admin/tree_pages"><i class="ti ti-table text-lg"></i>Pages</a>
       
+        <button type="button" class="ig-nav-link shrink-0" aria-expanded="false" aria-controls="ig-nav-items-1-1" aria-label="Pages menu" data-ig-nav-item-toggle><i class="ti ti-chevron-down text-lg transition-transform" aria-hidden="true"></i></button>
+      </div>
+      <div id="ig-nav-items-1-1" class="flex flex-col gap-1" hidden>
       
         <a class="ig-nav-link py-1.5 pl-11 text-[13px]" href="/admin/tree_pages/new">Add new</a>
+      
+      </div>
+      </div>
       
     </div>
     </div>
@@ -40,16 +63,37 @@
     <button type="button" class="ig-caption mt-5 flex w-full items-center justify-between" aria-expanded="true" aria-controls="ig-nav-group-2" data-ig-nav-toggle>Settings<i class="ti ti-chevron-down text-lg transition-transform" aria-hidden="true"></i></button>
     <div id="ig-nav-group-2" class="flex flex-col gap-1">
     
+      <div class="flex flex-col gap-1" data-ig-nav-item>
+      <div class="flex items-center gap-1">
       
         <a class="ig-nav-link" href="/admin/tree_options"><i class="ti ti-table text-lg"></i>General</a>
       
+        <button type="button" class="ig-nav-link shrink-0" aria-expanded="false" aria-controls="ig-nav-items-2-0" aria-label="General menu" data-ig-nav-item-toggle><i class="ti ti-chevron-down text-lg transition-transform" aria-hidden="true"></i></button>
+      </div>
+      <div id="ig-nav-items-2-0" class="flex flex-col gap-1" hidden>
       
         <a class="ig-nav-link py-1.5 pl-11 text-[13px]" href="/admin/tree_options/new">Add new</a>
+      
+      </div>
+      </div>
       
     </div>
     </div>
     
   </nav>
+  <style>[data-ig-nav-item] > div > a { flex: 1 1 0%; min-width: 0; } [data-ig-nav-item-toggle][aria-expanded="false"] i { transform: rotate(-90deg); }</style>
+  <script>
+  // A navigation entry's group, as a WordPress menu with its submenu: the toggle beside the
+  // entry shows or hides its create link and its child entries. The group of the current page
+  // starts open; without JavaScript it is the only one that shows its links.
+  document.querySelectorAll('[data-ig-nav-item-toggle]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const open = button.getAttribute('aria-expanded') !== 'true';
+      button.setAttribute('aria-expanded', String(open));
+      document.getElementById(button.getAttribute('aria-controls')).hidden = !open;
+    });
+  });
+  </script>
   <script>
   // Collapsible navigation groups, as Filament's: the heading collapses or expands the group,
   // and the browser remembers the collapsed groups by label (localStorage, as Filament's

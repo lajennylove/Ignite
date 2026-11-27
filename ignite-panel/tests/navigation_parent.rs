@@ -119,9 +119,15 @@ fn a_label_only_parent_opens_its_first_child() {
         nav.contains(r#"<a class="ig-nav-link" href="/admin/np-general"><i class="ti ti-settings text-lg"></i>Settings</a>"#),
         "{nav}"
     );
-    // It has no "Add new" link, and its children show only when one is the current page.
-    assert!(!nav.contains("/admin/np-general/new"), "{nav}");
-    assert!(!nav.contains("Writing"), "{nav}");
+    // It has no "Add new" link, and its children show only when one is the current page:
+    // since 0.6.6 they are in the page, in its group, hidden until the toggle opens it.
+    // (Each child lists its own create link after it, since 0.6.6.)
+    assert!(
+        at(&nav, &child("np-general", "General")) < at(&nav, "/admin/np-general/new"),
+        "{nav}"
+    );
+    let hidden = at(&nav, r#"class="flex flex-col gap-1" hidden>"#);
+    assert!(hidden < at(&nav, &child("np-writing", "Writing")), "{nav}");
     // The children are not entries of their own.
     assert!(!nav.contains("></i>General</a>"), "{nav}");
 }

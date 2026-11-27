@@ -166,6 +166,8 @@ fn a_child_entry_renders_under_its_parent_in_sort_order() {
     assert!(!nav.contains("></i>Tags</a>"), "{nav}");
 }
 
+// Since 0.6.6 the children are in the page in a closed group, hidden until its toggle opens
+// it (see nav_groups_toggle.rs); before, they were left out of the page.
 #[test]
 fn children_show_only_when_their_parent_or_one_of_them_is_the_current_page() {
     let _guard = reset();
@@ -173,8 +175,19 @@ fn children_show_only_when_their_parent_or_one_of_them_is_the_current_page() {
     let html = page(&client, "/admin/tree_pages/new");
     let nav = sidebar(&html);
     assert!(nav.contains("></i>Posts</a>"), "{nav}");
-    assert!(!nav.contains(&child("tree_tags", "Tags")), "{nav}");
-    assert!(!nav.contains("Categories"), "{nav}");
+    let hidden = at(
+        nav,
+        r#"<div id="ig-nav-items-1-0" class="flex flex-col gap-1" hidden>"#,
+    );
+    assert!(
+        hidden < at(nav, &child("tree_categories", "Categories")),
+        "{nav}"
+    );
+    assert!(hidden < at(nav, &child("tree_tags", "Tags")), "{nav}");
+    assert!(
+        at(nav, &child("tree_tags", "Tags")) < at(nav, "></i>Pages</a>"),
+        "{nav}"
+    );
 }
 
 #[test]
@@ -277,7 +290,7 @@ fn a_collapsible_group_renders_expanded_with_its_state_attributes() {
     );
     // Without JavaScript every group is expanded: the heading says so, and its entries are
     // in the page and not hidden.
-    let button = at(nav, r#"<button type="button""#);
+    let button = at(nav, r#"<button type="button" class="ig-caption"#);
     assert!(
         nav[button..].starts_with(
             r#"<button type="button" class="ig-caption mt-5 flex w-full items-center justify-between" aria-expanded="true" aria-controls="ig-nav-group-1" data-ig-nav-toggle>Content<i"#
@@ -289,8 +302,10 @@ fn a_collapsible_group_renders_expanded_with_its_state_attributes() {
         at(nav, r#"aria-controls="ig-nav-group-2""#) < at(nav, "></i>General</a>"),
         "{nav}"
     );
+    // The groups' sections are not hidden (an entry's closed group of links is, since 0.6.6).
     let markup = &nav[..at(nav, "<script>")];
-    assert!(!markup.contains(" hidden"), "{markup}");
+    assert!(!markup.contains(r#"<div id="ig-nav-group-1" class="flex flex-col gap-1" hidden"#));
+    assert!(!markup.contains(r#"<div id="ig-nav-group-2" class="flex flex-col gap-1" hidden"#));
     // The script that collapses and remembers the groups is in the sidebar.
     assert!(nav.contains("ignite:sidebar:collapsed_groups"), "{nav}");
     assert!(!nav.contains(r#"<p class="ig-caption mt-5">"#), "{nav}");
@@ -379,7 +394,8 @@ fn collapsible_navigation_groups_false_renders_plain_groups_as_before() {
     let nav = sidebar(&html);
     assert!(nav == SIDEBAR_PLAIN, "{nav}");
     assert!(!nav.contains("data-ig-nav-group"), "{nav}");
-    assert!(!nav.contains("<script>"), "{nav}");
+    // No script for the groups; since 0.6.6 the entries' own groups have theirs.
+    assert!(!nav.contains("ignite:sidebar:collapsed_groups"), "{nav}");
 }
 
 #[test]

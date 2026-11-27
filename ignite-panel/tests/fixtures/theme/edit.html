@@ -28,16 +28,36 @@
       
         <a class="ig-nav-link" href="/admin"><i class="ti ti-layout-dashboard text-lg"></i>Dashboard</a>
       
-      
     
+      <div class="flex flex-col gap-1" data-ig-nav-item data-ig-nav-open>
+      <div class="flex items-center gap-1">
       
         <a class="ig-nav-link ig-nav-link-active" href="/admin/widgets" aria-current="page"><i class="ti ti-table text-lg"></i>Widgets</a>
       
+        <button type="button" class="ig-nav-link shrink-0" aria-expanded="true" aria-controls="ig-nav-items-0-1" aria-label="Widgets menu" data-ig-nav-item-toggle><i class="ti ti-chevron-down text-lg transition-transform" aria-hidden="true"></i></button>
+      </div>
+      <div id="ig-nav-items-0-1" class="flex flex-col gap-1">
       
         <a class="ig-nav-link py-1.5 pl-11 text-[13px]" href="/admin/widgets/new">Add new</a>
       
+      </div>
+      </div>
+      
     
   </nav>
+  <style>[data-ig-nav-item] > div > a { flex: 1 1 0%; min-width: 0; } [data-ig-nav-item-toggle][aria-expanded="false"] i { transform: rotate(-90deg); }</style>
+  <script>
+  // A navigation entry's group, as a WordPress menu with its submenu: the toggle beside the
+  // entry shows or hides its create link and its child entries. The group of the current page
+  // starts open; without JavaScript it is the only one that shows its links.
+  document.querySelectorAll('[data-ig-nav-item-toggle]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const open = button.getAttribute('aria-expanded') !== 'true';
+      button.setAttribute('aria-expanded', String(open));
+      document.getElementById(button.getAttribute('aria-controls')).hidden = !open;
+    });
+  });
+  </script>
 </aside>
 
 
