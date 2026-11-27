@@ -38,7 +38,7 @@ pub use embedded::EmbeddedViews;
 pub use ignite::Ignite;
 pub use ignite_core;
 pub use mail::{EmailitMailer, MailError, Mailer, Message, NotConfigured, RecordingMailer};
-pub use navigation::NavigationGroup;
+pub use navigation::{NavigationGroup, NavigationItem};
 pub use session::AdminUser;
 pub use theme::{
     active_admin_theme, register_admin_theme, registered_admin_themes, resolve_admin_theme,

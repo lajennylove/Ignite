@@ -140,6 +140,18 @@ pub(crate) struct NavGroup {
 }
 
 impl NavGroup {
+    /// The entry of `node` with the entries listed under it, or `None` for a label-only
+    /// parent without children. A label-only parent (the node's flag) links to its first
+    /// child, as a Filament cluster's navigation item opens the cluster's first page.
+    fn from_node(node: Node<(NavGroup, bool)>) -> Option<NavGroup> {
+        let (mut item, label_only) = node.item;
+        let children: Vec<NavGroup> = node.children.into_iter().map(|(child, _)| child).collect();
+        if label_only {
+            item.url = children.first()?.url.clone();
+        }
+        Some(NavGroup::with_children(Node { item, children }))
+    }
+
     /// The entry `item` with the entries listed under it.
     fn with_children(node: Node<NavGroup>) -> NavGroup {
         let has_active_child = node.children.iter().any(|child| child.active);
@@ -206,27 +218,57 @@ impl Layout {
                 // The dashboard is the first entry, before every group, as Filament's is: it
                 // has no sort, and the ungrouped entries keep the order they were added in.
                 // A resource may list itself under it.
+                // Each entry carries whether it is a label-only parent the panel declared
+                // (`Ignite::navigation_items` without a URL): it takes its first child's URL.
+                let entry_view = |title: &str, icon: Option<&str>, url: String| NavGroup {
+                    title: title.to_string(),
+                    icon: icon_classes(admin_theme.theme.as_ref(), icon),
+                    icon_name: icon.unwrap_or_default().to_string(),
+                    url,
+                    has_add: false,
+                    add_url: String::new(),
+                    active: false,
+                    children: Vec::new(),
+                    has_children: false,
+                    has_active_child: false,
+                    expanded: false,
+                };
                 let dashboard = Entry {
                     key: String::new(),
                     label: "Dashboard".to_string(),
                     group: None,
                     sort: None,
                     parent: None,
-                    item: NavGroup {
-                        title: "Dashboard".to_string(),
-                        icon: icon_classes(admin_theme.theme.as_ref(), Some(icons::DASHBOARD)),
-                        icon_name: icons::DASHBOARD.to_string(),
-                        url: registry.mount.clone(),
-                        has_add: false,
-                        add_url: String::new(),
-                        active: section.is_empty(),
-                        children: Vec::new(),
-                        has_children: false,
-                        has_active_child: false,
-                        expanded: false,
-                    },
+                    item: (
+                        NavGroup {
+                            active: section.is_empty(),
+                            ..entry_view(
+                                "Dashboard",
+                                Some(icons::DASHBOARD),
+                                registry.mount.clone(),
+                            )
+                        },
+                        false,
+                    ),
                 };
+                let items = registry.navigation_items.iter().map(|item| Entry {
+                    // A declared entry is found by its label; its key is never a slug.
+                    key: format!("\u{0}{}", item.label()),
+                    label: item.label().to_string(),
+                    group: item.group_name().map(str::to_string),
+                    sort: item.sort_value(),
+                    parent: None,
+                    item: (
+                        entry_view(
+                            item.label(),
+                            item.icon_name(),
+                            item.url_value().unwrap_or_default().to_string(),
+                        ),
+                        item.url_value().is_none(),
+                    ),
+                });
                 let entries = std::iter::once(dashboard)
+                    .chain(items)
                     .chain(
                         registry
                             .all()
@@ -238,22 +280,19 @@ impl Layout {
                                 group: r.navigation_group().map(str::to_string),
                                 sort: r.navigation_sort(),
                                 parent: r.navigation_parent_item().map(str::to_string),
-                                item: NavGroup {
-                                    title: r.navigation_label().to_string(),
-                                    icon: icon_classes(
-                                        admin_theme.theme.as_ref(),
-                                        r.navigation_icon(),
-                                    ),
-                                    icon_name: r.navigation_icon().unwrap_or_default().to_string(),
-                                    url: format!("{}/{}", registry.mount, r.slug()),
-                                    has_add: user.may(r.slug(), Action::Create),
-                                    add_url: format!("{}/{}/new", registry.mount, r.slug()),
-                                    active: section == r.slug(),
-                                    children: Vec::new(),
-                                    has_children: false,
-                                    has_active_child: false,
-                                    expanded: false,
-                                },
+                                item: (
+                                    NavGroup {
+                                        has_add: user.may(r.slug(), Action::Create),
+                                        add_url: format!("{}/{}/new", registry.mount, r.slug()),
+                                        active: section == r.slug(),
+                                        ..entry_view(
+                                            r.navigation_label(),
+                                            r.navigation_icon(),
+                                            format!("{}/{}", registry.mount, r.slug()),
+                                        )
+                                    },
+                                    false,
+                                ),
                             }),
                     )
                     .collect();
@@ -269,7 +308,7 @@ impl Layout {
                         let items: Vec<NavGroup> = section
                             .items
                             .into_iter()
-                            .map(NavGroup::with_children)
+                            .filter_map(NavGroup::from_node)
                             .collect();
                         // A group the panel does not declare follows the panel's default. A
                         // group declared twice takes the options of its last declaration.

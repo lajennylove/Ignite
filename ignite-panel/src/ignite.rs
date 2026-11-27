@@ -13,7 +13,7 @@ use rocket::{Build, Request, Response, Rocket};
 use crate::brand::{self, Brand};
 use crate::erased::{Adapter, Erased, RuntimeAdapter};
 use crate::mail::{Mailer, NotConfigured};
-use crate::navigation::NavigationGroup;
+use crate::navigation::{NavigationGroup, NavigationItem};
 use crate::proxy::TrustedProxies;
 use crate::routes;
 use crate::session;
@@ -77,6 +77,9 @@ pub(crate) struct Registry {
     /// The navigation groups in the order the sidebar shows them (see
     /// [`Ignite::navigation_groups`]).
     pub(crate) navigation_groups: Vec<NavigationGroup>,
+    /// The navigation entries the panel declares itself, such as a parent that is only a
+    /// label (see [`Ignite::navigation_items`]).
+    pub(crate) navigation_items: Vec<NavigationItem>,
     /// Whether a group that does not say collapses (see
     /// [`Ignite::collapsible_navigation_groups`]).
     pub(crate) collapsible_navigation_groups: bool,
@@ -157,6 +160,7 @@ pub struct Ignite {
     storage: PathBuf,
     brand: Brand,
     navigation_groups: Vec<NavigationGroup>,
+    navigation_items: Vec<NavigationItem>,
     collapsible_navigation_groups: bool,
 }
 
@@ -227,6 +231,7 @@ impl Ignite {
             storage: PathBuf::from(users::DEFAULT_STORAGE_DIR),
             brand: Brand::default(),
             navigation_groups: Vec::new(),
+            navigation_items: Vec::new(),
             collapsible_navigation_groups: true,
         }
     }
@@ -537,6 +542,23 @@ impl Ignite {
         self
     }
 
+    /// Adds navigation entries of the panel's own, as Filament's panel `navigationItems()`:
+    /// each [`NavigationItem`] is listed in its group by its sort, beside the resources. An
+    /// entry without a URL is a parent that is only a label: resources name it as their
+    /// `navigation_parent_item` (by its label), and it opens its first child, as a Filament
+    /// cluster does. Each call adds to the list.
+    ///
+    /// ```ignore
+    /// Ignite::new().navigation_items([NavigationItem::make("Settings").group("Settings").sort(1)])
+    /// ```
+    pub fn navigation_items<I>(mut self, items: I) -> Self
+    where
+        I: IntoIterator<Item = NavigationItem>,
+    {
+        self.navigation_items.extend(items);
+        self
+    }
+
     /// Whether every navigation group is collapsible, as Filament's panel
     /// `collapsibleNavigationGroups()`: its heading collapses and expands its entries, and the
     /// browser remembers which groups the user collapsed. The default is `true`, as in
@@ -575,6 +597,7 @@ impl Ignite {
             storage,
             brand,
             navigation_groups,
+            navigation_items,
             collapsible_navigation_groups,
         } = self;
         // Users created or deleted from now on run the app's callbacks.
@@ -607,6 +630,7 @@ impl Ignite {
                 runtime_permissions: Mutex::new(HashSet::new()),
                 brand,
                 navigation_groups,
+                navigation_items,
                 collapsible_navigation_groups,
             };
             Ok(rocket

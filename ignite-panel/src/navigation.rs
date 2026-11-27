@@ -96,6 +96,97 @@ impl From<Box<str>> for NavigationGroup {
     }
 }
 
+/// A navigation entry the panel declares itself, as Filament's `NavigationItem` in the panel's
+/// `navigationItems()`: a label with its own group, sort and icon, and no resource of its own.
+///
+/// Its main use is a parent entry that is only a label over child entries, as Filament's
+/// cluster: resources name it as their parent item by its label
+/// ([`NAVIGATION_PARENT_ITEM`](ignite_core::IgniteResource::NAVIGATION_PARENT_ITEM) or a
+/// runtime resource's `navigation_parent_item`), and clicking it opens its first child, as
+/// clicking a Filament cluster's navigation item opens the first page of the cluster. As with
+/// Filament's `$navigationParentItem`, the parent and its children must be in the same group.
+/// An entry without a [`url`](Self::url) whose children the user may not see is not listed.
+///
+/// ```ignore
+/// Ignite::new()
+///     .navigation_groups(["Content", "Settings"])
+///     .navigation_items([NavigationItem::make("Settings").group("Settings").icon("settings")])
+/// // Each settings screen is a resource with
+/// //     navigation_group = "Settings", navigation_parent_item = "Settings"
+/// // and its own navigation_sort, so General (sort 1) is the one "Settings" opens.
+/// ```
+///
+/// An entry with a [`url`](Self::url) is a plain link, as Filament's custom navigation items,
+/// and is listed even without children.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NavigationItem {
+    label: String,
+    group: Option<String>,
+    sort: Option<i32>,
+    icon: Option<String>,
+    url: Option<String>,
+}
+
+impl NavigationItem {
+    /// An entry with the label `label`, no group, no sort, no icon and no URL of its own.
+    pub fn make(label: impl Into<String>) -> Self {
+        NavigationItem {
+            label: label.into(),
+            group: None,
+            sort: None,
+            icon: None,
+            url: None,
+        }
+    }
+
+    /// The navigation group the entry is listed in, as Filament's `group()`.
+    pub fn group(mut self, group: impl Into<String>) -> Self {
+        self.group = Some(group.into());
+        self
+    }
+
+    /// The entry's place among the entries of its group, as Filament's `sort()`: lower first.
+    pub fn sort(mut self, sort: i32) -> Self {
+        self.sort = Some(sort);
+        self
+    }
+
+    /// The name of the entry's icon, such as `settings`, as a resource's `NAVIGATION_ICON`:
+    /// the admin theme resolves it.
+    pub fn icon(mut self, icon: impl Into<String>) -> Self {
+        self.icon = Some(icon.into());
+        self
+    }
+
+    /// The address the entry links to, as Filament's `url()`. Without one, the entry links to
+    /// its first child, and is not listed when it has none.
+    pub fn url(mut self, url: impl Into<String>) -> Self {
+        self.url = Some(url.into());
+        self
+    }
+
+    /// The entry's label.
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+
+    pub(crate) fn group_name(&self) -> Option<&str> {
+        self.group.as_deref()
+    }
+
+    pub(crate) fn sort_value(&self) -> Option<i32> {
+        self.sort
+    }
+
+    pub(crate) fn icon_name(&self) -> Option<&str> {
+        self.icon.as_deref()
+    }
+
+    pub(crate) fn url_value(&self) -> Option<&str> {
+        self.url.as_deref()
+    }
+}
+
 /// An entry of the sidebar with what places it: its key (the slug), its label, its group, its
 /// sort and the parent it is listed under.
 pub(crate) struct Entry<T> {
