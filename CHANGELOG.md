@@ -4,6 +4,45 @@ All notable changes to Ignite are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Navigation items of the panel's own, as Filament's panel `navigationItems()`:
+  `NavigationItem::make(label)` with `group`, `sort`, `icon` and `url`, passed to
+  `Ignite::navigation_items`. An item without a URL is a parent that is only a label: resources
+  name it with `navigation_parent_item`, and it links to its first child by sort, as a Filament
+  cluster's navigation item opens the cluster's first page. It is not listed when the user may
+  see none of its children. `navigation_parent_item` works as before.
+- `tab_counts_follow_search` (`IgniteResource`, `RuntimeResource` and the derive's
+  `#[ignite(tab_counts_follow_search = true)]`): each tab's count is for the current search, as
+  0.6.4 counted.
+- `hide_empty_tabs` (`IgniteResource`, `RuntimeResource` and the derive's
+  `#[ignite(hide_empty_tabs = false)]`), `true` by default.
+- Badges inside another column's cell and badges on some tabs only:
+  `ColumnBadges::badge_inside(column, target)` and `badge_on_tabs(column, tabs)`, and the
+  `RuntimeResource` methods of the same names. The panel renders them on the server: a badge
+  inside a cell follows the cell's text, its column has no column of its own, and on a tab not
+  listed the badge (or the badge column, heading and cells) is not rendered.
+- `FieldConditions::slug_locked_when(field, rule)` and `RuntimeResource::slug_locked_when`: on
+  the edit form of a record with a stored slug, when the rule holds (such as for a published
+  post), the slug input is marked `data-ignite-slug-locked` and the form script no longer fills
+  it from its source. On create, on drafts and for a record without a slug, nothing changes.
+- The list cell view values `has_badges` and `badges` (each with `text` and `color`), for
+  themes.
+
+### Changed
+
+- **Breaking:** a tab's count is the number of all its rows, whatever the search, as a Filament
+  tab's `badge()` counts its own query. In 0.6.4 it was the number for the current search; call
+  `tab_counts_follow_search(true)` to keep that. Without a search the counts are the same.
+- **Breaking:** a tab whose count is 0 is left out of the list page, except the default tab and
+  the tab being shown. Filament has no such rule; call `hide_empty_tabs(false)` to render every
+  tab, as 0.6.4 did.
+- **Breaking:** `RuntimeResource` has the new public fields `tab_counts_follow_search` and
+  `hide_empty_tabs`, so code that builds it with a struct literal must set them.
+- The form script is rebuilt (`form-CkpvZ3Mw.js`) for locked slugs.
+
 ## [0.6.4] - 2026-11-26
 
 ### Added

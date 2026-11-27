@@ -239,6 +239,30 @@ Each section is a card; `columns` and `column_span` apply from the `lg` breakpoi
 
 `slug_from("slug", "title")` (on `RuntimeResource` and `FieldConditions`) fills the slug with the title's slug as the user types, until the user edits the slug by hand, as Filament's documented slug example (`afterStateUpdated` with `Str::slug`). The server still checks the value in `validate`.
 
+`slug_locked_when("slug", rule)` stops the slug from following the title on the edit form of a record that has a stored slug, when `rule` (given the `FormContext`) holds, such as once the stored post is published, so a published URL does not change with its title. On create, on drafts and for a record without a slug yet, the slug follows the title as before. Filament's example has no such rule.
+
+```rust
+.slug_from("slug", "title")
+.slug_locked_when("slug", |form| {
+    form.record().and_then(|r| r.get("status")).and_then(|s| s.as_str()) == Some("publish")
+})
+```
+
+### List tabs and badges
+
+A list can have tabs, as Filament's `getTabs()` (`RuntimeResource::tab(Tab::make("drafts").where_eq("status", "draft"))`, or `IgniteResource::tabs`), and badge columns, as Filament's `badge()` and `color()` (`badge`, `badge_color`). Each tab shows the number of all its rows, whatever the search, as a Filament tab's badge counts its own query; `tab_counts_follow_search(true)` counts the rows that match the search instead. A tab whose count is 0 is left out, except the default tab and the tab being shown; `hide_empty_tabs(false)` renders every tab. A badge can show inside another column's cell, and only on some tabs, decided on the server:
+
+```rust
+RuntimeResource::new("posts", "Posts", "Post", PostData)
+    .tab(Tab::make("all"))
+    .tab(Tab::make("drafts").where_eq("status", "draft"))
+    .badge_color("status", |state| if state == "draft" { BadgeColor::Gray } else { BadgeColor::Success })
+    .badge_inside("status", "title") // after the title, with no Status column
+    .badge_on_tabs("status", ["all"]); // on All only
+```
+
+The derive takes `#[ignite(tab_counts_follow_search = true)]` and `#[ignite(hide_empty_tabs = false)]`, and `ColumnBadges` has `badge_inside` and `badge_on_tabs`.
+
 `Ignite::unsaved_changes_alerts()`, as Filament's panel option of the same name, asks "Are you sure you want to leave? Without saving, everything is going to be lost." when the user leaves a create or edit form they changed and did not save. It is off by default, as in Filament.
 
 ## Brand and navigation
@@ -273,6 +297,18 @@ A resource places itself in the sidebar with struct attributes, as Filament's `$
 ```
 
 A resource implemented by hand sets `NAVIGATION_GROUP`, `NAVIGATION_SORT`, `NAVIGATION_LABEL` and `NAVIGATION_ICON`, and a `RuntimeResource` the methods of the same names. The sidebar lists the dashboard and the resources without a group first, as they were listed before, then each group under its name as a heading: the groups in the order of `navigation_groups` (each call adds to the list, as in Filament), then any group not listed there. Inside a group, resources are sorted by `navigation_sort`, lower first, then by label; a resource without a sort comes before those with one. `navigation_label` changes the sidebar's text only; the pages keep the resource's title.
+
+A resource is listed under another entry with `navigation_parent_item` (Filament's `$navigationParentItem`), by the parent's label or slug, in the same group. A parent that is only a label, with no screen of its own, is declared on the panel with `navigation_items` (Filament's `navigationItems()`); clicking it opens its first child, as a Filament cluster's navigation item does:
+
+```rust
+Ignite::new()
+    .navigation_groups(["Content", "Settings"])
+    .navigation_items([NavigationItem::make("Settings").group("Settings").sort(1).icon("settings")])
+// General, Writing, Reading...: navigation_group "Settings", navigation_parent_item "Settings",
+// navigation_sort 1, 2, 3...: "Settings" links to General and lists the others under it.
+```
+
+A `NavigationItem` has `group`, `sort`, `icon` and an optional `url`: with one it is a plain link, as Filament's custom navigation items; without one it links to its first child by sort, and is not listed when the user may see none of its children.
 
 `navigation_icon` is an icon name that says what the resource is, not a CSS class: `post`, `page`, `media`, `comment`, `appearance`, `plugins`, `users`, `tools`, `settings`, or a name of the app's own, such as a custom post type's `book`. The active admin theme maps the name to its own icon (see [Admin themes](#admin-themes)): the `ignite` theme to a Tabler icon from the font it ships, a WordPress-like theme to a Dashicon. A name the theme does not know, and a resource without a name, show the theme's generic resource icon. Filament's navigation items also take an icon name, which the panel resolves through its icon set; in Ignite the admin theme resolves it.
 
