@@ -35,6 +35,7 @@ use syn::{
 /// - `#[ignite(hide_empty_tabs = false)]`: renders the tabs whose count is 0 too. Defaults to `true`: an empty tab is left out, except the default tab and the tab shown.
 /// - `#[ignite(badges = post_badges)]`: the list columns shown as coloured badges, as Filament's `badge()` and `color()` on a text column: the path of a `fn() -> ignite_core::ColumnBadges`. Defaults to none: every cell is plain text.
 /// - `#[ignite(row_actions = post_actions)]`: the actions on each row of the list, as Filament's `recordActions()`: the path of a `fn() -> Vec<ignite_core::RowAction>`. Defaults to none: each row has its Edit and Delete buttons only.
+/// - `#[ignite(hide_default_delete_when = in_trash)]`: hides the built-in Delete button (and refuses the delete) on the records that meet a filter, as Filament's `DeleteAction::make()->hidden(...)`: the path of a `fn() -> ignite_core::ListFilter`. Defaults to none.
 /// - `#[ignite(form_layout = post_layout)]`: the layout of the create and edit forms, as Filament's `Grid`, `Section`, `Group`, `columns()` and `columnSpan()`: the path of a `fn() -> ignite_core::FormLayout`. Defaults to none: the form renders as one card of fields.
 ///
 /// Field attributes:
@@ -721,6 +722,7 @@ struct ListAttrs {
     tab_counts_follow_search: Option<bool>,
     hide_empty_tabs: Option<bool>,
     row_actions: Option<syn::Path>,
+    hide_default_delete_when: Option<syn::Path>,
 }
 
 impl ListAttrs {
@@ -768,7 +770,14 @@ impl ListAttrs {
                 }
             }
         });
-        quote! { #tabs #default #badges #follow #hide #actions }
+        let hide_delete = self.hide_default_delete_when.as_ref().map(|path| {
+            quote! {
+                fn hide_default_delete_when() -> ::core::option::Option<::ignite_core::ListFilter> {
+                    ::core::option::Option::Some(#path())
+                }
+            }
+        });
+        quote! { #tabs #default #badges #follow #hide #actions #hide_delete }
     }
 }
 
@@ -845,6 +854,9 @@ fn struct_attrs(input: &DeriveInput) -> syn::Result<StructAttrs> {
             } else if meta.path.is_ident("tab_counts_follow_search") {
                 list.tab_counts_follow_search = Some(meta.value()?.parse::<syn::LitBool>()?.value);
                 Ok(())
+            } else if meta.path.is_ident("hide_default_delete_when") {
+                list.hide_default_delete_when = Some(meta.value()?.parse::<syn::Path>()?);
+                Ok(())
             } else if meta.path.is_ident("row_actions") {
                 list.row_actions = Some(meta.value()?.parse::<syn::Path>()?);
                 Ok(())
@@ -853,7 +865,7 @@ fn struct_attrs(input: &DeriveInput) -> syn::Result<StructAttrs> {
                 Ok(())
             } else {
                 Err(meta.error(
-                    "unknown ignite attribute on the struct; expected `table`, `title`, `singular`, `latest_records`, `navigation_label`, `navigation_group`, `navigation_sort`, `navigation_parent_item`, `navigation_icon`, `navigation_create_item`, `navigation_create_label`, `conditions`, `form_layout`, `tabs`, `default_active_tab`, `badges`, `tab_counts_follow_search`, `hide_empty_tabs` or `row_actions`",
+                    "unknown ignite attribute on the struct; expected `table`, `title`, `singular`, `latest_records`, `navigation_label`, `navigation_group`, `navigation_sort`, `navigation_parent_item`, `navigation_icon`, `navigation_create_item`, `navigation_create_label`, `conditions`, `form_layout`, `tabs`, `default_active_tab`, `badges`, `tab_counts_follow_search`, `hide_empty_tabs`, `row_actions` or `hide_default_delete_when`",
                 ))
             }
         })?;

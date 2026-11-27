@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use ignite_core::{
     ActingUser, ColumnBadges, ColumnDef, Database, FieldConditions, FieldDef, FieldErrors,
-    FieldKindDef, FormInput, FormLayout, IgniteResource, LatestRecords, ListQuery,
+    FieldKindDef, FormInput, FormLayout, IgniteResource, LatestRecords, ListFilter, ListQuery,
     RegisteredResource, Row, RowAction, Stat, Tab,
 };
 use orbit_orm::Error;
@@ -54,6 +54,8 @@ pub(crate) trait Erased: Send + Sync {
     fn hide_empty_tabs(&self) -> bool;
     /// The actions on each row of the list, in display order.
     fn row_actions(&self) -> &[RowAction];
+    /// The records whose built-in Delete button is hidden, if set.
+    fn hide_default_delete_when(&self) -> Option<&ListFilter>;
     /// One page of records as JSON, and the total count.
     /// The resource's queries are given the signed-in `user`: they call its `*_for` methods.
     async fn list(
@@ -107,6 +109,7 @@ pub(crate) struct Adapter<R> {
     tabs: Vec<Tab>,
     column_badges: ColumnBadges,
     row_actions: Vec<RowAction>,
+    hide_default_delete_when: Option<ListFilter>,
     resource: PhantomData<fn() -> R>,
 }
 
@@ -120,6 +123,7 @@ impl<R: IgniteResource> Adapter<R> {
             tabs: R::tabs(),
             column_badges: R::column_badges(),
             row_actions: R::row_actions(),
+            hide_default_delete_when: R::hide_default_delete_when(),
             resource: PhantomData,
         }
     }
@@ -243,6 +247,10 @@ impl<R: IgniteResource> Erased for Adapter<R> {
 
     fn row_actions(&self) -> &[RowAction] {
         &self.row_actions
+    }
+
+    fn hide_default_delete_when(&self) -> Option<&ListFilter> {
+        self.hide_default_delete_when.as_ref()
     }
 
     async fn list(
@@ -624,6 +632,10 @@ impl Erased for RuntimeAdapter {
 
     fn row_actions(&self) -> &[RowAction] {
         self.0.row_actions()
+    }
+
+    fn hide_default_delete_when(&self) -> Option<&ListFilter> {
+        self.0.hide_default_delete_when()
     }
 
     async fn list(

@@ -34,6 +34,11 @@ All notable changes to Ignite are listed here. The format follows
   ability, the policy's answer for the record and the action's rule for the record (403
   otherwise; 419 without the token), and shows the refusal or the success message as the
   flash, back on the same list page (`_back`). A list without row actions renders as before.
+- `hide_default_delete_when(ListFilter)` (`RuntimeResource` builder, `IgniteResource` method
+  returning `Option<ListFilter>`, and the derive's `#[ignite(hide_default_delete_when = path)]`),
+  as Filament's `DeleteAction::make()->hidden(fn ($record) => ...)`: the records that meet the
+  filter show no built-in Delete button, and the panel refuses their delete (403), so a post in
+  the trash offers only its row actions, such as Restore and Delete permanently, as WordPress.
 - The theme values `actions` and `has_actions` on each row of the list (each action with
   `label`, `is_post`, `url`, `has_confirm`, `confirm` and `class`), and `return_url`.
 - Sign-in messages for an empty field, in WordPress's wording (`wp-login.php`): "ERROR: The
@@ -70,7 +75,7 @@ All notable changes to Ignite are listed here. The format follows
   sidebar has a small style and script for the toggles. A theme that overrides
   `partials.nav` keeps working: `children`, `has_add`, `add_url` and `expanded` are unchanged.
 - **Breaking:** `RuntimeResource` has the new public fields `navigation_create_item`,
-  `navigation_create_label` and `row_actions`, so code that builds it with a struct literal must set them.
+  `navigation_create_label`, `row_actions` and `hide_default_delete_when`, so code that builds it with a struct literal must set them.
 - The empty dashboard says "Nothing to show yet." instead of the developer note "No stats
   yet. A resource shows its cards here by implementing `widgets`."
 - The navigation API of 0.6.5 (`NavigationGroup`, `NavigationItem`, `navigation_parent_item`)

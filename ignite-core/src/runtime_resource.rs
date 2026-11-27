@@ -31,7 +31,7 @@ use crate::condition::{FieldConditions, FormContext, Operation};
 use crate::field::{self as check, Block, Column, Field, FieldKind};
 use crate::form::{FieldErrors, FormInput, ValidationError};
 use crate::layout::FormLayout;
-use crate::list::{BadgeColor, ColumnBadges, Tab};
+use crate::list::{BadgeColor, ColumnBadges, ListFilter, Tab};
 use crate::policy::ActingUser;
 use crate::query::{ListQuery, Page};
 
@@ -496,6 +496,11 @@ pub struct RuntimeResource {
     /// The actions on each row of the list page, in display order, as Filament's
     /// `recordActions()`. See [`RowAction`]. The default is none.
     pub row_actions: Vec<RowAction>,
+    /// The records whose built-in Delete button is hidden (and whose delete the panel
+    /// refuses). See
+    /// [`IgniteResource::hide_default_delete_when`](crate::IgniteResource::hide_default_delete_when).
+    /// The default is none.
+    pub hide_default_delete_when: Option<ListFilter>,
 }
 
 impl fmt::Debug for RuntimeResource {
@@ -522,6 +527,7 @@ impl fmt::Debug for RuntimeResource {
             .field("tab_counts_follow_search", &self.tab_counts_follow_search)
             .field("hide_empty_tabs", &self.hide_empty_tabs)
             .field("row_actions", &self.row_actions)
+            .field("hide_default_delete_when", &self.hide_default_delete_when)
             .finish_non_exhaustive()
     }
 }
@@ -557,6 +563,7 @@ impl RuntimeResource {
             tab_counts_follow_search: false,
             hide_empty_tabs: true,
             row_actions: Vec::new(),
+            hide_default_delete_when: None,
         }
     }
 
@@ -730,6 +737,14 @@ impl RuntimeResource {
     /// `recordActions()`. See [`RowAction`].
     pub fn row_action(mut self, action: RowAction) -> Self {
         self.row_actions.push(action);
+        self
+    }
+
+    /// Hides the built-in Delete button on the records that meet `filter`, and refuses their
+    /// delete, such as `ListFilter::new().where_eq("status", "trash")` for a post in the trash.
+    /// See [`IgniteResource::hide_default_delete_when`](crate::IgniteResource::hide_default_delete_when).
+    pub fn hide_default_delete_when(mut self, filter: ListFilter) -> Self {
+        self.hide_default_delete_when = Some(filter);
         self
     }
 
@@ -1060,6 +1075,11 @@ impl RegisteredResource {
     /// The actions on each row of the list, in display order.
     pub fn row_actions(&self) -> &[RowAction] {
         &self.resource.row_actions
+    }
+
+    /// The records whose built-in Delete button is hidden, if set.
+    pub fn hide_default_delete_when(&self) -> Option<&ListFilter> {
+        self.resource.hide_default_delete_when.as_ref()
     }
 
     /// [`validate`](Self::validate) for a form whose fields `hidden` are hidden (see

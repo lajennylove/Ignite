@@ -10,7 +10,7 @@ use crate::condition::FieldConditions;
 use crate::field::{Column, Field};
 use crate::form::{FieldErrors, FormInput};
 use crate::layout::FormLayout;
-use crate::list::{ColumnBadges, Tab};
+use crate::list::{ColumnBadges, ListFilter, Tab};
 use crate::policy::ActingUser;
 use crate::query::{ListQuery, Page};
 use crate::widget::{LatestRecords, Stat, StatWidget};
@@ -207,6 +207,17 @@ pub trait IgniteResource: Send + Sync + 'static {
     /// buttons only. `#[derive(IgniteResource)]` writes it for `#[ignite(row_actions = path)]`.
     fn row_actions() -> Vec<RowAction> {
         Vec::new()
+    }
+
+    /// The records whose built-in Delete button is hidden, as Filament's
+    /// `DeleteAction::make()->hidden(fn ($record) => ...)`: a record that meets the filter shows
+    /// no Delete button on the list, and the panel refuses its delete (403), such as a post in
+    /// the trash, which WordPress deletes only with "Delete Permanently". The panel reads it
+    /// once, when it is built. The default, `None`, shows the Delete button on every record the
+    /// user may delete. `#[derive(IgniteResource)]` writes it for
+    /// `#[ignite(hide_default_delete_when = path)]`, the path of a `fn() -> ListFilter`.
+    fn hide_default_delete_when() -> Option<ListFilter> {
+        None
     }
 
     /// The choices of a [`FieldKind::Lookup`](crate::FieldKind::Lookup) field, as

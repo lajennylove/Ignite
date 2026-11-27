@@ -1034,6 +1034,7 @@ async fn index(
             can_update && record_allowed(db, slug, &session, Action::Update, record).await?;
         let record_can_delete =
             can_delete && record_allowed(db, slug, &session, Action::Delete, record).await?;
+        let default_delete_hidden = default_delete_hidden(resource.as_ref(), record);
         let actions = row_action_views(
             resource.as_ref(),
             record,
@@ -1067,7 +1068,7 @@ async fn index(
             edit_url: format!("{index_url}/{id}/edit"),
             delete_url: format!("{index_url}/{id}/delete"),
             can_update: record_can_update,
-            can_delete: record_can_delete,
+            can_delete: record_can_delete && !default_delete_hidden,
             has_actions: !actions.is_empty(),
             actions,
         });
@@ -1432,7 +1433,11 @@ async fn destroy(
     let resource = registry.find(slug).ok_or(Status::NotFound)?;
     let index_url = format!("{}/{}", registry.mount, resource.slug());
 
-    authorize_record(db, &session, &resource, id, Action::Delete).await?;
+    let record = authorize_record(db, &session, &resource, id, Action::Delete).await?;
+    // A record whose Delete button the resource hides cannot be deleted this way either.
+    if default_delete_hidden(resource.as_ref(), &record) {
+        return Err(Status::Forbidden);
+    }
     let deleted = resource
         .delete(db.inner(), session.acting_user(), id)
         .await
@@ -1495,6 +1500,15 @@ async fn run_row_action(
         Err(message) => set_flash(cookies, &registry.secret, &message),
     }
     Ok(Redirect::to(back_url(form.get("_back"), &index_url)))
+}
+
+/// Whether the resource hides the built-in Delete button of `record`
+/// (`hide_default_delete_when`).
+fn default_delete_hidden(resource: &dyn Erased, record: &Value) -> bool {
+    match (resource.hide_default_delete_when(), record.as_object()) {
+        (Some(filter), Some(row)) => filter.matches(row),
+        _ => false,
+    }
 }
 
 /// The panel's ability for a row action's [`ActionAbility`](ignite_core::ActionAbility).
