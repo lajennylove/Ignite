@@ -36,6 +36,13 @@ All notable changes to Ignite are listed here. The format follows
   flash, back on the same list page (`_back`). A list without row actions renders as before.
 - The theme values `actions` and `has_actions` on each row of the list (each action with
   `label`, `is_post`, `url`, `has_confirm`, `confirm` and `class`), and `return_url`.
+- Sign-in messages for an empty field, in WordPress's wording (`wp-login.php`): "ERROR: The
+  email field is empty." and "ERROR: The password field is empty.", each in its field's error
+  slot (with `aria-invalid` and `aria-describedby`), with 422, keeping the email typed. As
+  Laravel's login request validates them before the attempt, an empty field does not count
+  against the sign-in throttle. Wrong credentials keep "The email or password is incorrect."
+  The login page has the theme values `has_email_error`, `email_error`, `has_password_error`
+  and `password_error`.
 - The theme values `add_label`, `has_sub_items`, `sub_items`, `open`, `closed`,
   `aria_expanded` and `sub_items_id` on each entry of `nav_sections`.
 

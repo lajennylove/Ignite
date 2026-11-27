@@ -573,6 +573,12 @@ pub(crate) struct LoginPage {
     pub(crate) remember: bool,
     pub(crate) has_error: bool,
     pub(crate) error: String,
+    /// The error of each field, in the field's error slot, as the other forms show them: an
+    /// empty email or password, with WordPress's wording ("ERROR: The email field is empty.").
+    pub(crate) has_email_error: bool,
+    pub(crate) email_error: String,
+    pub(crate) has_password_error: bool,
+    pub(crate) password_error: String,
 }
 
 /// The page where a user asks for a password reset link. Its message is the flash of the

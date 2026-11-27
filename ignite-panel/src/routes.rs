@@ -235,7 +235,7 @@ fn login_form(
         Status::Ok,
         render_page(
             "ignite::login",
-            &login_page(registry, "", false, None, token),
+            &login_page(registry, "", false, None, &FieldErrors::new(), token),
             compiled::login::render,
         ),
     ))
@@ -246,8 +246,11 @@ fn login_page(
     email: &str,
     remember: bool,
     error: Option<&str>,
+    field_errors: &FieldErrors,
     csrf_token: String,
 ) -> LoginPage {
+    let email_error = field_errors.get("email");
+    let password_error = field_errors.get("password");
     let layout = Layout::new(registry, None, "", None, csrf_token);
     LoginPage {
         home_url: layout.home_url,
@@ -276,8 +279,17 @@ fn login_page(
         remember,
         has_error: error.is_some(),
         error: error.unwrap_or_default().to_string(),
+        has_email_error: email_error.is_some(),
+        email_error: email_error.cloned().unwrap_or_default(),
+        has_password_error: password_error.is_some(),
+        password_error: password_error.cloned().unwrap_or_default(),
     }
 }
+
+/// The message of an empty sign-in field, as WordPress's `wp-login.php` words it.
+pub(crate) const EMPTY_EMAIL: &str = "ERROR: The email field is empty.";
+/// The message of an empty password, as WordPress's `wp-login.php` words it.
+pub(crate) const EMPTY_PASSWORD: &str = "ERROR: The password field is empty.";
 
 #[post("/login", data = "<body>")]
 async fn login(
@@ -295,6 +307,35 @@ async fn login(
     let remember_me = matches!(form.get("remember"), Some("1" | "true" | "on" | "yes"));
     let throttle_key = throttle::key(&email, client_ip.0);
 
+    // An empty email or password is refused before any check, as Laravel's login request
+    // validates both as `required` before it attempts the sign-in (and before its rate limit):
+    // each field shows WordPress's message in its error slot, the email keeps what was typed,
+    // and the attempt does not count against the throttle.
+    let mut empty = FieldErrors::new();
+    if email.is_empty() {
+        empty.insert("email".to_string(), EMPTY_EMAIL.to_string());
+    }
+    if password.is_empty() {
+        empty.insert("password".to_string(), EMPTY_PASSWORD.to_string());
+    }
+    if !empty.is_empty() {
+        return Ok(Reply::Page(
+            Status::UnprocessableEntity,
+            render_page(
+                "ignite::login",
+                &login_page(
+                    registry,
+                    form.get("email").unwrap_or(""),
+                    remember_me,
+                    None,
+                    &empty,
+                    csrf_token(cookies, &registry.secret),
+                ),
+                compiled::login::render,
+            ),
+        ));
+    }
+
     // Refuse before checking the password while the key is at its limit.
     let waiting = throttle::retry_after(db.inner(), &throttle_key, throttle::LIMIT)
         .await
@@ -308,6 +349,7 @@ async fn login(
                 &email,
                 remember_me,
                 Some(&message),
+                &FieldErrors::new(),
                 csrf_token(cookies, &registry.secret),
             ),
             compiled::login::render,
@@ -378,6 +420,7 @@ async fn login(
                     &email,
                     remember_me,
                     Some("The email or password is incorrect."),
+                    &FieldErrors::new(),
                     csrf_token(cookies, &registry.secret),
                 ),
                 compiled::login::render,
