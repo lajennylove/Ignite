@@ -163,3 +163,132 @@ fn a_slug_field_names_the_field_it_is_filled_from() {
 
     unregister_runtime("slug-posts").expect("unregister");
 }
+
+/// Three saved posts: a draft, a published post with a slug, and a published post with no
+/// slug yet. A save that validates fails, so the tests see only the forms.
+struct SlugRows;
+
+fn slug_row(id: i64) -> Option<Row> {
+    let (title, slug, status) = match id {
+        1 => ("Plan", "plan", "draft"),
+        2 => ("Ship", "ship-it", "publish"),
+        3 => ("Polish", "", "publish"),
+        _ => return None,
+    };
+    serde_json::json!({"id": id, "title": title, "slug": slug, "body": "", "status": status})
+        .as_object()
+        .cloned()
+}
+
+impl RuntimeData for SlugRows {
+    fn list<'a>(&'a self, _: &'a Database, _: &'a ListQuery) -> RuntimeFuture<'a, Page<Row>> {
+        Box::pin(async {
+            Ok(Page {
+                rows: Vec::new(),
+                total: 0,
+            })
+        })
+    }
+
+    fn find<'a>(&'a self, _: &'a Database, id: i64) -> RuntimeFuture<'a, Option<Row>> {
+        Box::pin(async move { Ok(slug_row(id)) })
+    }
+
+    fn create<'a>(&'a self, _: &'a Database, _: Row) -> RuntimeFuture<'a, Row> {
+        Box::pin(async { Err(OrbitError::NotFound { table: "none" }) })
+    }
+
+    fn update<'a>(&'a self, _: &'a Database, _: i64, _: Row) -> RuntimeFuture<'a, Row> {
+        Box::pin(async { Err(OrbitError::NotFound { table: "none" }) })
+    }
+
+    fn delete<'a>(&'a self, _: &'a Database, _: i64) -> RuntimeFuture<'a, u64> {
+        Box::pin(async { Ok(0) })
+    }
+}
+
+/// Posts whose slug stops following the title once the stored post is published.
+fn published_posts(slug: &str) -> RuntimeResource {
+    let mut resource = posts(slug).slug_locked_when("slug", |form| {
+        form.record()
+            .and_then(|record| record.get("status"))
+            .and_then(|status| status.as_str())
+            == Some("publish")
+    });
+    resource.data = std::sync::Arc::new(SlugRows);
+    resource
+}
+
+/// The slug input of a form page.
+fn slug_input(body: &str) -> &str {
+    let start = body
+        .find(r#"<input class="ig-input" id="slug""#)
+        .expect("the slug input");
+    let end = body[start..].find('>').unwrap() + start + 1;
+    &body[start..end]
+}
+
+#[test]
+fn a_saved_published_slug_no_longer_follows_the_title() {
+    let _guard = reset();
+    let _ = unregister_runtime("slug-locked");
+    register_runtime(published_posts("slug-locked")).expect("register");
+    let client = signed_in(None);
+
+    // On create, the slug follows the title.
+    let body = get(&client, "/admin/slug-locked/new");
+    assert_eq!(
+        slug_input(&body),
+        r#"<input class="ig-input" id="slug" name="slug" type="text"  value="" data-ignite-slug-from="title">"#
+    );
+    // A draft's slug still follows it.
+    let body = get(&client, "/admin/slug-locked/1/edit");
+    assert_eq!(
+        slug_input(&body),
+        r#"<input class="ig-input" id="slug" name="slug" type="text"  value="plan" data-ignite-slug-from="title">"#
+    );
+    // A published post's stored slug does not.
+    let body = get(&client, "/admin/slug-locked/2/edit");
+    assert_eq!(
+        slug_input(&body),
+        r#"<input class="ig-input" id="slug" name="slug" type="text"  value="ship-it" data-ignite-slug-from="title" data-ignite-slug-locked>"#
+    );
+    // The script leaves a locked slug alone.
+    let source = get(&client, &form_script(&body).expect("the form script"));
+    assert!(source.contains("data-ignite-slug-locked"), "{source}");
+    // A published post without a slug yet gets one from its title.
+    let body = get(&client, "/admin/slug-locked/3/edit");
+    assert!(
+        !slug_input(&body).contains("data-ignite-slug-locked"),
+        "{body}"
+    );
+
+    // A failed save shows the form again, still locked: the stored post decides.
+    let response = client
+        .post("/admin/slug-locked/2")
+        .header(ContentType::Form)
+        .body(with_token(&client, "title=&slug=ship-it&body="))
+        .dispatch();
+    let body = response.into_string().unwrap();
+    assert!(body.contains("is required"), "{body}");
+    assert!(
+        slug_input(&body).contains("data-ignite-slug-locked"),
+        "{body}"
+    );
+
+    unregister_runtime("slug-locked").expect("unregister");
+}
+
+#[test]
+fn without_a_lock_rule_a_published_slug_follows_as_before() {
+    let _guard = reset();
+    let _ = unregister_runtime("slug-open");
+    let mut resource = posts("slug-open");
+    resource.data = std::sync::Arc::new(SlugRows);
+    register_runtime(resource).expect("register");
+    let client = signed_in(None);
+    let body = get(&client, "/admin/slug-open/2/edit");
+    assert!(!body.contains("data-ignite-slug-locked"), "{body}");
+    assert!(body.contains(r#"data-ignite-slug-from="title""#), "{body}");
+    unregister_runtime("slug-open").expect("unregister");
+}

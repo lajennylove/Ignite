@@ -78,7 +78,8 @@ document.addEventListener('click', (event) => {
 // A slug field (`data-ignite-slug-from`, Filament's slug pattern) takes the slug of its source
 // field as the user types, until the user edits it: when the slug no longer matches the slug
 // of the source's previous value, it is left alone, as Filament's example compares it with
-// `Str::slug($old)`.
+// `Str::slug($old)`. A slug field marked `data-ignite-slug-locked` (the record is saved with a
+// slug, and `slug_locked_when` holds, such as for a published post) is never filled.
 const previousValues = new WeakMap();
 
 // The slug of `text`, as Laravel's `Str::slug`: ASCII, lowercase, words joined by `-`.
@@ -100,7 +101,7 @@ document.addEventListener('input', (event) => {
     }
     const previous = previousValues.has(source) ? previousValues.get(source) : source.defaultValue;
     previousValues.set(source, source.value);
-    for (const target of form.querySelectorAll('[data-ignite-slug-from]')) {
+    for (const target of form.querySelectorAll('[data-ignite-slug-from]:not([data-ignite-slug-locked])')) {
         if (target.dataset.igniteSlugFrom === source.name && target.value === slug(previous)) {
             target.value = slug(source.value);
         }

@@ -1,4 +1,4 @@
-{{-- One form field: its label, its input and its error. The form and the profile page include it inside `@foreach (field in ...)`. The kinds added for custom fields render through partials/fields. A live field is marked `data-ignite-live`: the panel's script shows the form again when it changes. A slug field is marked `data-ignite-slug-from` with the field it is filled from. --}}
+{{-- One form field: its label, its input and its error. The form and the profile page include it inside `@foreach (field in ...)`. The kinds added for custom fields render through partials/fields. A live field is marked `data-ignite-live`: the panel's script shows the form again when it changes. A slug field is marked `data-ignite-slug-from` with the field it is filled from, and `data-ignite-slug-locked` when it no longer follows it. --}}
 <div data-ignite-field="{{ $field.name }}"@if (field.live) data-ignite-live@endif>
   @if (field.is_checkbox)
     <label class="flex items-center gap-2 text-sm font-semibold text-heading">
@@ -50,7 +50,7 @@
     @elseif (field.is.clone)
       @include('ignite::partials.fields.clone')
     @else
-      <input class="ig-input" id="{{ $field.name }}" name="{{ $field.name }}" type="{{ $field.input_type }}" @if (field.has_step)step="{{ $field.step }}" @endif value="{{ $field.value }}"@if (field.has_slug_from) data-ignite-slug-from="{{ $field.slug_from }}"@endif>
+      <input class="ig-input" id="{{ $field.name }}" name="{{ $field.name }}" type="{{ $field.input_type }}" @if (field.has_step)step="{{ $field.step }}" @endif value="{{ $field.value }}"@if (field.has_slug_from) data-ignite-slug-from="{{ $field.slug_from }}"@if (field.slug_locked) data-ignite-slug-locked@endif@endif>
     @endif
   @endif
   @if (field.has_error)

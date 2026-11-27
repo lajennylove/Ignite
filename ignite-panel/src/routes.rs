@@ -8,8 +8,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 
 use ignite_core::{
-    ActingUser, ColumnDef, Database, Direction, FieldDef, FieldErrors, FormInput, LatestRecords,
-    ListQuery, Operation,
+    ActingUser, ColumnDef, Database, Direction, FieldDef, FieldErrors, FormContext, FormInput,
+    LatestRecords, ListQuery, Operation,
 };
 use orbit_orm::Error as OrbitError;
 use propel_rocket::PropelView;
@@ -1244,7 +1244,8 @@ async fn edit_form(
         registry,
         layout,
         &resource,
-        FormTarget::edit(registry, &resource, id),
+        FormTarget::edit(registry, &resource, id)
+            .with_slug_locks(slug_locks(&resource, &record, &session, &form)),
         &form,
         &FieldErrors::new(),
         &choices,
@@ -1285,7 +1286,8 @@ async fn edit_form_live(
         registry,
         layout,
         &resource,
-        FormTarget::edit(registry, &resource, id),
+        FormTarget::edit(registry, &resource, id)
+            .with_slug_locks(slug_locks(&resource, &record, &session, &form)),
         &form,
         &FieldErrors::new(),
         &choices,
@@ -1338,7 +1340,8 @@ async fn update(
                     registry,
                     layout,
                     &resource,
-                    FormTarget::edit(registry, &resource, id),
+                    FormTarget::edit(registry, &resource, id)
+                        .with_slug_locks(slug_locks(&resource, &record, &session, &form)),
                     &form,
                     &errors,
                     &choices,
@@ -1385,6 +1388,8 @@ struct FormTarget {
     submit_label: &'static str,
     /// Where the form sends its values when a live field changes.
     live_url: String,
+    /// The slug fields that no longer follow their source (`slug_locked_when`).
+    slug_locks: BTreeSet<String>,
 }
 
 impl FormTarget {
@@ -1396,6 +1401,7 @@ impl FormTarget {
             live_url: format!("{index_url}/new/live"),
             action: index_url,
             submit_label: "Create",
+            slug_locks: BTreeSet::new(),
         }
     }
 
@@ -1407,7 +1413,14 @@ impl FormTarget {
             action: format!("{index_url}/{id}"),
             submit_label: "Save",
             live_url: format!("{index_url}/{id}/edit/live"),
+            slug_locks: BTreeSet::new(),
         }
+    }
+
+    /// The form with the slug fields `locks` no longer following their source.
+    fn with_slug_locks(mut self, locks: BTreeSet<String>) -> Self {
+        self.slug_locks = locks;
+        self
     }
 }
 
@@ -1425,7 +1438,15 @@ fn form_view(
     hidden: &BTreeSet<String>,
 ) -> PropelView {
     let conditions = resource.conditions();
-    let fields = form_field_views(resource.fields(), conditions, hidden, form, errors, choices);
+    let fields = form_field_views(
+        resource.fields(),
+        conditions,
+        hidden,
+        &target.slug_locks,
+        form,
+        errors,
+        choices,
+    );
     let has_live = fields.iter().any(|field| field.live);
     let shown_fields = fields
         .iter()
@@ -1490,6 +1511,29 @@ fn form_view(
         editor_script: editor.unwrap_or_default(),
     };
     render_page("ignite::form", &page, compiled::form::render)
+}
+
+/// The slug fields of `resource` that no longer follow their source on the edit form of
+/// `record`, whose fields hold `form` (see `FieldConditions::slug_locked_when`).
+fn slug_locks(
+    resource: &Arc<dyn Erased>,
+    record: &Value,
+    session: &AdminUser,
+    form: &FormInput,
+) -> BTreeSet<String> {
+    let conditions = resource.conditions();
+    let context = FormContext::new(
+        Operation::Edit,
+        record.as_object(),
+        session.acting_user(),
+        form,
+    );
+    resource
+        .fields()
+        .iter()
+        .filter(|field| conditions.is_slug_locked(&field.name, &context))
+        .map(|field| field.name.clone())
+        .collect()
 }
 
 /// The fields of `resource` that its conditions hide on the form for `operation`, editing

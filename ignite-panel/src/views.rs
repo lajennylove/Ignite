@@ -824,6 +824,9 @@ pub(crate) struct FieldView {
     /// The field this one is filled from as a slug, if any (`data-ignite-slug-from`).
     pub(crate) has_slug_from: bool,
     pub(crate) slug_from: String,
+    /// Whether the slug no longer follows its source (`data-ignite-slug-locked`), as
+    /// `FieldConditions::slug_locked_when` says for the stored record.
+    pub(crate) slug_locked: bool,
     pub(crate) input_type: &'static str,
     pub(crate) is_textarea: bool,
     pub(crate) is_checkbox: bool,
@@ -1089,6 +1092,7 @@ impl FieldView {
             live: false,
             has_slug_from: false,
             slug_from: String::new(),
+            slug_locked: false,
             input_type,
             is_textarea,
             is_checkbox,
@@ -1330,11 +1334,13 @@ pub(crate) fn field_views_with(
 }
 
 /// The fields of a resource's form that its conditions show, in display order: the fields
-/// of `hidden` are left out, and each live field is marked.
+/// of `hidden` are left out, each live field is marked, and each slug field of `slug_locks`
+/// is marked as no longer following its source.
 pub(crate) fn form_field_views(
     fields: &[FieldDef],
     conditions: &FieldConditions,
     hidden: &BTreeSet<String>,
+    slug_locks: &BTreeSet<String>,
     form: &FormInput,
     errors: &FieldErrors,
     choices: &FormChoices,
@@ -1350,6 +1356,7 @@ pub(crate) fn form_field_views(
         if let Some(source) = conditions.slug_source(&view.name) {
             view.has_slug_from = true;
             view.slug_from = source.to_string();
+            view.slug_locked = slug_locks.contains(&view.name);
         }
     }
     views

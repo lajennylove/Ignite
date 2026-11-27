@@ -126,6 +126,8 @@ pub struct FieldConditions {
     live: BTreeSet<String>,
     /// The field each slug field is filled from, by slug field name.
     slugs: HashMap<String, String>,
+    /// When each slug field stops following its source, by slug field name.
+    slug_locks: HashMap<String, Rule>,
 }
 
 impl fmt::Debug for FieldConditions {
@@ -136,6 +138,7 @@ impl fmt::Debug for FieldConditions {
             .field("visible", &names(&self.visible))
             .field("live", &self.live)
             .field("slugs", &self.slugs)
+            .field("slug_locks", &names(&self.slug_locks))
             .finish()
     }
 }
@@ -197,10 +200,56 @@ impl FieldConditions {
     /// one `-`, as `Str::slug` gives it. The value is not checked: `validate` still checks it.
     ///
     /// On the edit form, a slug that is not the slug of the stored title counts as edited by
-    /// hand, so it is not replaced.
+    /// hand, so it is not replaced. [`slug_locked_when`](Self::slug_locked_when) stops it from
+    /// following the title at all, such as once the record is published.
     pub fn slug_from(mut self, field: impl Into<String>, source: impl Into<String>) -> Self {
         self.slugs.insert(field.into(), source.into());
         self
+    }
+
+    /// Stops the slug field `field` from following its source on the edit form of a record
+    /// whose stored slug is not blank, when `rule` holds, such as when the stored record is
+    /// published: the slug of a published post's URL then stays as it is when the title
+    /// changes. On the create form, and while `rule` fails (such as for a draft), the slug
+    /// follows the title as [`slug_from`](Self::slug_from) says. The user can still edit the
+    /// slug by hand. The input is marked `data-ignite-slug-locked`, which the panel's script
+    /// reads.
+    ///
+    /// Filament's slug example has no such rule: it stops when the user has edited the slug.
+    /// Ignite keeps that, and adds this one.
+    ///
+    /// ```ignore
+    /// conditions
+    ///     .slug_from("slug", "title")
+    ///     .slug_locked_when("slug", |form| {
+    ///         form.record().and_then(|r| r.get("status")).and_then(|s| s.as_str()) == Some("publish")
+    ///     })
+    /// ```
+    pub fn slug_locked_when(
+        mut self,
+        field: impl Into<String>,
+        rule: impl Fn(&FormContext<'_>) -> bool + Send + Sync + 'static,
+    ) -> Self {
+        self.slug_locks.insert(field.into(), Arc::new(rule));
+        self
+    }
+
+    /// Whether the slug field `field` no longer follows its source on `form`: the form edits a
+    /// record whose stored `field` is not blank, and the rule of
+    /// [`slug_locked_when`](Self::slug_locked_when) holds.
+    pub fn is_slug_locked(&self, field: &str, form: &FormContext<'_>) -> bool {
+        let Some(rule) = self.slug_locks.get(field) else {
+            return false;
+        };
+        let stored = form
+            .record()
+            .and_then(|record| record.get(field))
+            .is_some_and(|value| match value {
+                Value::Null => false,
+                Value::String(text) => !text.trim().is_empty(),
+                _ => true,
+            });
+        form.operation() == Operation::Edit && stored && rule(form)
     }
 
     /// The field `field` is filled from by [`slug_from`](Self::slug_from), if any.

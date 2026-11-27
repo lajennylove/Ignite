@@ -594,6 +594,18 @@ impl RuntimeResource {
         self
     }
 
+    /// Stops the slug field `field` from following its source on the edit form of a record
+    /// with a stored slug, when `rule` holds, such as once the record is published. See
+    /// [`FieldConditions::slug_locked_when`].
+    pub fn slug_locked_when(
+        mut self,
+        field: impl Into<String>,
+        rule: impl Fn(&FormContext<'_>) -> bool + Send + Sync + 'static,
+    ) -> Self {
+        self.conditions = self.conditions.slug_locked_when(field, rule);
+        self
+    }
+
     /// Sets the layout of the create and edit forms: columns, sections and groups, as
     /// Filament's layout components. See [`FormLayout`].
     pub fn form_layout(mut self, layout: FormLayout) -> Self {
