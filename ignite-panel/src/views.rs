@@ -700,6 +700,19 @@ pub(crate) struct CellView {
     /// The badge's colour name, such as `gray` or `success`: its class is `ig-badge-<color>`.
     /// Empty for a plain cell.
     pub(crate) color: &'static str,
+    /// Whether the cell shows other columns' badges after its text
+    /// (`ColumnBadges::badge_inside`).
+    pub(crate) has_badges: bool,
+    /// The other columns' badges the cell shows after its text, in order.
+    pub(crate) badges: Vec<BadgeView>,
+}
+
+/// A badge shown inside another column's cell.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct BadgeView {
+    pub(crate) text: String,
+    /// The colour name: its class is `ig-badge-<color>`.
+    pub(crate) color: &'static str,
 }
 
 impl CellView {
@@ -709,6 +722,8 @@ impl CellView {
             text,
             badge: false,
             color: "",
+            has_badges: false,
+            badges: Vec::new(),
         }
     }
 
@@ -718,7 +733,25 @@ impl CellView {
             text,
             badge: true,
             color: color.as_str(),
+            has_badges: false,
+            badges: Vec::new(),
         }
+    }
+
+    /// The cell with other columns' badges after its text, as `(text, colour)` pairs.
+    pub(crate) fn with_badges(
+        mut self,
+        badges: impl IntoIterator<Item = (String, ignite_core::BadgeColor)>,
+    ) -> Self {
+        self.badges = badges
+            .into_iter()
+            .map(|(text, color)| BadgeView {
+                text,
+                color: color.as_str(),
+            })
+            .collect();
+        self.has_badges = !self.badges.is_empty();
+        self
     }
 }
 

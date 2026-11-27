@@ -307,12 +307,25 @@ impl BadgeColor {
 /// How a badge column picks its colour from the cell's state.
 type ColorRule = Arc<dyn Fn(&str) -> BadgeColor + Send + Sync>;
 
+/// One badge column: its colour rule, the column whose cell shows it, and the tabs it shows on.
+#[derive(Clone, Default)]
+struct Badge {
+    color: Option<ColorRule>,
+    inside: Option<String>,
+    tabs: Option<Vec<String>>,
+}
+
 /// The list columns that show their value as a coloured badge, by column key, as Filament's
 /// `TextColumn::make($key)->badge()->color(fn (string $state) => ...)`. A column that is not
 /// listed shows its value as plain text.
+///
+/// A badge can also show inside another column's cell, after its text, instead of in a column
+/// of its own ([`badge_inside`](Self::badge_inside)), such as a post's status beside its
+/// title; and only on some tabs of the list ([`badge_on_tabs`](Self::badge_on_tabs)). The
+/// panel decides both when it renders the page, so the page needs no script for them.
 #[derive(Clone, Default)]
 pub struct ColumnBadges {
-    columns: BTreeMap<String, Option<ColorRule>>,
+    columns: BTreeMap<String, Badge>,
 }
 
 impl fmt::Debug for ColumnBadges {
@@ -332,7 +345,7 @@ impl ColumnBadges {
     /// Shows the column `column` as a badge in the primary colour, as Filament's `->badge()`
     /// with no `color()`.
     pub fn badge(mut self, column: impl Into<String>) -> Self {
-        self.columns.insert(column.into(), None);
+        self.columns.entry(column.into()).or_default().color = None;
         self
     }
 
@@ -345,7 +358,31 @@ impl ColumnBadges {
         column: impl Into<String>,
         color: impl Fn(&str) -> BadgeColor + Send + Sync + 'static,
     ) -> Self {
-        self.columns.insert(column.into(), Some(Arc::new(color)));
+        self.columns.entry(column.into()).or_default().color = Some(Arc::new(color));
+        self
+    }
+
+    /// Shows the badge of the column `column` inside the cell of the column `target`, after
+    /// its text, and not as a column of its own: the list has no column for `column`, even
+    /// when the resource lists it. `column` need not be a list column: its value is read from
+    /// the row. It is a badge in the primary colour unless [`badge_color`](Self::badge_color)
+    /// gives it a colour.
+    pub fn badge_inside(mut self, column: impl Into<String>, target: impl Into<String>) -> Self {
+        self.columns.entry(column.into()).or_default().inside = Some(target.into());
+        self
+    }
+
+    /// Shows the badge of the column `column` only on the list's tabs `tabs`, by key, as a
+    /// Filament column's `visible()` that reads the active tab. On another tab, or on a list
+    /// with no tab active, the badge is not rendered: a badge column is left out of the table,
+    /// heading and all, and a badge inside another cell is left out of the cell.
+    pub fn badge_on_tabs<S: Into<String>>(
+        mut self,
+        column: impl Into<String>,
+        tabs: impl IntoIterator<Item = S>,
+    ) -> Self {
+        self.columns.entry(column.into()).or_default().tabs =
+            Some(tabs.into_iter().map(Into::into).collect());
         self
     }
 
@@ -362,10 +399,40 @@ impl ColumnBadges {
     /// The colour of the badge of the column `column` for `state`, or `None` when the column
     /// is not a badge.
     pub fn color(&self, column: &str, state: &str) -> Option<BadgeColor> {
-        self.columns.get(column).map(|rule| {
-            rule.as_ref()
+        self.columns.get(column).map(|badge| {
+            badge
+                .color
+                .as_ref()
                 .map_or(BadgeColor::Primary, |rule| rule(state))
         })
+    }
+
+    /// The column whose cell shows the badge of `column`, if it shows inside another cell.
+    pub fn inside_of(&self, column: &str) -> Option<&str> {
+        self.columns.get(column)?.inside.as_deref()
+    }
+
+    /// The badge columns shown inside the cell of `target`, in key order.
+    pub fn inside(&self, target: &str) -> Vec<&str> {
+        self.columns
+            .iter()
+            .filter(|(_, badge)| badge.inside.as_deref() == Some(target))
+            .map(|(column, _)| column.as_str())
+            .collect()
+    }
+
+    /// Whether the badge of `column` shows when the tab `tab` is active (`None` for none): a
+    /// badge without [`badge_on_tabs`](Self::badge_on_tabs) shows on every tab. A column that
+    /// is not a badge shows.
+    pub fn shows_on(&self, column: &str, tab: Option<&str>) -> bool {
+        match self
+            .columns
+            .get(column)
+            .and_then(|badge| badge.tabs.as_ref())
+        {
+            None => true,
+            Some(tabs) => tab.is_some_and(|tab| tabs.iter().any(|key| key == tab)),
+        }
     }
 }
 
@@ -435,5 +502,27 @@ mod tests {
         assert_eq!(badges.color("kind", "x"), Some(BadgeColor::Primary));
         assert_eq!(badges.color("title", "x"), None);
         assert_eq!(BadgeColor::Danger.as_str(), "danger");
+    }
+
+    #[test]
+    fn a_badge_shows_inside_another_cell_and_on_its_tabs() {
+        let badges = ColumnBadges::new()
+            .badge_color("status", |_| BadgeColor::Gray)
+            .badge_inside("status", "title")
+            .badge_on_tabs("status", ["all"])
+            .badge("kind");
+        assert_eq!(badges.inside_of("status"), Some("title"));
+        assert_eq!(badges.inside("title"), ["status"]);
+        assert_eq!(badges.inside_of("kind"), None);
+        assert_eq!(badges.color("status", "x"), Some(BadgeColor::Gray));
+        assert!(badges.shows_on("status", Some("all")));
+        assert!(!badges.shows_on("status", Some("drafts")));
+        assert!(!badges.shows_on("status", None));
+        assert!(badges.shows_on("kind", None) && badges.shows_on("title", Some("drafts")));
+        // `badge` after `badge_inside` keeps the place and resets the colour only.
+        let badges = ColumnBadges::new()
+            .badge_inside("status", "title")
+            .badge("status");
+        assert_eq!(badges.inside_of("status"), Some("title"));
     }
 }

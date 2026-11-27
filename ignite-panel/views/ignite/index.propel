@@ -71,7 +71,7 @@
           @forelse (row in rows)
             <tr>
               @foreach (cell in row.cells)
-                <td>@if (cell.badge)<span class="ig-badge ig-badge-{{ $cell.color }}">{{ $cell.text }}</span>@else{{ $cell.text }}@endif</td>
+                <td>@if (cell.badge)<span class="ig-badge ig-badge-{{ $cell.color }}">{{ $cell.text }}</span>@else{{ $cell.text }}@endif@if (cell.has_badges)@foreach (inline in cell.badges) <span class="ig-badge ig-badge-{{ $inline.color }}">{{ $inline.text }}</span>@endforeach@endif</td>
               @endforeach
               <td class="whitespace-nowrap text-right">
                 @if (row.can_update)

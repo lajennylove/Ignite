@@ -651,6 +651,24 @@ impl RuntimeResource {
         self.column_badges = self.column_badges.badge_color(column, color);
         self
     }
+
+    /// Shows the badge of the column `column` inside the cell of the column `target`, instead
+    /// of in a column of its own. See [`ColumnBadges::badge_inside`].
+    pub fn badge_inside(mut self, column: impl Into<String>, target: impl Into<String>) -> Self {
+        self.column_badges = self.column_badges.badge_inside(column, target);
+        self
+    }
+
+    /// Shows the badge of the column `column` only on the list's tabs `tabs`, by key. See
+    /// [`ColumnBadges::badge_on_tabs`].
+    pub fn badge_on_tabs<S: Into<String>>(
+        mut self,
+        column: impl Into<String>,
+        tabs: impl IntoIterator<Item = S>,
+    ) -> Self {
+        self.column_badges = self.column_badges.badge_on_tabs(column, tabs);
+        self
+    }
 }
 
 /// The checks of [`RegisteredResource::validate`]. Each error is keyed by its field's name.

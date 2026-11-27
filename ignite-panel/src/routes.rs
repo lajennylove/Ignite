@@ -925,7 +925,6 @@ async fn index(
         filter: active.map(|t| t.filter.clone()).unwrap_or_default(),
     };
 
-    let keys: Vec<&str> = columns.iter().map(|c| c.key.as_str()).collect();
     let user = session.acting_user();
     let (records, total) = resource
         .list(db.inner(), user, &query)
@@ -947,6 +946,29 @@ async fn index(
     .await
     .map_err(db_status)?;
     let badges = resource.column_badges();
+    // The columns the table shows: a badge shown inside another cell has no column of its
+    // own, and a badge column not shown on the active tab is left out, heading and all.
+    let active_key = active.map(|t| t.key.as_str());
+    let shown: Vec<&ColumnDef> = columns
+        .iter()
+        .filter(|c| badges.inside_of(&c.key).is_none() && badges.shows_on(&c.key, active_key))
+        .collect();
+    // The badges each shown column's cell holds after its text, on the active tab.
+    let inline: Vec<Vec<&str>> = shown
+        .iter()
+        .map(|c| {
+            badges
+                .inside(&c.key)
+                .into_iter()
+                .filter(|badge| badges.shows_on(badge, active_key))
+                .collect()
+        })
+        .collect();
+    let keys: Vec<&str> = columns
+        .iter()
+        .map(|c| c.key.as_str())
+        .chain(inline.iter().flatten().copied())
+        .collect();
     let lookups = lookup_choices(db.inner(), user, resource.as_ref(), &keys)
         .await
         .map_err(db_status)?;
@@ -959,16 +981,25 @@ async fn index(
     for record in &records {
         let id = record_id(record)?;
         rows.push(RowView {
-            cells: columns
+            cells: shown
                 .iter()
-                .map(|c| {
-                    let text = choice_text(record.get(&c.key), lookups.get(&c.key));
+                .zip(&inline)
+                .map(|(c, inline)| {
                     // A badge shows the cell's value; an empty cell has no badge, as in
                     // Filament. Its colour is picked from the stored value.
-                    match badges.color(&c.key, &cell_text(record.get(&c.key))) {
-                        Some(color) if !text.is_empty() => CellView::badge(text, color),
-                        _ => CellView::plain(text),
-                    }
+                    let badge = |key: &str| {
+                        let text = choice_text(record.get(key), lookups.get(key));
+                        let color = badges.color(key, &cell_text(record.get(key)));
+                        (text, color)
+                    };
+                    let cell = match badge(&c.key) {
+                        (text, Some(color)) if !text.is_empty() => CellView::badge(text, color),
+                        (text, _) => CellView::plain(text),
+                    };
+                    cell.with_badges(inline.iter().filter_map(|key| match badge(key) {
+                        (text, Some(color)) if !text.is_empty() => Some((text, color)),
+                        _ => None,
+                    }))
                 })
                 .collect(),
             edit_url: format!("{index_url}/{id}/edit"),
@@ -980,7 +1011,7 @@ async fn index(
         });
     }
 
-    let heads = columns
+    let heads = shown
         .iter()
         .map(|c| {
             let active = sort.as_deref() == Some(c.key.as_str());
@@ -1040,7 +1071,7 @@ async fn index(
         index_url: index_url.clone(),
         search: search.clone(),
         columns: heads,
-        colspan: columns.len() + 1,
+        colspan: shown.len() + 1,
         rows,
         total,
         page: page_no,
