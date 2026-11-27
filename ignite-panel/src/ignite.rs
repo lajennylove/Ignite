@@ -4,7 +4,10 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
-use ignite_core::{Database, Field, FormWidget, IgniteResource, ListWidget, StatsOverviewWidget};
+use ignite_core::{
+    Database, Field, FormWidget, IgniteResource, ListWidget, RegisteredResource, RuntimeResource,
+    StatsOverviewWidget,
+};
 use orbit_orm::{PoolOptions, Transaction};
 use rocket::catchers;
 use rocket::fairing::{self, AdHoc, Fairing, Info, Kind};
@@ -175,6 +178,8 @@ pub struct Ignite {
     collapsible_navigation_groups: bool,
     widgets: Vec<Arc<dyn StatsOverviewWidget>>,
     dashboard_widgets: Vec<DashboardWidget>,
+    roles: Vec<crate::Role>,
+    abilities: Vec<String>,
 }
 
 impl Ignite {
@@ -248,6 +253,8 @@ impl Ignite {
             collapsible_navigation_groups: true,
             widgets: Vec::new(),
             dashboard_widgets: Vec::new(),
+            roles: Vec::new(),
+            abilities: Vec::new(),
         }
     }
 
@@ -273,6 +280,77 @@ impl Ignite {
             panic!("{error}: a runtime resource has it, so the static resource cannot");
         }
         self.resources.push(Arc::new(Adapter::<R>::new()));
+        self
+    }
+
+    /// Adds a resource defined by data ([`RuntimeResource`]) as part of the panel from its
+    /// start, as [`resource`](Self::resource) adds a static one: its permission rows are
+    /// registered when the app starts and its slug is reserved. The panel's Users and Roles
+    /// screens are added this way (see [`crate::screens`]), so an app can extend them with the
+    /// [`RuntimeResource`] builder first. To add and remove resources while the panel serves,
+    /// use [`ignite_core::register_runtime`] instead.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the slug or a field name is not valid, if another resource already uses the
+    /// slug, or if the slug is one the panel reserves for its own routes.
+    pub fn runtime_resource(mut self, resource: RuntimeResource) -> Self {
+        let slug = resource.slug.clone();
+        assert!(
+            !RESERVED_SLUGS.contains(&slug.as_str()),
+            "the slug `{slug}` is reserved for the panel's own routes; choose another slug"
+        );
+        assert!(
+            !self.resources.iter().any(|r| r.slug() == slug),
+            "two Ignite resources use the slug `{slug}`"
+        );
+        let registered =
+            RegisteredResource::new(resource).unwrap_or_else(|error| panic!("{error}"));
+        if let Err(error) = ignite_core::reserve_slugs(&[slug.as_str()]) {
+            panic!("{error}: a runtime resource has it");
+        }
+        self.resources
+            .push(Arc::new(RuntimeAdapter(Arc::new(registered))));
+        self
+    }
+
+    /// Adds the panel's Users and Roles screens as they are: [`screens::users_resource`]
+    /// (WordPress's Users screens: the list with a search and a view per role, add, edit,
+    /// disable, enable and delete) and [`screens::roles_resource`] (the roles and their
+    /// abilities). Listed in the navigation as "Users", with its "Add new" link, and "Roles",
+    /// for the users whose roles grant `users.viewAny` and `roles.viewAny`. To change a
+    /// screen, pass it to [`runtime_resource`](Self::runtime_resource) instead; to replace it,
+    /// add a resource of the app's own at its slug.
+    ///
+    /// [`screens::users_resource`]: crate::screens::users_resource
+    /// [`screens::roles_resource`]: crate::screens::roles_resource
+    pub fn user_management(self) -> Self {
+        self.runtime_resource(crate::screens::users_resource())
+            .runtime_resource(crate::screens::roles_resource())
+    }
+
+    /// Declares a role and the abilities it starts with, such as
+    /// `Role::make("author").label("Author").abilities(["posts.viewAny", "posts.create"])`, as
+    /// WordPress's `add_role`. When the app starts, the abilities are registered as permissions
+    /// and a role that does not exist yet is created with them; a role that exists keeps the
+    /// abilities it has (see [`Role`](crate::Role)). The Users and Roles screens show the
+    /// role's label. Each call adds one role.
+    pub fn role(mut self, role: crate::Role) -> Self {
+        self.roles.push(role);
+        self
+    }
+
+    /// Declares abilities of the app's own, beside the resources' abilities, such as
+    /// `settings.manage`: each is registered as a permission when the app starts, so the Roles
+    /// screen offers it and a role can be granted it. Check it with
+    /// [`AdminUser::can`](crate::AdminUser::can) or [`AdminUser::authorize`](crate::AdminUser::authorize),
+    /// or on a navigation item with [`NavigationItem::ability`](crate::NavigationItem::ability).
+    pub fn abilities<I, S>(mut self, abilities: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.abilities.extend(abilities.into_iter().map(Into::into));
         self
     }
 
@@ -646,7 +724,17 @@ impl Ignite {
             collapsible_navigation_groups,
             widgets,
             dashboard_widgets,
+            roles,
+            abilities: app_abilities,
         } = self;
+        for role in &roles {
+            assert!(
+                crate::authz::valid_role_name(role.get_name()),
+                "the role `{}` is not a valid role name: use lowercase letters, digits, `-` and `_`",
+                role.get_name()
+            );
+        }
+        crate::roles::install_labels(&roles);
         // Users created or deleted from now on run the app's callbacks.
         users::install_callbacks(user_callbacks);
         users::install_storage_dir(storage);
@@ -662,8 +750,13 @@ impl Ignite {
                 }
             };
             // Each resource's abilities get a permission row, so roles can be granted them.
-            let abilities = crate::authz::resource_abilities(&resources);
+            let mut abilities = crate::authz::resource_abilities(&resources);
+            abilities.extend(app_abilities);
             crate::authz::register_at_start(&db, abilities).await;
+            // The app's roles, each created once with its abilities.
+            if let Err(error) = crate::authz::seed_roles(&db, &roles).await {
+                rocket::error!("ignite: could not create the app's roles: {error}");
+            }
             let registry = Registry {
                 mount: mount.clone(),
                 resources,

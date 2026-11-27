@@ -321,22 +321,26 @@ impl Layout {
                         false,
                     ),
                 };
-                let items = registry.navigation_items.iter().map(|item| Entry {
-                    // A declared entry is found by its label; its key is never a slug.
-                    key: format!("\u{0}{}", item.label()),
-                    label: item.label().to_string(),
-                    group: item.group_name().map(str::to_string),
-                    sort: item.sort_value(),
-                    parent: None,
-                    item: (
-                        entry_view(
-                            item.label(),
-                            item.icon_name(),
-                            item.url_value().unwrap_or_default().to_string(),
+                let items = registry
+                    .navigation_items
+                    .iter()
+                    .filter(|item| item.ability_name().is_none_or(|ability| user.can(ability)))
+                    .map(|item| Entry {
+                        // A declared entry is found by its label; its key is never a slug.
+                        key: format!("\u{0}{}", item.label()),
+                        label: item.label().to_string(),
+                        group: item.group_name().map(str::to_string),
+                        sort: item.sort_value(),
+                        parent: None,
+                        item: (
+                            entry_view(
+                                item.label(),
+                                item.icon_name(),
+                                item.url_value().unwrap_or_default().to_string(),
+                            ),
+                            item.url_value().is_none(),
                         ),
-                        item.url_value().is_none(),
-                    ),
-                });
+                    });
                 let entries = std::iter::once(dashboard)
                     .chain(items)
                     .chain(

@@ -1047,7 +1047,11 @@ async fn index(
     let per_page = resource.per_page().max(1);
     // The tab, as Filament's `?tab=`: the requested one, or the default. A resource without
     // tabs ignores the parameter, so its list and its links are as before.
-    let tabs = resource.tabs();
+    let tabs = resource
+        .tabs_for(db.inner(), session.acting_user())
+        .await
+        .map_err(db_status)?;
+    let tabs = tabs.as_slice();
     let requested_tab = tab
         .as_deref()
         .map(str::trim)
@@ -1072,6 +1076,7 @@ async fn index(
     let default_tab = ignite_core::active_tab(tabs, None, resource.default_active_tab());
     let tab_views = tab_views(
         resource.as_ref(),
+        tabs,
         db.inner(),
         user,
         &query,
@@ -2125,6 +2130,7 @@ fn choice_text(value: Option<&Value>, choices: Option<&Vec<(String, String)>>) -
 #[allow(clippy::too_many_arguments)]
 async fn tab_views(
     resource: &dyn Erased,
+    tabs: &[ignite_core::Tab],
     db: &Database,
     user: &ActingUser,
     query: &ListQuery,
@@ -2149,8 +2155,8 @@ async fn tab_views(
         None
     };
     let hide_empty = resource.hide_empty_tabs();
-    let mut views = Vec::with_capacity(resource.tabs().len());
-    for tab in resource.tabs() {
+    let mut views = Vec::with_capacity(tabs.len());
+    for tab in tabs {
         let is_active = active == Some(tab.key.as_str());
         let count = if is_active && count_search == query.search {
             total

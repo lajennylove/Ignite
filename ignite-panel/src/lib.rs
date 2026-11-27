@@ -21,7 +21,9 @@ mod navigation;
 mod password_reset;
 mod profile;
 mod proxy;
+mod roles;
 mod routes;
+pub mod screens;
 mod session;
 mod sessions;
 pub mod theme;
@@ -39,6 +41,7 @@ pub use ignite::Ignite;
 pub use ignite_core;
 pub use mail::{EmailitMailer, MailError, Mailer, Message, NotConfigured, RecordingMailer};
 pub use navigation::{NavigationGroup, NavigationItem};
+pub use roles::{role_label, Role};
 pub use session::AdminUser;
 pub use theme::{
     active_admin_theme, register_admin_theme, registered_admin_themes, resolve_admin_theme,

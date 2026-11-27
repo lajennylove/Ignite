@@ -362,6 +362,25 @@ impl AdminUser {
         self.acting.can(ability)
     }
 
+    /// Refuses with 403 Forbidden when the user may not do `ability`, as Laravel's
+    /// `Gate::authorize()` (and a controller's `$this->authorize()`). Use it in an app's own
+    /// route under the panel, such as a settings screen:
+    ///
+    /// ```ignore
+    /// #[get("/admin/settings")]
+    /// fn settings(user: AdminUser) -> Result<PropelView, Status> {
+    ///     user.authorize("settings.manage")?;
+    ///     // ...
+    /// }
+    /// ```
+    pub fn authorize(&self, ability: &str) -> Result<(), Status> {
+        if self.can(ability) {
+            Ok(())
+        } else {
+            Err(Status::Forbidden)
+        }
+    }
+
     /// Whether the user may do `action` on the resource at `slug`: they hold the ability and,
     /// for `viewAny` and `create`, the resource's policy allows it. The actions on one record
     /// ask the policy with the record (see `authz::policy_allows`).

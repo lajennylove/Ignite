@@ -34,8 +34,43 @@ All notable changes to Ignite are listed here. The format follows
 - A resource's create form comes back to the dashboard after its save when it sends
   `_back` set to the panel's mount (the form widget does); any other `_back` is ignored.
 
+- Users and Roles screens, as WordPress's Users screens and a Filament `UserResource` with
+  Filament Shield's roles: `Ignite::user_management()`, and `ignite_panel::screens`
+  (`users_resource()`, `roles_resource()`, `UsersData`, `RolesData`, `USERS_SLUG`,
+  `ROLES_SLUG`, `STATUS_ACTIVE`, `STATUS_DISABLED`). The Users list has the name, email, roles
+  and status, a search, a view per role (`?tab=<role>`), and Disable, Enable and Delete row
+  actions; add a user with a name, email, password (at least 8 characters) and roles; edit
+  one, a blank password keeping the stored one. The Roles screen lists, creates, edits
+  (name and abilities) and deletes roles. Nobody disables or deletes their own account there,
+  only a super-admin gives or changes `super-admin`, and the last enabled super-admin keeps
+  it. An app extends a screen with the `RuntimeResource` builder, or replaces it with its own
+  resource at `users` or `roles`.
+- `Ignite::runtime_resource(RuntimeResource)`: a resource defined by data that is part of the
+  panel from its start, as `resource` adds a static one; `RegisteredResource::new` checks a
+  definition without registering it.
+- Roles an app declares, as WordPress's `add_role`: `ignite_panel::Role` (`make(name)`,
+  `label`, `ability`, `abilities`) and `Ignite::role(Role)`; each is created once with its
+  abilities when the app starts, and keeps the abilities the Roles screen gives it.
+  `Ignite::abilities([...])` registers the app's own abilities as permissions.
+  `ignite_panel::role_label(name)`.
+- Role functions in `ignite_panel::authz`: `roles`, `permissions`, `role_permissions`,
+  `revoke_permission`, `sync_role_permissions`, `rename_role`, `delete_role`, `roles_of`,
+  `sync_user_roles` and `valid_role_name`.
+- `AdminUser::authorize(ability)`, 403 when the user may not, as Laravel's
+  `Gate::authorize()`, and `NavigationItem::ability(name)`, which lists the item only for the
+  users who may.
+- `RuntimeData::tabs_for(db, user)`, tabs computed on each list request as Filament's
+  `getTabs()` (default: the resource's tabs), and `RuntimeData::validate_form(form,
+  operation)`, rules on the submitted form beside the fields' checks (default: none).
+- `users::create_user_with_hash`, `create_user` with a password already hashed.
+
 ### Changed
 
+- **Breaking:** `ignite_panel::authz::AuthzError` has the new variants `SuperAdminRole` and
+  `InvalidRoleName`, so an exhaustive `match` on it must handle them.
+- The panel's checks are unchanged: each action needs the `<slug>.<action>` ability of one of
+  the user's roles and the resource's policy, and `super-admin` passes every check; the roles
+  an app declares and the Roles screen now set those abilities.
 - The 0.6.6 stat cards are unchanged. The empty dashboard's "Nothing to show yet." is left out
   when the dashboard has list or form widgets.
 

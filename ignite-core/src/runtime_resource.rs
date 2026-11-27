@@ -221,6 +221,30 @@ pub trait RuntimeData: Send + Sync + 'static {
         let _ = user;
         self.options(db, field)
     }
+
+    /// The tabs of the list page for the signed-in `user`, computed on each list request, as
+    /// Filament's `getTabs()` is a method of the List page: such as one tab per role on a users
+    /// list, which changes when a role is added. `None`, the default, keeps the resource's
+    /// [`tabs`](RuntimeResource::tabs). The `tab` query parameter, the default tab and the
+    /// counts work as for the declared tabs.
+    fn tabs_for<'a>(
+        &'a self,
+        db: &'a Database,
+        user: &'a ActingUser,
+    ) -> RuntimeFuture<'a, Option<Vec<Tab>>> {
+        let _ = (db, user);
+        Box::pin(async { Ok(None) })
+    }
+
+    /// Rules on the submitted form, checked beside the fields' own checks before the row is
+    /// built, as the rules of a Laravel form request: such as a password's minimum length,
+    /// which the row cannot show because a password is hashed in it. `operation` is
+    /// [`Operation::Create`] or [`Operation::Edit`]. Each error is keyed by the field's name and
+    /// shows under it, with 422, as a field's own error. The default is none.
+    fn validate_form(&self, form: &FormInput, operation: Operation) -> FieldErrors {
+        let _ = (form, operation);
+        FieldErrors::new()
+    }
 }
 
 /// The kind of a [`FieldDef`]: every [`FieldKind`], with owned values so it can be loaded
@@ -928,6 +952,14 @@ pub struct RegisteredResource {
 }
 
 impl RegisteredResource {
+    /// Checks `resource` as [`register_runtime`] does, without adding it to the registry: its
+    /// slug and its field names. The panel uses it for a resource defined by data that is part
+    /// of the panel from its start (`Ignite::runtime_resource`), such as the Users screen.
+    pub fn new(resource: RuntimeResource) -> Result<Self, RuntimeError> {
+        check_definition(&resource)?;
+        Ok(RegisteredResource { resource })
+    }
+
     /// The definition that was registered.
     pub fn resource(&self) -> &RuntimeResource {
         &self.resource
@@ -1163,8 +1195,23 @@ fn valid_slug(slug: &str) -> bool {
 /// Refuses a slug that is not valid, a slug that a static resource, another runtime resource
 /// or one of the panel's own pages (such as `login`) uses, and two fields with one name.
 pub fn register_runtime(resource: RuntimeResource) -> Result<(), RuntimeError> {
+    check_definition(&resource)?;
+    write(|registry| {
+        let slug = resource.slug.as_str();
+        if registry.reserved.contains(slug) || registry.resources.iter().any(|r| r.slug() == slug) {
+            return Err(RuntimeError::SlugTaken(resource.slug.clone()));
+        }
+        registry
+            .resources
+            .push(Arc::new(RegisteredResource { resource }));
+        Ok(())
+    })
+}
+
+/// Checks a definition's slug and field names.
+fn check_definition(resource: &RuntimeResource) -> Result<(), RuntimeError> {
     if !valid_slug(&resource.slug) {
-        return Err(RuntimeError::InvalidSlug(resource.slug));
+        return Err(RuntimeError::InvalidSlug(resource.slug.clone()));
     }
     if let Some(field) = resource.fields.iter().find(|f| !valid_field_name(&f.name)) {
         return Err(RuntimeError::InvalidFieldName {
@@ -1179,16 +1226,7 @@ pub fn register_runtime(resource: RuntimeResource) -> Result<(), RuntimeError> {
             field: field.name.clone(),
         });
     }
-    write(|registry| {
-        let slug = resource.slug.as_str();
-        if registry.reserved.contains(slug) || registry.resources.iter().any(|r| r.slug() == slug) {
-            return Err(RuntimeError::SlugTaken(resource.slug.clone()));
-        }
-        registry
-            .resources
-            .push(Arc::new(RegisteredResource { resource }));
-        Ok(())
-    })
+    Ok(())
 }
 
 /// Removes the runtime resource at `slug`. From the next request on, it is gone from the

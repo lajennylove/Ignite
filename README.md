@@ -312,6 +312,39 @@ A `NavigationItem` has `group`, `sort`, `icon` and an optional `url`: with one i
 
 `navigation_icon` is an icon name that says what the resource is, not a CSS class: `post`, `page`, `media`, `comment`, `appearance`, `plugins`, `users`, `tools`, `settings`, or a name of the app's own, such as a custom post type's `book`. The active admin theme maps the name to its own icon (see [Admin themes](#admin-themes)): the `ignite` theme to a Tabler icon from the font it ships, a WordPress-like theme to a Dashicon. A name the theme does not know, and a resource without a name, show the theme's generic resource icon. Filament's navigation items also take an icon name, which the panel resolves through its icon set; in Ignite the admin theme resolves it.
 
+### Dashboard widgets
+
+The dashboard shows the stat cards first, as Filament's stats overview widget: a resource's `stats` (or `widgets`) and the panel's own `StatsOverviewWidget`s passed to `Ignite::widget`. After them come the widgets that render their own view, as Filament's custom widgets, in the order they were added:
+
+```rust
+use ignite_core::{FormWidget, ListWidget, ListWidgetRow};
+
+Ignite::new()
+    // WordPress's "Recently Published": rows from a runtime resource's data.
+    .list_widget(
+        ListWidget::make("Recently Published")
+            .rows_from(posts.data.clone(), latest_published_query(), |row| {
+                ListWidgetRow::make(row["title"].as_str().unwrap_or_default())
+                    .value(row["published_at"].as_str().unwrap_or_default())
+                    .url(format!("/admin/posts/{}/edit", row["id"]))
+            })
+            .empty_state("No posts published yet."),
+    )
+    // Any rows, computed for the signed-in user.
+    .list_widget(ListWidget::make("Activity").rows(|db, user| Box::pin(async move { activity(db, user).await })))
+    // WordPress's "Quick Draft": the resource's fields, posting to its create route.
+    .form_widget(
+        FormWidget::make("Quick Draft", "posts")
+            .fields(["title", "content"])
+            .hidden("status", "draft")
+            .submit_label("Save Draft"),
+    )
+```
+
+- A list widget shows its title and its rows (a label, an optional value and an optional link), or its empty state. `can_view(rule)` shows it only to some users, as Filament's `canView()`.
+- A form widget shows the resource's fields it names (all by default) and posts to the resource's create route with the CSRF token and `_back` set to the dashboard, so the resource's validation, abilities, policy and `create_for` run as for its own form, and the panel comes back to the dashboard with "Record created.". A form that does not validate shows the resource's create form with the errors. It shows only to a user who may create a record of the resource.
+- Every label, value and link is escaped, and a link that is not a path or an `http(s)` URL (such as `javascript:`) is shown without a link. The `ignite` theme renders them with `partials.widgets.list` and `partials.widgets.form`; a theme replaces them with `AdminTheme::view`. The dashboard's values are `has_widgets` and `widgets` (each with `is_list`, `is_form`, `title`, `title_id`, `rows`, `has_rows`, `empty_state`, `action`, `csrf_token`, `back_url`, `fields`, `hidden` and `submit_label`).
+
 ### Stylesheets
 
 `stylesheet` adds an app stylesheet to every page of the panel, signed-in and sign-in pages alike, as Filament registers an app's CSS with `FilamentAsset::register`. Each call adds one, in order. The layout links them at the end of the head, after the panel's own CSS, so their rules can change the panel's look. The links are compiled into the panel's views, so they work in a release build.
@@ -333,6 +366,15 @@ ignite_panel::set_admin_theme("wp")?;
 ```
 
 `set_admin_theme` sets the site's default theme. Each signed-in user can choose their own admin theme on the profile page (the card shows when more than one theme is registered); the choice is stored in the user's `admin_theme` column and applies to that user's requests only. A user without a choice, a stored name that no registered theme has, and the sign-in pages get the site default. The admin theme is separate from the light or dark mode (the top bar's switch and the `theme` column): changing one keeps the other. An app reads the theme of a user with `AdminUser::admin_theme()` (the stored choice is `admin_theme_choice()`), and renders its own view that extends `ignite::layouts.app` in it with `ignite_panel::with_admin_theme(&user.admin_theme(), || PropelView::render(...))`; without that, an app's view renders in the site default.
+
+A theme without a dark mode, such as a WordPress-like one, says so with `dark_mode()` returning `false`, as Filament's panel `darkMode(false)`: its pages always render light (`data-theme="light"`), whatever the user chose in another theme (the choice is kept for the themes that have a dark mode), and the light and dark switch is hidden. `theme_switcher()` (default `dark_mode()`) hides only the switch, as Filament's `themeSwitcher(false)`. The line under the profile's admin theme choice comes from `theme_switcher_note()`: by default `DEFAULT_THEME_SWITCHER_NOTE` while the switch shows, and no line otherwise; return your own words, or `None`. The views read `theme_switcher` (the top bar) and `has_theme_switcher_note` with `theme_switcher_note` (the profile), so such a theme needs no copy of the profile page.
+
+```rust
+impl AdminTheme for WpTheme {
+    fn dark_mode(&self) -> bool { false }
+    // ...
+}
+```
 
 Every registered theme renders in debug and release builds. A theme's own views come from `AdminTheme::view`, so it can ship them in the binary. In a release build the `ignite` theme renders from the views compiled into the panel, and another theme through Propel's runtime renderer, from the panel's views embedded in the binary.
 
@@ -404,9 +446,47 @@ ignite user role remove editor@example.com editors
 - The migration that adds roles gives `super-admin` to every user who exists when it runs, so an upgrade locks nobody out. A user created later has no roles until `ignite user role add` gives one. The last super-admin cannot lose the role.
 - `role grant` refuses a permission that the app has not registered yet. It also refuses an unknown role.
 - The server answers 403 Forbidden to a request the user may not make, and an unknown resource stays 404. The navigation lists only the resources the user may view, the "Add new" link and the New button need `create`, the Edit button needs `update`, and the Delete button needs `delete`. The dashboard shows a resource's stat cards and table only when the user may view it.
-- An app's own route can check an ability: `user.can("reports.view")`, where `user` is an `AdminUser` request guard.
+- An app's own route can check an ability: `user.can("reports.view")`, where `user` is an `AdminUser` request guard, or refuse with 403 as Laravel's `Gate::authorize()`: `user.authorize("settings.manage")?`. A navigation item of the panel's own shows only to the users who may: `NavigationItem::make("Reading").url("/admin/reading").ability("settings.manage")`.
 
-The panel does not edit roles yet. Use the command.
+An app declares its roles and the abilities each one starts with, and its own abilities beside the resources':
+
+```rust
+use ignite_panel::{Ignite, Role};
+
+Ignite::new()
+    .abilities(["settings.manage"])
+    .role(Role::make("administrator").label("Administrator").abilities(["posts.viewAny", "posts.create", "posts.update", "posts.delete", "settings.manage"]))
+    .role(Role::make("author").label("Author").abilities(["posts.viewAny", "posts.create"]))
+```
+
+When the app starts, the abilities are registered as permissions and each role that does not exist yet is created with its abilities, as WordPress's `add_role` adds a role once. A role that exists keeps the abilities it has, so a change made on the Roles screen is not undone by the next start. A role name is lowercase letters, digits, `-` and `_`; its label is what the screens show (`role_label(name)`).
+
+### Users and Roles screens
+
+`Ignite::user_management()` adds two screens, built as runtime resources the way a Filament app builds a `UserResource`:
+
+- **Users** (`/admin/users`), as WordPress's Users screens: the list with the name, email, roles and status (a badge), a search on the name and email, and a view per role ("All", then each role with its count, as `?tab=author`); "Add new" with the name, email, password (at least 8 characters) and roles; the edit form, where a blank password keeps the stored one; and the row actions Disable, Enable and Delete. Listed as "Users" in the navigation with its "Add new" link.
+- **Roles** (`/admin/roles`): the roles with their label and how many users and abilities each has; a new role with its name and abilities; the edit form, which offers every ability the panel knows (each resource's five and the app's own); and the row action Delete. `super-admin` cannot be renamed or deleted.
+
+The screens use their own abilities, `users.*` and `roles.*`, so a role sees them only when it is granted them. Nobody can disable or delete their own account here, a user who is not a super-admin cannot give, take or change `super-admin`, and the last enabled super-admin keeps the role, as on the command line. A change to a role's abilities applies from the next request.
+
+An app extends a screen with the `RuntimeResource` builder and adds it with `Ignite::runtime_resource`, or replaces it with a resource of its own at the slug `users` or `roles`:
+
+```rust
+use ignite_panel::screens::{roles_resource, users_resource};
+
+Ignite::new()
+    .runtime_resource(
+        users_resource()
+            .navigation_group("People")
+            .navigation_create_label("Add New User")
+            .column(ColumnDef { key: "id".into(), label: "ID".into(), sortable: false, searchable: false })
+            .row_action(RowAction::make("posts").url("/admin/posts?author={id}")),
+    )
+    .runtime_resource(roles_resource())
+```
+
+`screens::UsersData` and `screens::RolesData` are the screens' data, for an app's own resource. The role functions are in `ignite_panel::authz`: `create_role`, `rename_role`, `delete_role`, `roles`, `permissions`, `role_permissions`, `grant_permission`, `revoke_permission`, `sync_role_permissions`, `assign_role`, `remove_role`, `roles_of`, `user_roles` and `sync_user_roles`.
 
 ### Policies and the acting user
 

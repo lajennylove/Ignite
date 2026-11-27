@@ -154,6 +154,25 @@ pub async fn update_password<'a>(
         .await
 }
 
+/// Replaces the password hash of the user with `id` with `hash`, already hashed, and sets a
+/// new remember token, as [`update_password`] does.
+pub(crate) async fn set_password_hash<'a>(
+    db: impl Executor<'a>,
+    id: i64,
+    hash: &str,
+) -> Result<u64, Error> {
+    Credentials::query()
+        .where_eq("id", id)
+        .update(
+            db,
+            &[
+                ("password_hash", hash.into()),
+                ("remember_token", new_remember_token().as_str().into()),
+            ],
+        )
+        .await
+}
+
 /// A new remember token: 60 URL-safe characters from 45 random bytes, the length of Laravel's
 /// `Str::random(60)`.
 fn new_remember_token() -> String {
@@ -553,6 +572,17 @@ pub async fn create_user(
     password: &str,
 ) -> Result<User, Error> {
     let password_hash = ignite_core::hash_password(password).map_err(hash_error)?;
+    create_user_with_hash(db, name, email, &password_hash).await
+}
+
+/// [`create_user`] with a password already hashed ([`hash_password`]), as a form's
+/// password field gives it. The app's created callbacks run as for [`create_user`].
+pub async fn create_user_with_hash(
+    db: &Database,
+    name: &str,
+    email: &str,
+    password_hash: &str,
+) -> Result<User, Error> {
     let created = callbacks().created;
     db.transaction(async |tx| {
         let id = User::query()
@@ -561,7 +591,7 @@ pub async fn create_user(
                 &[
                     ("name", name.into()),
                     ("email", email.into()),
-                    ("password_hash", password_hash.as_str().into()),
+                    ("password_hash", password_hash.into()),
                 ],
             )
             .await? as i64;

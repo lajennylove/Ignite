@@ -125,6 +125,7 @@ pub struct NavigationItem {
     sort: Option<i32>,
     icon: Option<String>,
     url: Option<String>,
+    ability: Option<String>,
 }
 
 impl NavigationItem {
@@ -136,6 +137,7 @@ impl NavigationItem {
             sort: None,
             icon: None,
             url: None,
+            ability: None,
         }
     }
 
@@ -165,6 +167,15 @@ impl NavigationItem {
         self
     }
 
+    /// Lists the entry only for a user who may do `ability`, such as `settings.manage`, as
+    /// Filament's `visible(fn (): bool => auth()->user()->can(...))`. The default lists it for
+    /// every user. The page it links to checks the ability too, with
+    /// [`AdminUser::authorize`](crate::AdminUser::authorize).
+    pub fn ability(mut self, ability: impl Into<String>) -> Self {
+        self.ability = Some(ability.into());
+        self
+    }
+
     /// The entry's label.
     pub fn label(&self) -> &str {
         &self.label
@@ -184,6 +195,10 @@ impl NavigationItem {
 
     pub(crate) fn url_value(&self) -> Option<&str> {
         self.url.as_deref()
+    }
+
+    pub(crate) fn ability_name(&self) -> Option<&str> {
+        self.ability.as_deref()
     }
 }
 

@@ -137,7 +137,7 @@ pub(crate) async fn policy_allows(
 #[derive(Debug, Clone, OrbitModel)]
 #[orbit(table = "roles")]
 #[allow(dead_code)]
-struct Role {
+struct RoleRow {
     id: i64,
     #[orbit(fillable)]
     name: String,
@@ -230,6 +230,11 @@ pub enum AuthzError {
     CannotDisableLastSuperAdmin,
     /// Deleting the user would leave no enabled super-admin, so the user is kept.
     CannotDeleteLastSuperAdmin,
+    /// The `super-admin` role cannot be renamed or deleted.
+    SuperAdminRole,
+    /// A role name is empty or has a character other than a lowercase letter, a digit, `-`
+    /// or `_`.
+    InvalidRoleName(String),
     /// The database failed.
     Database(Error),
 }
@@ -254,6 +259,13 @@ impl fmt::Display for AuthzError {
                 "This is the last super-admin who is enabled, so the user cannot be deleted. \
                  Give super-admin to another enabled user first."
             ),
+            AuthzError::SuperAdminRole => {
+                write!(f, "The super-admin role cannot be renamed or deleted.")
+            }
+            AuthzError::InvalidRoleName(name) => write!(
+                f,
+                "{name} is not a valid role name: use lowercase letters, digits, - and _."
+            ),
             AuthzError::Database(error) => write!(f, "The database failed: {error}"),
         }
     }
@@ -268,7 +280,7 @@ impl From<Error> for AuthzError {
 }
 
 async fn role_id<'a>(db: impl Executor<'a>, name: &str) -> Result<Option<i64>, Error> {
-    Ok(Role::query()
+    Ok(RoleRow::query()
         .where_eq("name", name)
         .first(db)
         .await?
@@ -288,7 +300,9 @@ pub async fn create_role(db: &Database, name: &str) -> Result<(), AuthzError> {
     if role_id(db, name).await?.is_some() {
         return Err(AuthzError::Exists(name.to_string()));
     }
-    Role::query().insert(db, &[("name", name.into())]).await?;
+    RoleRow::query()
+        .insert(db, &[("name", name.into())])
+        .await?;
     Ok(())
 }
 
@@ -418,7 +432,7 @@ pub async fn delete_user(db: &Database, email: &str) -> Result<(), AuthzError> {
         .transaction(async |tx| {
             // The same lock as `remove_role`, so two changes to the super-admins cannot both
             // pass. Orbit's lock is portable: SQLite has no row locks, so it is left out there.
-            Role::query()
+            RoleRow::query()
                 .where_eq("name", SUPER_ADMIN)
                 .select(&["id"])
                 .for_update()
@@ -476,4 +490,235 @@ async fn user_and_role(db: &Database, email: &str, role: &str) -> Result<(i64, i
         .await?
         .ok_or_else(|| AuthzError::NotFound(format!("The role {role}")))?;
     Ok((user.id, role_row))
+}
+
+/// Whether `name` is a role name the Roles screen and [`Role`](crate::Role) accept: lowercase
+/// ASCII letters, digits, `-` and `_`, as WordPress's role names (`administrator`, `author`).
+pub fn valid_role_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'_')
+}
+
+/// The names of every role, in name order.
+pub async fn roles(db: &Database) -> Result<Vec<String>, AuthzError> {
+    let rows: Vec<(String,)> =
+        raw::fetch_all(db, "SELECT name FROM roles ORDER BY name", &[]).await?;
+    Ok(rows.into_iter().map(|(name,)| name).collect())
+}
+
+/// The name of every permission (ability) the panel knows, in name order: each resource's
+/// abilities, and the app's own ([`Ignite::ability`](crate::Ignite::ability)).
+pub async fn permissions(db: &Database) -> Result<Vec<String>, AuthzError> {
+    let rows: Vec<(String,)> =
+        raw::fetch_all(db, "SELECT name FROM permissions ORDER BY name", &[]).await?;
+    Ok(rows.into_iter().map(|(name,)| name).collect())
+}
+
+/// The permissions of the role `role`, in name order. The role must exist.
+pub async fn role_permissions(db: &Database, role: &str) -> Result<Vec<String>, AuthzError> {
+    let role_row = role_id(db, role)
+        .await?
+        .ok_or_else(|| AuthzError::NotFound(format!("The role {role}")))?;
+    let rows: Vec<(String,)> = raw::fetch_all(
+        db,
+        "SELECT permissions.name AS name FROM permissions \
+         INNER JOIN role_permission ON role_permission.permission_id = permissions.id \
+         WHERE role_permission.role_id = ? ORDER BY permissions.name",
+        &[role_row.into()],
+    )
+    .await?;
+    Ok(rows.into_iter().map(|(name,)| name).collect())
+}
+
+/// Takes the permission `permission` from the role `role`. Returns `false` when the role did
+/// not have it. Both must exist.
+pub async fn revoke_permission(
+    db: &Database,
+    role: &str,
+    permission: &str,
+) -> Result<bool, AuthzError> {
+    let role_row = role_id(db, role)
+        .await?
+        .ok_or_else(|| AuthzError::NotFound(format!("The role {role}")))?;
+    let permission_row = permission_id(db, permission)
+        .await?
+        .ok_or_else(|| AuthzError::NotFound(format!("The permission {permission}")))?;
+    let removed = raw::execute(
+        db,
+        "DELETE FROM role_permission WHERE role_id = ? AND permission_id = ?",
+        &[role_row.into(), permission_row.into()],
+    )
+    .await?;
+    Ok(removed > 0)
+}
+
+/// Makes `permissions` the permissions of the role `role`: the ones not listed are taken away
+/// and the others given, in one transaction. Each permission must exist.
+pub async fn sync_role_permissions(
+    db: &Database,
+    role: &str,
+    permissions: &[String],
+) -> Result<(), AuthzError> {
+    let role_row = role_id(db, role)
+        .await?
+        .ok_or_else(|| AuthzError::NotFound(format!("The role {role}")))?;
+    let mut ids = Vec::with_capacity(permissions.len());
+    for permission in permissions {
+        ids.push(
+            permission_id(db, permission)
+                .await?
+                .ok_or_else(|| AuthzError::NotFound(format!("The permission {permission}")))?,
+        );
+    }
+    db.transaction(async |tx| {
+        raw::execute(
+            &mut *tx,
+            "DELETE FROM role_permission WHERE role_id = ?",
+            &[role_row.into()],
+        )
+        .await?;
+        for id in &ids {
+            raw::execute(
+                &mut *tx,
+                "INSERT IGNORE INTO role_permission (role_id, permission_id) VALUES (?, ?)",
+                &[role_row.into(), (*id).into()],
+            )
+            .await?;
+        }
+        Ok::<(), Error>(())
+    })
+    .await?;
+    Ok(())
+}
+
+/// Renames the role `from` to `to`. Its permissions and users stay. Refuses `super-admin`,
+/// a name that is not valid and a name another role has.
+pub async fn rename_role(db: &Database, from: &str, to: &str) -> Result<(), AuthzError> {
+    if from == to {
+        return Ok(());
+    }
+    if from == SUPER_ADMIN || to == SUPER_ADMIN {
+        return Err(AuthzError::SuperAdminRole);
+    }
+    if !valid_role_name(to) {
+        return Err(AuthzError::InvalidRoleName(to.to_string()));
+    }
+    let role_row = role_id(db, from)
+        .await?
+        .ok_or_else(|| AuthzError::NotFound(format!("The role {from}")))?;
+    if role_id(db, to).await?.is_some() {
+        return Err(AuthzError::Exists(to.to_string()));
+    }
+    RoleRow::query()
+        .where_eq("id", role_row)
+        .update(db, &[("name", to.into())])
+        .await?;
+    Ok(())
+}
+
+/// Deletes the role `role`: its users lose it and its permissions go with it. Refuses
+/// `super-admin`. Returns `false` when there is no such role.
+pub async fn delete_role(db: &Database, role: &str) -> Result<bool, AuthzError> {
+    if role == SUPER_ADMIN {
+        return Err(AuthzError::SuperAdminRole);
+    }
+    let Some(role_row) = role_id(db, role).await? else {
+        return Ok(false);
+    };
+    db.transaction(async |tx| {
+        for sql in [
+            "DELETE FROM role_permission WHERE role_id = ?",
+            "DELETE FROM role_user WHERE role_id = ?",
+            "DELETE FROM roles WHERE id = ?",
+        ] {
+            raw::execute(&mut *tx, sql, &[role_row.into()]).await?;
+        }
+        Ok::<(), Error>(())
+    })
+    .await?;
+    Ok(true)
+}
+
+/// The roles of the user with `user_id`, in name order.
+pub async fn roles_of(db: &Database, user_id: i64) -> Result<Vec<String>, AuthzError> {
+    let rows: Vec<(String,)> = raw::fetch_all(
+        db,
+        "SELECT roles.name AS name FROM roles \
+         INNER JOIN role_user ON role_user.role_id = roles.id \
+         WHERE role_user.user_id = ? ORDER BY roles.name",
+        &[user_id.into()],
+    )
+    .await?;
+    Ok(rows.into_iter().map(|(name,)| name).collect())
+}
+
+/// Makes `roles` the roles of the user with `user_id`, in one transaction. Each role must
+/// exist. Refuses to take `super-admin` from the last enabled user who has it
+/// ([`AuthzError::LastSuperAdmin`]).
+pub async fn sync_user_roles(
+    db: &Database,
+    user_id: i64,
+    roles: &[String],
+) -> Result<(), AuthzError> {
+    let mut ids = Vec::with_capacity(roles.len());
+    for role in roles {
+        ids.push(
+            role_id(db, role)
+                .await?
+                .ok_or_else(|| AuthzError::NotFound(format!("The role {role}")))?,
+        );
+    }
+    let keeps_super_admin = roles.iter().any(|role| role == SUPER_ADMIN);
+    db.transaction(async |tx| {
+        // The same lock as `remove_role`, so two changes to the super-admins cannot both pass.
+        raw::execute(
+            &mut *tx,
+            "SELECT id FROM roles WHERE name = ? FOR UPDATE",
+            &[SUPER_ADMIN.into()],
+        )
+        .await?;
+        if !keeps_super_admin
+            && is_super_admin(&mut *tx, user_id).await?
+            && enabled_super_admins_besides(&mut *tx, user_id).await? == 0
+        {
+            return Err(AuthzError::LastSuperAdmin);
+        }
+        raw::execute(
+            &mut *tx,
+            "DELETE FROM role_user WHERE user_id = ?",
+            &[user_id.into()],
+        )
+        .await?;
+        for id in &ids {
+            raw::execute(
+                &mut *tx,
+                "INSERT IGNORE INTO role_user (user_id, role_id) VALUES (?, ?)",
+                &[user_id.into(), (*id).into()],
+            )
+            .await?;
+        }
+        Ok(())
+    })
+    .await
+}
+
+/// Creates each declared role that does not exist yet, with its default abilities, as
+/// WordPress's `add_role` adds a role only once: a role that exists keeps the abilities it
+/// has, so a change made on the Roles screen is not undone when the app starts again. The
+/// abilities are registered as permissions first.
+pub(crate) async fn seed_roles(db: &Database, roles: &[crate::Role]) -> Result<(), AuthzError> {
+    for role in roles {
+        register(db, role.get_abilities()).await?;
+        if role_id(db, role.get_name()).await?.is_some() {
+            continue;
+        }
+        create_role(db, role.get_name()).await?;
+        for ability in role.get_abilities() {
+            grant_permission(db, role.get_name(), ability).await?;
+        }
+    }
+    Ok(())
 }

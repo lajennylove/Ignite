@@ -44,6 +44,12 @@ pub(crate) trait Erased: Send + Sync {
     fn form_layout(&self) -> &FormLayout;
     /// The tabs of the list page, in display order.
     fn tabs(&self) -> &[Tab];
+    /// The tabs of the list page for `user` on this request: a runtime resource's
+    /// [`RuntimeData::tabs_for`](ignite_core::RuntimeData::tabs_for), else [`tabs`](Self::tabs).
+    async fn tabs_for(&self, db: &Database, user: &ActingUser) -> Result<Vec<Tab>, Error> {
+        let _ = (db, user);
+        Ok(self.tabs().to_vec())
+    }
     /// The key of the tab shown when the list has no `tab` parameter, if set.
     fn default_active_tab(&self) -> Option<&str>;
     /// The list columns shown as coloured badges.
@@ -507,7 +513,22 @@ impl RuntimeAdapter {
         } else {
             self.0.validate_update_shown(form, hidden)
         };
-        let errors = validated.as_ref().err().cloned().unwrap_or_default();
+        let operation = if creating {
+            ignite_core::Operation::Create
+        } else {
+            ignite_core::Operation::Edit
+        };
+        let mut errors = validated.as_ref().err().cloned().unwrap_or_default();
+        // The data layer's own rules on the submitted form, for the shown fields only.
+        for (name, message) in self.0.resource().data.validate_form(form, operation) {
+            if !hidden.contains(&name) {
+                errors.entry(name).or_insert(message);
+            }
+        }
+        let validated = match validated {
+            Ok(_) if !errors.is_empty() => Err(errors.clone()),
+            other => other,
+        };
         let fields = &shown(self.0.fields(), hidden);
         let data = &self.0.resource().data;
         let errors = lookup_errors(fields, form, errors, |field| {
@@ -636,6 +657,13 @@ impl Erased for RuntimeAdapter {
 
     fn hide_default_delete_when(&self) -> Option<&ListFilter> {
         self.0.hide_default_delete_when()
+    }
+
+    async fn tabs_for(&self, db: &Database, user: &ActingUser) -> Result<Vec<Tab>, Error> {
+        Ok(match self.0.resource().data.tabs_for(db, user).await? {
+            Some(tabs) => tabs,
+            None => self.0.tabs().to_vec(),
+        })
     }
 
     async fn list(
