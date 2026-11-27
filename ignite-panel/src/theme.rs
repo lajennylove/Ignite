@@ -214,7 +214,42 @@ pub trait AdminTheme: Send + Sync + 'static {
         let _ = name;
         None
     }
+
+    /// Whether the theme has a dark mode, as Filament's panel `darkMode()`. The default is
+    /// `true`. A theme without one, such as a theme in the style of wp-admin, returns `false`:
+    /// its pages always render in the light mode (`data-theme="light"`), whatever the user
+    /// chose in another theme, and the light and dark switch is hidden (see
+    /// [`theme_switcher`](Self::theme_switcher)). The user's stored choice is kept, so it
+    /// applies again in a theme that has a dark mode.
+    fn dark_mode(&self) -> bool {
+        true
+    }
+
+    /// Whether the pages show the light and dark switch, as Filament's panel
+    /// `themeSwitcher()`: the top bar's button and the profile's line about it
+    /// ([`theme_switcher_note`](Self::theme_switcher_note)). The default is
+    /// [`dark_mode`](Self::dark_mode), so a theme without a dark mode needs only that; a theme
+    /// that keeps its dark mode but hides the switch returns `false` here. The page values are
+    /// `theme_switcher` (every signed-in page) and `has_theme_switcher_note` with
+    /// `theme_switcher_note` (the profile).
+    fn theme_switcher(&self) -> bool {
+        self.dark_mode()
+    }
+
+    /// The line the profile's "Admin theme" section shows about the light and dark switch, or
+    /// `None` for no line. The default is [`DEFAULT_THEME_SWITCHER_NOTE`] while the theme shows
+    /// its [`theme_switcher`](Self::theme_switcher), and no line when it does not. The view
+    /// escapes it.
+    fn theme_switcher_note(&self) -> Option<String> {
+        self.theme_switcher()
+            .then(|| DEFAULT_THEME_SWITCHER_NOTE.to_string())
+    }
 }
+
+/// The profile's line about the light and dark switch, as the `ignite` theme words it (see
+/// [`AdminTheme::theme_switcher_note`]).
+pub const DEFAULT_THEME_SWITCHER_NOTE: &str =
+    "The light or dark mode is the switch in the top bar, and stays as it is.";
 
 /// The icon names the panel and Mission Control use. A name says what an entry is; each
 /// theme maps it to its own icon with [`AdminTheme::icon`]. The set is open: a resource can

@@ -93,6 +93,8 @@ pub(crate) struct Layout {
     pub(crate) avatar_url: String,
     pub(crate) theme: String,
     pub(crate) theme_url: String,
+    /// Whether the page shows the light and dark switch ([`AdminTheme::theme_switcher`](crate::AdminTheme::theme_switcher)).
+    pub(crate) theme_switcher: bool,
     pub(crate) profile_url: String,
     pub(crate) logout_everywhere_url: String,
     pub(crate) csrf_token: String,
@@ -436,10 +438,13 @@ impl Layout {
                 registry.mount,
                 chrono::Utc::now().timestamp_millis()
             ),
+            // A theme without a dark mode renders light, whatever the user chose elsewhere.
             theme: user
+                .filter(|_| admin_theme.theme.dark_mode())
                 .map(|u| u.theme().to_string())
                 .unwrap_or_else(|| "light".to_string()),
             theme_url: format!("{}/theme", registry.mount),
+            theme_switcher: admin_theme.theme.theme_switcher(),
             profile_url: format!("{}/profile", registry.mount),
             logout_everywhere_url: format!("{}/logout-everywhere", registry.mount),
             nav,
@@ -470,6 +475,8 @@ pub(crate) struct DashboardPage {
     pub(crate) avatar_url: String,
     pub(crate) theme: String,
     pub(crate) theme_url: String,
+    /// Whether the page shows the light and dark switch ([`AdminTheme::theme_switcher`](crate::AdminTheme::theme_switcher)).
+    pub(crate) theme_switcher: bool,
     pub(crate) profile_url: String,
     pub(crate) logout_everywhere_url: String,
     pub(crate) csrf_token: String,
@@ -559,6 +566,8 @@ pub(crate) struct LoginPage {
     pub(crate) avatar_url: String,
     pub(crate) theme: String,
     pub(crate) theme_url: String,
+    /// Whether the page shows the light and dark switch ([`AdminTheme::theme_switcher`](crate::AdminTheme::theme_switcher)).
+    pub(crate) theme_switcher: bool,
     pub(crate) profile_url: String,
     pub(crate) logout_everywhere_url: String,
     pub(crate) csrf_token: String,
@@ -599,6 +608,8 @@ pub(crate) struct ForgotPage {
     pub(crate) avatar_url: String,
     pub(crate) theme: String,
     pub(crate) theme_url: String,
+    /// Whether the page shows the light and dark switch ([`AdminTheme::theme_switcher`](crate::AdminTheme::theme_switcher)).
+    pub(crate) theme_switcher: bool,
     pub(crate) profile_url: String,
     pub(crate) logout_everywhere_url: String,
     pub(crate) csrf_token: String,
@@ -630,6 +641,8 @@ pub(crate) struct ResetPage {
     pub(crate) avatar_url: String,
     pub(crate) theme: String,
     pub(crate) theme_url: String,
+    /// Whether the page shows the light and dark switch ([`AdminTheme::theme_switcher`](crate::AdminTheme::theme_switcher)).
+    pub(crate) theme_switcher: bool,
     pub(crate) profile_url: String,
     pub(crate) logout_everywhere_url: String,
     pub(crate) csrf_token: String,
@@ -661,6 +674,8 @@ pub(crate) struct ProfilePage {
     pub(crate) avatar_url: String,
     pub(crate) theme: String,
     pub(crate) theme_url: String,
+    /// Whether the page shows the light and dark switch ([`AdminTheme::theme_switcher`](crate::AdminTheme::theme_switcher)).
+    pub(crate) theme_switcher: bool,
     pub(crate) profile_url: String,
     pub(crate) logout_everywhere_url: String,
     pub(crate) csrf_token: String,
@@ -686,6 +701,10 @@ pub(crate) struct ProfilePage {
     /// theme. The user's choice is selected, or the site default when they have none or their
     /// choice is no longer registered.
     pub(crate) admin_themes: Vec<OptionView>,
+    /// The page theme's line about the light and dark switch
+    /// ([`AdminTheme::theme_switcher_note`](crate::AdminTheme::theme_switcher_note)).
+    pub(crate) has_theme_switcher_note: bool,
+    pub(crate) theme_switcher_note: String,
 }
 
 /// The list view of a resource.
@@ -700,6 +719,8 @@ pub(crate) struct IndexPage {
     pub(crate) avatar_url: String,
     pub(crate) theme: String,
     pub(crate) theme_url: String,
+    /// Whether the page shows the light and dark switch ([`AdminTheme::theme_switcher`](crate::AdminTheme::theme_switcher)).
+    pub(crate) theme_switcher: bool,
     pub(crate) profile_url: String,
     pub(crate) logout_everywhere_url: String,
     pub(crate) csrf_token: String,
@@ -879,6 +900,8 @@ pub(crate) struct FormPage {
     pub(crate) avatar_url: String,
     pub(crate) theme: String,
     pub(crate) theme_url: String,
+    /// Whether the page shows the light and dark switch ([`AdminTheme::theme_switcher`](crate::AdminTheme::theme_switcher)).
+    pub(crate) theme_switcher: bool,
     pub(crate) profile_url: String,
     pub(crate) logout_everywhere_url: String,
     pub(crate) csrf_token: String,

@@ -4,6 +4,21 @@ All notable changes to Ignite are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- The light and dark switch per admin theme, as Filament's panel `darkMode(false)` and
+  `themeSwitcher(false)`: `AdminTheme::dark_mode()` (default `true`; `false` renders the
+  theme's pages light, whatever the user chose in another theme, and hides the switch),
+  `AdminTheme::theme_switcher()` (default `dark_mode()`; `false` hides the top bar's switch and
+  keeps the dark mode) and `AdminTheme::theme_switcher_note()`, the profile's line about the
+  switch under "Admin theme" (default `DEFAULT_THEME_SWITCHER_NOTE` while the switch shows,
+  none otherwise), so a theme without a dark mode, such as a WordPress-like one, needs no copy
+  of the profile page. The page values `theme_switcher` (every page) and
+  `has_theme_switcher_note` with `theme_switcher_note` (the profile). Existing themes do not
+  change.
+
 ## [0.6.6] - 2026-11-27
 
 ### Added

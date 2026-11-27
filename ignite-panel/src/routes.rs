@@ -174,6 +174,7 @@ async fn dashboard(
         avatar_url: layout.avatar_url,
         theme: layout.theme,
         theme_url: layout.theme_url,
+        theme_switcher: layout.theme_switcher,
         profile_url: layout.profile_url,
         logout_everywhere_url: layout.logout_everywhere_url,
         csrf_token: layout.csrf_token,
@@ -267,6 +268,7 @@ fn login_page(
         avatar_url: layout.avatar_url,
         theme: layout.theme,
         theme_url: layout.theme_url,
+        theme_switcher: layout.theme_switcher,
         profile_url: layout.profile_url,
         logout_everywhere_url: layout.logout_everywhere_url,
         csrf_token: layout.csrf_token,
@@ -596,6 +598,10 @@ fn render_profile(
     let flash = take_flash(cookies, &registry.secret);
     let token = csrf_token(cookies, &registry.secret);
     let layout = Layout::new(registry, Some(session), "profile", flash, token);
+    // The line about the light and dark switch is the page theme's to word, or to leave out.
+    let note = crate::theme::entry_or_default(&layout.admin_theme.name)
+        .theme
+        .theme_switcher_note();
     let fields: Vec<FieldDef> = profile::profile_fields(registry)
         .into_iter()
         .map(FieldDef::from)
@@ -613,6 +619,7 @@ fn render_profile(
         avatar_url: layout.avatar_url,
         theme: layout.theme,
         theme_url: layout.theme_url,
+        theme_switcher: layout.theme_switcher,
         profile_url: layout.profile_url,
         logout_everywhere_url: layout.logout_everywhere_url,
         csrf_token: layout.csrf_token,
@@ -634,6 +641,8 @@ fn render_profile(
         has_admin_themes: crate::theme::registered_admin_themes().len() > 1,
         admin_theme_action: format!("{}/profile/admin-theme", registry.mount),
         admin_themes: admin_theme_options(session.admin_theme_choice()),
+        has_theme_switcher_note: note.is_some(),
+        theme_switcher_note: note.unwrap_or_default(),
     };
     render_page("ignite::profile", &page, compiled::profile::render)
 }
@@ -1114,6 +1123,7 @@ async fn index(
         avatar_url: layout.avatar_url,
         theme: layout.theme,
         theme_url: layout.theme_url,
+        theme_switcher: layout.theme_switcher,
         profile_url: layout.profile_url,
         logout_everywhere_url: layout.logout_everywhere_url,
         csrf_token: layout.csrf_token,
@@ -1685,6 +1695,7 @@ fn form_view(
         avatar_url: layout.avatar_url,
         theme: layout.theme,
         theme_url: layout.theme_url,
+        theme_switcher: layout.theme_switcher,
         profile_url: layout.profile_url,
         logout_everywhere_url: layout.logout_everywhere_url,
         csrf_token: layout.csrf_token,

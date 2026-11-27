@@ -108,7 +108,7 @@
             @endforeach
           </select>
         </div>
-        <p class="m-0 text-sm">The light or dark mode is the switch in the top bar, and stays as it is.</p>
+        @if (has_theme_switcher_note)<p class="m-0 text-sm">{{ $theme_switcher_note }}</p>@endif
 
         <div>
           <button type="submit" class="ig-btn ig-btn-outline">Save theme</button>
