@@ -29,7 +29,7 @@ use serde_json::{Map, Value};
 use crate::action::RowAction;
 use crate::condition::{FieldConditions, FormContext, Operation};
 use crate::field::{self as check, Block, Column, Field, FieldKind};
-use crate::form::{FieldErrors, FormInput};
+use crate::form::{FieldErrors, FormInput, ValidationError};
 use crate::layout::FormLayout;
 use crate::list::{BadgeColor, ColumnBadges, Tab};
 use crate::policy::ActingUser;
@@ -141,6 +141,46 @@ pub trait RuntimeData: Send + Sync + 'static {
     ) -> RuntimeFuture<'a, Row> {
         let _ = user;
         self.update(db, id, input)
+    }
+
+    /// [`create_for`](Self::create_for) that may refuse the row with field messages, as
+    /// Laravel's `ValidationException::withMessages()`: answer `Ok(Err(ValidationError))` and
+    /// the panel shows the create form again with 422, each message under its field and the
+    /// typed values kept. The panel calls this method; the default is
+    /// [`create_for`](Self::create_for), which never refuses.
+    ///
+    /// ```ignore
+    /// fn try_create_for<'a>(&'a self, db: &'a Database, user: &'a ActingUser, input: Row)
+    ///     -> RuntimeFuture<'a, Result<Row, ValidationError>> {
+    ///     Box::pin(async move {
+    ///         if name_is_taken(db, &input).await? {
+    ///             return Ok(Err(ValidationError::with_messages([("name", "That name is in use.")])));
+    ///         }
+    ///         Ok(Ok(save(db, input).await?))
+    ///     })
+    /// }
+    /// ```
+    fn try_create_for<'a>(
+        &'a self,
+        db: &'a Database,
+        user: &'a ActingUser,
+        input: Row,
+    ) -> RuntimeFuture<'a, Result<Row, ValidationError>> {
+        Box::pin(async move { self.create_for(db, user, input).await.map(Ok) })
+    }
+
+    /// [`update_for`](Self::update_for) that may refuse the row with field messages, as
+    /// [`try_create_for`](Self::try_create_for) for the edit form. The panel calls it only
+    /// after [`find_for`](Self::find_for) found the row and the policy allowed the update. The
+    /// default is [`update_for`](Self::update_for), which never refuses.
+    fn try_update_for<'a>(
+        &'a self,
+        db: &'a Database,
+        user: &'a ActingUser,
+        id: i64,
+        input: Row,
+    ) -> RuntimeFuture<'a, Result<Row, ValidationError>> {
+        Box::pin(async move { self.update_for(db, user, id, input).await.map(Ok) })
     }
 
     /// [`delete`](Self::delete) for the signed-in `user`. The panel calls it only after

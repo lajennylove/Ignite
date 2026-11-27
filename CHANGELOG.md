@@ -52,6 +52,13 @@ All notable changes to Ignite are listed here. The format follows
   shows the panel's cards first, then each resource's, in its grid, with the description under
   the value; a resource's cards still show only to a user who may view its records. The cards
   have the theme values `has_description` and `description`.
+- Field errors from a runtime resource's data layer, as Laravel's
+  `ValidationException::withMessages()`: `ignite_core::ValidationError`
+  (`with_messages([(field, message), ...])`, `errors`, `into_errors`) and the `RuntimeData`
+  methods `try_create_for` and `try_update_for`, which the panel now calls for a save and which
+  default to `create_for` and `update_for`. Answering `Ok(Err(ValidationError))` shows the form
+  again with 422, each message under its field and the typed values kept, as the resource's own
+  validation does.
 - The theme values `add_label`, `has_sub_items`, `sub_items`, `open`, `closed`,
   `aria_expanded` and `sub_items_id` on each entry of `nav_sections`.
 

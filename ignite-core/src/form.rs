@@ -75,6 +75,55 @@ impl FormInput {
 /// Since 0.3.0. Before, the keys were `&'static str`.
 pub type FieldErrors = HashMap<String, String>;
 
+/// A save the data layer refuses with a message on one or more fields, as Laravel's
+/// `ValidationException::withMessages(['field' => 'message'])`. A runtime resource's
+/// [`RuntimeData::try_create_for`](crate::RuntimeData::try_create_for) and
+/// [`try_update_for`](crate::RuntimeData::try_update_for) return it; the panel answers 422 with
+/// the form again, each message under its field and the typed values kept, as for the
+/// resource's own validation. Each key must be the name of a field the form shows: a message
+/// for another key has no slot to show in.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ValidationError {
+    errors: FieldErrors,
+}
+
+impl ValidationError {
+    /// The refusal with `messages`, as `(field, message)` pairs. A field named twice keeps its
+    /// last message.
+    pub fn with_messages<F, M>(messages: impl IntoIterator<Item = (F, M)>) -> Self
+    where
+        F: Into<String>,
+        M: Into<String>,
+    {
+        ValidationError {
+            errors: messages
+                .into_iter()
+                .map(|(field, message)| (field.into(), message.into()))
+                .collect(),
+        }
+    }
+
+    /// The messages, by field name.
+    pub fn errors(&self) -> &FieldErrors {
+        &self.errors
+    }
+
+    /// The messages, by field name, owned.
+    pub fn into_errors(self) -> FieldErrors {
+        self.errors
+    }
+}
+
+impl std::fmt::Display for ValidationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut fields: Vec<&str> = self.errors.keys().map(String::as_str).collect();
+        fields.sort_unstable();
+        write!(f, "the save was refused on: {}", fields.join(", "))
+    }
+}
+
+impl std::error::Error for ValidationError {}
+
 #[cfg(test)]
 mod tests {
     use super::*;

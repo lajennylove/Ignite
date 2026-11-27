@@ -514,16 +514,21 @@ impl RuntimeAdapter {
         })
     }
 
-    /// Saves a validated row through `save`, and turns a unique-index violation into a
-    /// field error, as for a static resource.
+    /// Saves a validated row through `save`. The data layer's refusal with field messages
+    /// ([`ValidationError`](ignite_core::ValidationError)) becomes the form's errors, and so
+    /// does a unique-index violation, as for a static resource.
     async fn save<'a>(
         &self,
         validated: Result<Row, FieldErrors>,
-        save: impl FnOnce(Row) -> ignite_core::RuntimeFuture<'a, Row>,
+        save: impl FnOnce(
+            Row,
+        )
+            -> ignite_core::RuntimeFuture<'a, Result<Row, ignite_core::ValidationError>>,
     ) -> Result<Result<Value, FieldErrors>, Error> {
         match validated {
             Ok(row) => match save(row).await {
-                Ok(record) => Ok(Ok(Value::Object(record))),
+                Ok(Ok(record)) => Ok(Ok(Value::Object(record))),
+                Ok(Err(refused)) => Ok(Err(refused.into_errors())),
                 Err(error) => {
                     let keys: Vec<(&str, &str)> = self
                         .0
@@ -658,7 +663,7 @@ impl Erased for RuntimeAdapter {
     ) -> Result<Result<Value, FieldErrors>, Error> {
         let validated = self.checked(db, user, form, true, hidden).await?;
         let data = &self.0.resource().data;
-        self.save(validated, |row| data.create_for(db, user, row))
+        self.save(validated, |row| data.try_create_for(db, user, row))
             .await
     }
 
@@ -672,7 +677,7 @@ impl Erased for RuntimeAdapter {
     ) -> Result<Result<Value, FieldErrors>, Error> {
         let validated = self.checked(db, user, form, false, hidden).await?;
         let data = &self.0.resource().data;
-        self.save(validated, |row| data.update_for(db, user, id, row))
+        self.save(validated, |row| data.try_update_for(db, user, id, row))
             .await
     }
 

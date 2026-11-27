@@ -25,7 +25,7 @@ pub use action::{ActionAbility, ActionResult, RowAction, DEFAULT_CONFIRMATION};
 pub use condition::{FieldConditions, FormContext, Operation};
 pub use editor::{editor_script, register_editor};
 pub use field::{Block, Column, Field, FieldKind};
-pub use form::{FieldErrors, FormInput};
+pub use form::{FieldErrors, FormInput, ValidationError};
 /// Derives `IgniteResource` for an Orbit model. See `ignite_macros` for the attributes.
 pub use ignite_macros::IgniteResource;
 pub use layout::{ColumnSpan, Component, FormLayout, Group, Section, Width};
