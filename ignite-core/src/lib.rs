@@ -18,6 +18,7 @@ pub mod policy;
 pub mod query;
 pub mod resource;
 pub mod runtime_resource;
+pub mod structure;
 mod value;
 pub mod widget;
 
@@ -41,6 +42,7 @@ pub use runtime_resource::{
     BlockDef, ColumnDef, FieldDef, FieldKindDef, RegisteredResource, Row, RuntimeData,
     RuntimeError, RuntimeFuture, RuntimeResource, MAX_FIELD_NAME,
 };
+pub use structure::{RepeaterSettings, Repeaters};
 pub use widget::{
     FormWidget, LatestRecords, ListWidget, ListWidgetRow, Stat, StatWidget, StatsOverviewWidget,
 };

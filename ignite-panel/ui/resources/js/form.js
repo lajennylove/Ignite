@@ -107,3 +107,36 @@ document.addEventListener('input', (event) => {
         }
     }
 });
+
+// The add, delete and move buttons of a repeater, group or flexible content field
+// (`data-ignite-op`, as Filament's repeater actions) send the form to the form's live URL,
+// which answers with the form shown again and saves nothing. Without this script the browser
+// does the same with the button's `formaction`, and shows the page it answers; with it, only
+// the fields are replaced, as a live field replaces them.
+document.addEventListener('click', async (event) => {
+    const button = event.target.closest?.('button[data-ignite-op]');
+    const form = button?.form;
+    if (!button || !form || event.defaultPrevented) {
+        return;
+    }
+    event.preventDefault();
+    const body = new FormData(form);
+    body.set(button.name, button.value);
+    const response = await fetch(button.formAction, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams(body),
+        credentials: 'same-origin',
+    });
+    if (!response.ok) {
+        return;
+    }
+    const page = new DOMParser().parseFromString(await response.text(), 'text/html');
+    const fields = page.querySelector('[data-ignite-fields]');
+    const current = form.querySelector('[data-ignite-fields]');
+    if (!fields || !current) {
+        return;
+    }
+    current.replaceWith(document.importNode(fields, true));
+    form.dispatchEvent(new CustomEvent('ignite:fields', { bubbles: true }));
+});

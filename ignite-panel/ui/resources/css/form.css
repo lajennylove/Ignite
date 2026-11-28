@@ -8,3 +8,25 @@
 @import "tailwindcss/utilities.css" layer(utilities) source(none);
 
 @source inline("grid-cols-[minmax(0,1fr)] lg:grid-cols-{1..12} lg:col-span-{1..12} col-span-full max-w-none content-start items-start");
+
+/*
+ * Repeaters, groups and flexible content (partials/structure.propel), as Filament's Repeater
+ * and Builder: each row is a bordered block with its buttons in its header, and a flexible
+ * content field picks a block from a list under its add button.
+ */
+.ig-structure-row {
+    padding: 1rem;
+}
+
+.ig-structure-picker > summary {
+    list-style: none;
+    cursor: pointer;
+}
+
+.ig-structure-picker > summary::-webkit-details-marker {
+    display: none;
+}
+
+.ig-structure-picker[open] > summary {
+    margin-bottom: 0.75rem;
+}

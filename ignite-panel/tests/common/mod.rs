@@ -2,6 +2,7 @@
 //! Fixtures shared by the panel tests: a `Widgets` resource, the `ignite_test`
 //! database, and the client helpers. The tests share one table, so they run one at a time.
 
+pub mod memory;
 pub mod snapshots;
 
 use std::future::Future;

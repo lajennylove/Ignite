@@ -249,8 +249,8 @@ fn each_new_type_renders_through_its_partial() {
         r#"<script src="/vendor/editor/init.js" defer></script>"#,
         r#"<option value="2" >About</option>"#,
         r#"name="related[]" multiple"#,
-        r#"data-ignite-structured="repeater""#,
-        "JSON: a list of rows, each an object with the keys title, email.",
+        // A repeater renders as rows of its sub-fields (see tests/repeater.rs).
+        r#"data-ignite-field="slides" data-ignite-structure="repeater""#,
         r#"data-ignite-structured="flexible_content""#,
     ] {
         assert!(form.contains(expected), "missing {expected}\n{form}");

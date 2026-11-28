@@ -24,6 +24,8 @@ use rocket::tokio::io::AsyncReadExt;
 use rocket::{get, post, routes, FromForm, Route, State};
 use serde_json::Value;
 
+use ignite_core::structure::structured_input;
+
 use crate::authz::Action;
 
 use crate::erased::{self, Erased};
@@ -40,9 +42,9 @@ use crate::users;
 use crate::views::{
     admin_theme_options, cell_text, compiled, content_width_class, editor_for, field_views,
     field_views_with, form_field_views, layout_columns, layout_grid_class, live_values,
-    record_form, render_page, CardView, CellView, ColumnHead, DashboardPage, FormChoices, FormPage,
-    HeaderView, HiddenView, IndexPage, LatestRow, LatestTable, Layout, LoginPage, ProfilePage,
-    RowActionView, RowView, TabView, WidgetView,
+    record_form, render_page, structure_views, CardView, CellView, ColumnHead, DashboardPage,
+    FormChoices, FormPage, HeaderView, HiddenView, IndexPage, LatestRow, LatestTable, Layout,
+    LoginPage, ProfilePage, RowActionView, RowView, StructureContext, TabView, WidgetView,
 };
 
 /// The largest form body the panel reads.
@@ -1298,7 +1300,7 @@ async fn new_form_live(
     let resource = registry.find(slug).ok_or(Status::NotFound)?;
     let form = read_form(body).await?;
     check_csrf(cookies, &registry.secret, form.get("_token"))?;
-    let form = live_values(resource.fields(), None, &form);
+    let form = live_values(resource.fields(), None, &operated(&resource, &form));
     let hidden = hidden_fields(&resource, Operation::Create, None, &session, &form);
     let choices = form_choices(db, &session, &resource, &form).await?;
     let layout = Layout::new(
@@ -1334,6 +1336,7 @@ async fn create(
     let index_url = format!("{}/{}", registry.mount, resource.slug());
     let form = read_form(body).await?;
     check_csrf(cookies, &registry.secret, form.get("_token"))?;
+    let form = structured_input(resource.fields(), &form);
     let hidden = hidden_fields(&resource, Operation::Create, None, &session, &form);
 
     let outcome = resource
@@ -1435,7 +1438,11 @@ async fn edit_form_live(
     let form = read_form(body).await?;
     check_csrf(cookies, &registry.secret, form.get("_token"))?;
     let record = authorize_record(db, &session, &resource, id, Action::Update).await?;
-    let form = live_values(resource.fields(), Some(&record), &form);
+    let form = live_values(
+        resource.fields(),
+        Some(&record),
+        &operated(&resource, &form),
+    );
     let hidden = hidden_fields(&resource, Operation::Edit, Some(&record), &session, &form);
     let choices = form_choices(db, &session, &resource, &form).await?;
     let layout = Layout::new(
@@ -1474,6 +1481,7 @@ async fn update(
     let index_url = format!("{}/{}", registry.mount, resource.slug());
     let form = read_form(body).await?;
     check_csrf(cookies, &registry.secret, form.get("_token"))?;
+    let form = structured_input(resource.fields(), &form);
     let record = authorize_record(db, &session, &resource, id, Action::Update).await?;
     let hidden = hidden_fields(&resource, Operation::Edit, Some(&record), &session, &form);
 
@@ -1686,6 +1694,21 @@ fn row_action_views(
         .collect()
 }
 
+/// `form` with the values of its structured fields built from their sub-field inputs, and
+/// the add, delete or move button it was sent with (`_ignite_op`) applied, for a live form.
+fn operated(resource: &Arc<dyn Erased>, form: &FormInput) -> FormInput {
+    let form = structured_input(resource.fields(), form);
+    match form.get("_ignite_op") {
+        Some(operation) => ignite_core::structure::apply_operation(
+            resource.fields(),
+            resource.repeaters(),
+            &form,
+            operation,
+        ),
+        None => form,
+    }
+}
+
 /// Where a create or edit form posts, and its heading and button.
 struct FormTarget {
     heading: String,
@@ -1743,7 +1766,7 @@ fn form_view(
     hidden: &BTreeSet<String>,
 ) -> PropelView {
     let conditions = resource.conditions();
-    let fields = form_field_views(
+    let mut fields = form_field_views(
         resource.fields(),
         conditions,
         hidden,
@@ -1752,7 +1775,20 @@ fn form_view(
         errors,
         choices,
     );
-    let has_live = fields.iter().any(|field| field.live);
+    structure_views(
+        &mut fields,
+        resource.fields(),
+        form,
+        &StructureContext {
+            conditions,
+            repeaters: resource.repeaters(),
+            errors,
+            choices,
+            ops_url: &target.live_url,
+        },
+    );
+    let has_structure = fields.iter().any(|field| field.is_structured);
+    let has_live = has_structure || fields.iter().any(|field| field.live);
     let shown_fields = fields
         .iter()
         .map(|field| field.name.as_str())
@@ -1760,8 +1796,9 @@ fn form_view(
         .join(",");
     let editor = editor_for(resource.fields());
     // The form script asks before a changed form is left, and fills slug fields.
-    let has_form_script =
-        registry.unsaved_changes_alerts || fields.iter().any(|field| field.has_slug_from);
+    let has_form_script = registry.unsaved_changes_alerts
+        || has_structure
+        || fields.iter().any(|field| field.has_slug_from);
     // A form with a layout places its fields in the layout's columns and cards; a form
     // without one renders them in one card, as before.
     let form_layout = resource.form_layout();
@@ -1804,6 +1841,7 @@ fn form_view(
         back_url: format!("{}/{}", registry.mount, resource.slug()),
         fields,
         has_layout,
+        has_form_styles: has_layout || has_structure,
         layout_class,
         layout_columns: columns,
         content_width: content_width_class(form_layout),
@@ -2006,7 +2044,9 @@ pub(crate) async fn read_form(data: Data<'_>) -> Result<FormInput, Status> {
 /// text under `name`: `tags[]=1&tags[]=2` gives `tags` = `["1","2"]`, and
 /// `link[url]=...&link[title]=...` gives `link` = `{"title":...,"url":...}`. Blank items are
 /// dropped, and a list or object with no value left is the blank text `""`, so it reads as
-/// a field sent blank. A plain key that comes twice keeps its last value.
+/// a field sent blank. A plain key that comes twice keeps its last value. A key `name[key]`,
+/// and a key of more levels, such as `members[0][name]` (a repeater's sub-field, see
+/// [`ignite_core::structure`]), is also kept as it was sent.
 pub(crate) fn form_values<'a>(
     pairs: impl Iterator<Item = (std::borrow::Cow<'a, str>, std::borrow::Cow<'a, str>)>,
 ) -> HashMap<String, String> {
@@ -2026,8 +2066,10 @@ pub(crate) fn form_values<'a>(
         {
             let object = objects.entry(base.to_string()).or_default();
             if !value.trim().is_empty() {
-                object.insert(inner.to_string(), Value::from(value.into_owned()));
+                object.insert(inner.to_string(), Value::from(value.to_string()));
             }
+            // Kept as sent too: a group's sub-field (`seo[title]`) is read by its own name.
+            values.insert(key.into_owned(), value.into_owned());
         } else {
             values.insert(key.into_owned(), value.into_owned());
         }

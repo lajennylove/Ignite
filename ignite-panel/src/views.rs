@@ -68,9 +68,10 @@ pub(crate) struct AdminThemeView {
     pub(crate) stylesheets: Vec<String>,
 }
 
+use ignite_core::structure::is_structured;
 use ignite_core::{
     ColumnSpan, Component, FieldConditions, FieldDef, FieldErrors, FieldKindDef, FormInput,
-    FormLayout, MediaItem, Width,
+    FormLayout, MediaItem, Repeaters, Width,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -1021,6 +1022,9 @@ pub(crate) struct FormPage {
     /// Whether the form has a layout ([`FormLayout`]), the classes of its grid, and its
     /// columns. The form then loads `resources/css/form.css`, which has the grid's classes.
     pub(crate) has_layout: bool,
+    /// Whether the page loads `resources/css/form.css`: the form has a layout or a structured
+    /// field.
+    pub(crate) has_form_styles: bool,
     pub(crate) layout_class: String,
     pub(crate) layout_columns: Vec<LayoutColumnView>,
     /// The width class of the page's content (`ignite_content_width` in the layout).
@@ -1088,6 +1092,51 @@ pub(crate) struct FieldView {
     pub(crate) schema: String,
     /// A line under a structured field that names the JSON keys it takes.
     pub(crate) hint: String,
+    pub(crate) has_error: bool,
+    pub(crate) error: String,
+    /// Whether a resource form renders the field as rows of sub-fields
+    /// (`partials/structure`), and its parts. A repeater elsewhere, such as on the profile, is
+    /// edited as JSON.
+    pub(crate) is_structured: bool,
+    pub(crate) parts: Vec<PartView>,
+}
+
+/// One part of a structured field, in display order: the start of a repeater (`is_open`),
+/// the start of one of its rows (`is_row`), the sub-fields of a row (`fields`), the end of a
+/// row (`is_row_end`), and the end of the field with
+/// its add button and its error (`is_close`). A structured sub-field adds its own parts in its
+/// place, so a template without recursion renders any nesting.
+#[derive(Debug, Clone, Default, Serialize)]
+pub(crate) struct PartView {
+    pub(crate) is_open: bool,
+    pub(crate) is_row: bool,
+    pub(crate) is_row_end: bool,
+    pub(crate) is_close: bool,
+    /// The sub-fields this part shows, rendered by `partials/field`.
+    pub(crate) fields: Vec<FieldView>,
+    /// The input name of the field (`members`, `members[0][rules]`) or of the row
+    /// (`members[0]`).
+    pub(crate) name: String,
+    pub(crate) label: String,
+    pub(crate) required: bool,
+    /// `repeater`, for `data-ignite-structure`.
+    pub(crate) kind: &'static str,
+    /// Whether the field is a list of rows: it sends its name blank, so no rows clears it.
+    pub(crate) is_list: bool,
+    /// The hidden input that keeps a row whose inputs send nothing, such as an unticked
+    /// checkbox.
+    pub(crate) marker: String,
+    /// Where the add, delete and move buttons send the form: the form's live URL.
+    pub(crate) ops_url: String,
+    pub(crate) can_up: bool,
+    pub(crate) up_op: String,
+    pub(crate) can_down: bool,
+    pub(crate) down_op: String,
+    pub(crate) can_delete: bool,
+    pub(crate) delete_op: String,
+    pub(crate) can_add: bool,
+    pub(crate) add_op: String,
+    pub(crate) add_label: String,
     pub(crate) has_error: bool,
     pub(crate) error: String,
 }
@@ -1343,6 +1392,8 @@ impl FieldView {
             hint,
             has_error: error.is_some(),
             error: error.unwrap_or_default(),
+            is_structured: false,
+            parts: Vec::new(),
         }
     }
 }
@@ -1591,6 +1642,231 @@ pub(crate) fn form_field_views(
         }
     }
     views
+}
+
+/// What the parts of a structured field are built with: the form's conditions (a live
+/// sub-field is marked by its settings path), its repeater settings, its errors (by dotted
+/// path), its loaded choices (a sub-field's by its settings path), and the URL its buttons
+/// send the form to.
+pub(crate) struct StructureContext<'a> {
+    pub(crate) conditions: &'a FieldConditions,
+    pub(crate) repeaters: &'a Repeaters,
+    pub(crate) errors: &'a FieldErrors,
+    pub(crate) choices: &'a FormChoices,
+    pub(crate) ops_url: &'a str,
+}
+
+/// Marks each structured field of `views` (the views of `fields`, by name) to render as rows
+/// of sub-fields, with the parts of its value in `form`.
+pub(crate) fn structure_views(
+    views: &mut [FieldView],
+    fields: &[FieldDef],
+    form: &FormInput,
+    context: &StructureContext<'_>,
+) {
+    for view in views.iter_mut() {
+        let Some(field) = fields
+            .iter()
+            .find(|f| f.name == view.name && is_structured(&f.kind))
+        else {
+            continue;
+        };
+        let value = form
+            .get(&field.name)
+            .and_then(|text| serde_json::from_str::<Value>(text).ok())
+            .unwrap_or(Value::Null);
+        let mut parts = Vec::new();
+        container_parts(field, &Place::top(&field.name), &value, context, &mut parts);
+        view.is_structured = true;
+        view.parts = parts;
+    }
+}
+
+/// Where a value of a structured field is: its input name (`members[0][name]`), its dotted
+/// path, which keys its errors and its buttons (`members.0.name`), and its settings path
+/// (`members.name`).
+struct Place {
+    input: String,
+    path: String,
+    schema: String,
+}
+
+impl Place {
+    fn top(name: &str) -> Self {
+        Place {
+            input: name.to_string(),
+            path: name.to_string(),
+            schema: name.to_string(),
+        }
+    }
+
+    /// The place of `key` inside this one; `schema` is added to the settings path when given.
+    fn child(&self, key: &str, schema: Option<&str>) -> Self {
+        Place {
+            input: format!("{}[{key}]", self.input),
+            path: format!("{}.{key}", self.path),
+            schema: match schema {
+                Some(name) => format!("{}.{name}", self.schema),
+                None => self.schema.clone(),
+            },
+        }
+    }
+}
+
+/// Adds the parts of the structured `field` at `place`, holding `value`.
+fn container_parts(
+    field: &FieldDef,
+    place: &Place,
+    value: &Value,
+    context: &StructureContext<'_>,
+    parts: &mut Vec<PartView>,
+) {
+    let error = context.errors.get(&place.path).cloned();
+    let open = PartView {
+        is_open: true,
+        name: place.input.clone(),
+        label: field.label.clone(),
+        required: field.required,
+        kind: kind_name(&field.kind),
+        ..PartView::default()
+    };
+    let close = |parts: &mut Vec<PartView>, add: PartView| {
+        parts.push(PartView {
+            is_close: true,
+            name: place.input.clone(),
+            has_error: error.is_some(),
+            error: error.clone().unwrap_or_default(),
+            ops_url: context.ops_url.to_string(),
+            ..add
+        });
+    };
+    if let FieldKindDef::Repeater(fields) = &field.kind {
+        let settings = context.repeaters.get(&place.schema);
+        let rows: &[Value] = value.as_array().map(Vec::as_slice).unwrap_or(&[]);
+        parts.push(PartView {
+            is_list: true,
+            ..open
+        });
+        for (index, row) in rows.iter().enumerate() {
+            let row_place = place.child(&index.to_string(), None);
+            let empty = serde_json::Map::new();
+            let values = row.as_object().unwrap_or(&empty);
+            let label = settings
+                .get_item_label()
+                .and_then(|name| values.get(name))
+                .map(|value| cell_text(Some(value)))
+                .filter(|text| !text.trim().is_empty())
+                .unwrap_or_else(|| format!("Row {}", index + 1));
+            let op = |verb: &str| format!("{verb}:{}", row_place.path);
+            parts.push(PartView {
+                is_row: true,
+                name: row_place.input.clone(),
+                label,
+                marker: format!("{}[_ignite_row]", row_place.input),
+                ops_url: context.ops_url.to_string(),
+                can_up: settings.is_reorderable() && index > 0,
+                up_op: op("up"),
+                can_down: settings.is_reorderable() && index + 1 < rows.len(),
+                down_op: op("down"),
+                can_delete: settings.is_deletable(),
+                delete_op: op("delete"),
+                ..PartView::default()
+            });
+            sub_field_parts(fields, values, &row_place, context, parts);
+            parts.push(PartView {
+                is_row_end: true,
+                ..PartView::default()
+            });
+        }
+        let full = settings
+            .get_max_items()
+            .is_some_and(|max| rows.len() >= max);
+        let add_label = settings
+            .get_add_action_label()
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("Add to {}", field.label));
+        close(
+            parts,
+            PartView {
+                can_add: settings.is_addable() && !full,
+                add_op: format!("add:{}", place.path),
+                add_label,
+                ..PartView::default()
+            },
+        );
+    }
+}
+
+/// Adds the parts of the sub-fields `fields` of a row or group at `place`, holding `values`:
+/// each structured sub-field's own parts, and the others as fields, a run of them in one part.
+fn sub_field_parts(
+    fields: &[FieldDef],
+    values: &serde_json::Map<String, Value>,
+    place: &Place,
+    context: &StructureContext<'_>,
+    parts: &mut Vec<PartView>,
+) {
+    let mut run: Vec<FieldView> = Vec::new();
+    for field in fields {
+        let at = place.child(&field.name, Some(&field.name));
+        let value = values.get(&field.name).unwrap_or(&Value::Null);
+        if is_structured(&field.kind) {
+            if !run.is_empty() {
+                parts.push(PartView {
+                    fields: std::mem::take(&mut run),
+                    ..PartView::default()
+                });
+            }
+            container_parts(field, &at, value, context, parts);
+            continue;
+        }
+        run.push(leaf_view(field, &at, value, context));
+    }
+    if !run.is_empty() {
+        parts.push(PartView {
+            fields: run,
+            ..PartView::default()
+        });
+    }
+}
+
+/// The input of the sub-field `field` at `place`, holding `value`.
+fn leaf_view(
+    field: &FieldDef,
+    place: &Place,
+    value: &Value,
+    context: &StructureContext<'_>,
+) -> FieldView {
+    let text = match value {
+        Value::Null | Value::Bool(false) => None,
+        Value::Bool(true) => Some("on".to_string()),
+        Value::String(text) => Some(text.clone()),
+        other => Some(other.to_string()),
+    };
+    let form = FormInput::new(
+        text.map(|text| (place.input.clone(), text))
+            .into_iter()
+            .collect(),
+    );
+    let errors: FieldErrors = context
+        .errors
+        .get(&place.path)
+        .map(|message| (place.input.clone(), message.clone()))
+        .into_iter()
+        .collect();
+    let def = FieldDef {
+        name: place.input.clone(),
+        ..field.clone()
+    };
+    let lookup = context
+        .choices
+        .lookups
+        .get(&place.schema)
+        .map(Vec::as_slice)
+        .unwrap_or(&[]);
+    let mut view = FieldView::new(&def, &form, &errors, lookup, &context.choices.media);
+    view.live = context.conditions.is_live(&place.schema);
+    view
 }
 
 /// One column of a form layout: a top-level section, group or field, with its span.

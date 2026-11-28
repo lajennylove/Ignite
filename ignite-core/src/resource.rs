@@ -158,6 +158,16 @@ pub trait IgniteResource: Send + Sync + 'static {
         FormLayout::new()
     }
 
+    /// The settings of the form's repeaters and flexible content fields, by path, as
+    /// Filament's `minItems()`, `maxItems()` and `itemLabel()` (see
+    /// [`Repeaters`](crate::Repeaters)). The panel reads them once, when it is built. The
+    /// default has none: every repeater has the default settings. A static resource checks
+    /// the row counts in its own `validate`, with
+    /// [`Field::check_value_in`](crate::Field::check_value_in).
+    fn repeaters() -> crate::Repeaters {
+        crate::Repeaters::new()
+    }
+
     /// The tabs of the list page, in display order, as Filament's `getTabs()` on a List page:
     /// each [`Tab`] has a key, a label and the conditions its rows meet, and shows the number
     /// of rows it matches (see [`tab_counts_follow_search`](Self::tab_counts_follow_search)). The

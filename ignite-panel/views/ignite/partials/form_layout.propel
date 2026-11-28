@@ -14,7 +14,7 @@
           <p class="m-0 text-sm">{{ $section.description }}</p>
     @endif
     @foreach (field in section.fields)
-      @include('ignite::partials.field')
+      @if (field.is_structured)@include('ignite::partials.structure')@else@include('ignite::partials.field')@endif
     @endforeach
         </section>
   @endforeach

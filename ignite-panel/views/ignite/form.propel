@@ -6,7 +6,7 @@
 
 @section('ignite_stylesheets')@include('ignite::partials.stylesheets')@endsection
 
-@section('ignite_head')@if (theme_style)<style>{!! $theme_style !!}</style>@endif@if (has_layout)@vite(['ui::resources/css/form.css'])@endif@endsection
+@section('ignite_head')@if (theme_style)<style>{!! $theme_style !!}</style>@endif@if (has_form_styles)@vite(['ui::resources/css/form.css'])@endif@endsection
 
 @section('ignite_html')data-theme="{{ $theme }}"@endsection
 
@@ -43,7 +43,7 @@
         <input type="hidden" name="_ignite_shown" value="{{ $shown_fields }}">
       @endif
       @foreach (field in fields)
-        @include('ignite::partials.field')
+        @if (field.is_structured)@include('ignite::partials.structure')@else@include('ignite::partials.field')@endif
       @endforeach
     </div>
 

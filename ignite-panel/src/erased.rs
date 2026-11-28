@@ -9,7 +9,7 @@ use std::sync::Arc;
 use ignite_core::{
     ActingUser, ColumnBadges, ColumnDef, Database, FieldConditions, FieldDef, FieldErrors,
     FieldKindDef, FormInput, FormLayout, IgniteResource, LatestRecords, ListFilter, ListQuery,
-    RegisteredResource, Row, RowAction, Stat, Tab,
+    RegisteredResource, Repeaters, Row, RowAction, Stat, Tab,
 };
 use orbit_orm::Error;
 use serde::Serialize;
@@ -42,6 +42,8 @@ pub(crate) trait Erased: Send + Sync {
     fn conditions(&self) -> &FieldConditions;
     /// The layout of the create and edit forms.
     fn form_layout(&self) -> &FormLayout;
+    /// The settings of the form's repeaters and flexible content fields.
+    fn repeaters(&self) -> &Repeaters;
     /// The tabs of the list page, in display order.
     fn tabs(&self) -> &[Tab];
     /// The tabs of the list page for `user` on this request: a runtime resource's
@@ -112,6 +114,7 @@ pub(crate) struct Adapter<R> {
     columns: Vec<ColumnDef>,
     conditions: FieldConditions,
     form_layout: FormLayout,
+    repeaters: Repeaters,
     tabs: Vec<Tab>,
     column_badges: ColumnBadges,
     row_actions: Vec<RowAction>,
@@ -126,6 +129,7 @@ impl<R: IgniteResource> Adapter<R> {
             columns: R::columns().iter().copied().map(ColumnDef::from).collect(),
             conditions: R::conditions(),
             form_layout: R::form_layout(),
+            repeaters: R::repeaters(),
             tabs: R::tabs(),
             column_badges: R::column_badges(),
             row_actions: R::row_actions(),
@@ -229,6 +233,10 @@ impl<R: IgniteResource> Erased for Adapter<R> {
 
     fn form_layout(&self) -> &FormLayout {
         &self.form_layout
+    }
+
+    fn repeaters(&self) -> &Repeaters {
+        &self.repeaters
     }
 
     fn tabs(&self) -> &[Tab] {
@@ -629,6 +637,10 @@ impl Erased for RuntimeAdapter {
 
     fn form_layout(&self) -> &FormLayout {
         self.0.form_layout()
+    }
+
+    fn repeaters(&self) -> &Repeaters {
+        self.0.repeaters()
     }
 
     fn tabs(&self) -> &[Tab] {

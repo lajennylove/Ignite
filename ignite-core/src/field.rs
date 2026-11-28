@@ -252,6 +252,28 @@ impl Field {
         let kind = crate::FieldKindDef::from(self.kind);
         crate::value::check_value(self.name, self.label, self.required, &kind, text, errors)
     }
+
+    /// [`check_value`](Self::check_value) that also checks the row counts of the repeaters
+    /// and flexible content in `repeaters` (`min_items` and `max_items`). A value nested in a
+    /// repeater, group or flexible content that does not pass its sub-field is recorded both
+    /// under the field's name and under its own dotted path, such as `members.0.name`.
+    pub fn check_value_in(
+        &self,
+        text: &str,
+        errors: &mut FieldErrors,
+        repeaters: &crate::Repeaters,
+    ) -> Option<String> {
+        let kind = crate::FieldKindDef::from(self.kind);
+        crate::value::check_value_in(
+            self.name,
+            self.label,
+            self.required,
+            &kind,
+            text,
+            errors,
+            repeaters,
+        )
+    }
 }
 
 // The checks themselves, by field name and label, so a static `Field` and a runtime

@@ -63,9 +63,29 @@ All notable changes to Ignite are listed here. The format follows
   `getTabs()` (default: the resource's tabs), and `RuntimeData::validate_form(form,
   operation)`, rules on the submitted form beside the fields' checks (default: none).
 - `users::create_user_with_hash`, `create_user` with a password already hashed.
+- A repeater edited as rows of sub-fields on a resource's form, as Filament's `Repeater`, in
+  place of its JSON textarea: each sub-field input is named after its row
+  (`members[0][name]`), the panel builds the field's JSON list from them
+  (`ignite_core::structure::structured_input`), and the stored value is unchanged, a JSON
+  list of row objects. Add, Delete, Move up and Move down buttons send the form to its live
+  URL and show it again without saving (`structure::apply_operation`); the form script does
+  it in place, and without the script the browser shows the page the button returns.
+  `RepeaterSettings` (`min_items`, `max_items`, `item_label`, `add_action_label`, `addable`,
+  `deletable`, `reorderable`), set with `RuntimeResource::repeater(path, settings)` or
+  `IgniteResource::repeaters()` (`Repeaters`), keyed by the path of names (`members`, or
+  `groups.rules` for a repeater inside a repeater). A sub-field's error is also keyed by its
+  dotted path (`members.0.name`), as Laravel keys nested errors, and shows under the row's
+  input; the repeater keeps its "Row 2: ..." message. Fewer or more rows than the settings
+  allow are refused with "<label> must have at least <n> items." and "<label> must not have
+  more than <n> items.". `Field::check_value_in` checks a static field with the settings.
+  The profile and the dashboard form widget still edit a repeater as JSON.
 
 ### Changed
 
+- A repeater on a resource form renders as rows (see Added), so its markup changed; a form
+  with one loads the form script and `form.css`. A structured value's nested errors are all
+  checked and recorded, not only the first. A `name[key]` form key is now also kept as sent,
+  beside the object the panel builds under `name`.
 - **Breaking:** `ignite_panel::authz::AuthzError` has the new variants `SuperAdminRole` and
   `InvalidRoleName`, so an exhaustive `match` on it must handle them.
 - The panel's checks are unchanged: each action needs the `<slug>.<action>` ability of one of

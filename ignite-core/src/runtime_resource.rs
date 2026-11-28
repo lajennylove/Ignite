@@ -34,6 +34,7 @@ use crate::layout::FormLayout;
 use crate::list::{BadgeColor, ColumnBadges, ListFilter, Tab};
 use crate::policy::ActingUser;
 use crate::query::{ListQuery, Page};
+use crate::structure::{RepeaterSettings, Repeaters};
 
 /// One record of a runtime resource: its values by key, as JSON. A row the panel lists or
 /// edits must have a numeric `id`, and a key for each field and column it shows.
@@ -525,6 +526,10 @@ pub struct RuntimeResource {
     /// [`IgniteResource::hide_default_delete_when`](crate::IgniteResource::hide_default_delete_when).
     /// The default is none.
     pub hide_default_delete_when: Option<ListFilter>,
+    /// The settings of the form's repeaters and flexible content fields, by path, as
+    /// Filament's `minItems()`, `maxItems()` and `itemLabel()`. See [`Repeaters`]. The default
+    /// has none: every repeater has the default settings.
+    pub repeaters: Repeaters,
 }
 
 impl fmt::Debug for RuntimeResource {
@@ -552,6 +557,7 @@ impl fmt::Debug for RuntimeResource {
             .field("hide_empty_tabs", &self.hide_empty_tabs)
             .field("row_actions", &self.row_actions)
             .field("hide_default_delete_when", &self.hide_default_delete_when)
+            .field("repeaters", &self.repeaters)
             .finish_non_exhaustive()
     }
 }
@@ -588,6 +594,7 @@ impl RuntimeResource {
             hide_empty_tabs: true,
             row_actions: Vec::new(),
             hide_default_delete_when: None,
+            repeaters: Repeaters::new(),
         }
     }
 
@@ -772,6 +779,15 @@ impl RuntimeResource {
         self
     }
 
+    /// Sets the settings of the repeater or flexible content field at `path`, such as
+    /// `"members"`, or `"groups.rules"` for the repeater `rules` inside each row of `groups`:
+    /// its fewest and most rows, its row label and its buttons, as Filament's `Repeater`
+    /// methods. See [`RepeaterSettings`].
+    pub fn repeater(mut self, path: impl Into<String>, settings: RepeaterSettings) -> Self {
+        self.repeaters = self.repeaters.repeater(path, settings);
+        self
+    }
+
     /// Shows the column `column` as a badge in the primary colour, as Filament's `->badge()`.
     /// See [`ColumnBadges::badge`].
     pub fn badge(mut self, column: impl Into<String>) -> Self {
@@ -817,6 +833,7 @@ fn validate_fields(
     form: &FormInput,
     creating: bool,
     hidden: &BTreeSet<String>,
+    repeaters: &Repeaters,
 ) -> Result<Row, FieldErrors> {
     let mut errors = FieldErrors::new();
     let mut row = Row::new();
@@ -839,6 +856,19 @@ fn validate_fields(
             // On an update, a field the form did not send keeps its stored value, and a blank
             // password keeps its hash. A field sent blank is cleared to NULL.
             let keep = !creating && (is_password || !form.has(name));
+            // A repeater sent with no rows has none, which its fewest rows may refuse.
+            let min = match field.kind {
+                FieldKindDef::Repeater(_) | FieldKindDef::FlexibleContent(_) if !keep => {
+                    repeaters.get(name).get_min_items().filter(|min| *min > 0)
+                }
+                _ => None,
+            };
+            if let (Some(min), false) = (min, errors.contains_key(name)) {
+                errors.insert(
+                    name.to_string(),
+                    format!("{label} must have at least {min} items."),
+                );
+            }
             if !keep {
                 row.insert(name.to_string(), Value::Null);
             }
@@ -878,8 +908,16 @@ fn validate_fields(
             FieldKindDef::Text | FieldKindDef::Textarea | FieldKindDef::Checkbox => {
                 Some(Value::String(text.to_string()))
             }
-            kind => crate::value::check_value(name, label, field.required, kind, text, &mut errors)
-                .map(Value::String),
+            kind => crate::value::check_value_in(
+                name,
+                label,
+                field.required,
+                kind,
+                text,
+                &mut errors,
+                repeaters,
+            )
+            .map(Value::String),
         };
         if let Some(value) = value {
             row.insert(name.to_string(), value);
@@ -1051,7 +1089,13 @@ impl RegisteredResource {
     /// [`RuntimeData::options`] by the panel, which can read the database, and so is a media
     /// id against the registered [`MediaLibrary`](crate::MediaLibrary).
     pub fn validate(&self, form: &FormInput) -> Result<Row, FieldErrors> {
-        validate_fields(&self.resource.fields, form, true, &BTreeSet::new())
+        validate_fields(
+            &self.resource.fields,
+            form,
+            true,
+            &BTreeSet::new(),
+            &self.resource.repeaters,
+        )
     }
 
     /// Turns the submitted form into a [`Row`] for an update. It is
@@ -1066,7 +1110,13 @@ impl RegisteredResource {
     /// - a checkbox the form did not send is `false`, because an unticked HTML checkbox sends
     ///   nothing.
     pub fn validate_update(&self, form: &FormInput) -> Result<Row, FieldErrors> {
-        validate_fields(&self.resource.fields, form, false, &BTreeSet::new())
+        validate_fields(
+            &self.resource.fields,
+            form,
+            false,
+            &BTreeSet::new(),
+            &self.resource.repeaters,
+        )
     }
 
     /// The conditions that show or hide the form's fields.
@@ -1114,6 +1164,11 @@ impl RegisteredResource {
         self.resource.hide_default_delete_when.as_ref()
     }
 
+    /// The settings of the form's repeaters and flexible content fields.
+    pub fn repeaters(&self) -> &Repeaters {
+        &self.resource.repeaters
+    }
+
     /// [`validate`](Self::validate) for a form whose fields `hidden` are hidden (see
     /// [`FieldConditions::hidden_fields`]): they are not checked, a required one included, and
     /// the row has no key for them, so the source writes nothing for them. The panel calls it.
@@ -1122,7 +1177,13 @@ impl RegisteredResource {
         form: &FormInput,
         hidden: &BTreeSet<String>,
     ) -> Result<Row, FieldErrors> {
-        validate_fields(&self.resource.fields, form, true, hidden)
+        validate_fields(
+            &self.resource.fields,
+            form,
+            true,
+            hidden,
+            &self.resource.repeaters,
+        )
     }
 
     /// [`validate_update`](Self::validate_update) for a form whose fields `hidden` are hidden:
@@ -1132,7 +1193,13 @@ impl RegisteredResource {
         form: &FormInput,
         hidden: &BTreeSet<String>,
     ) -> Result<Row, FieldErrors> {
-        validate_fields(&self.resource.fields, form, false, hidden)
+        validate_fields(
+            &self.resource.fields,
+            form,
+            false,
+            hidden,
+            &self.resource.repeaters,
+        )
     }
 }
 

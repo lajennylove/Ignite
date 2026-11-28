@@ -51,6 +51,16 @@ impl FormInput {
         FormInput(values)
     }
 
+    /// The value of `name` as sent, blank or not, or `None` when the form did not send it.
+    pub(crate) fn raw(&self, name: &str) -> Option<&str> {
+        self.0.get(name).map(String::as_str)
+    }
+
+    /// The names of the fields the form sent.
+    pub(crate) fn names(&self) -> impl Iterator<Item = &str> {
+        self.0.keys().map(String::as_str)
+    }
+
     /// Sets the value of `name`.
     pub(crate) fn insert(&mut self, name: String, value: String) {
         self.0.insert(name, value);
