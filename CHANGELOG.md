@@ -79,10 +79,16 @@ All notable changes to Ignite are listed here. The format follows
   allow are refused with "<label> must have at least <n> items." and "<label> must not have
   more than <n> items.". `Field::check_value_in` checks a static field with the settings.
   The profile and the dashboard form widget still edit a repeater as JSON.
+- A group (and a clone) edited as a labelled, bordered block of its sub-fields on a resource's
+  form, as ACF's group field and Filament's `Fieldset`, in place of its JSON textarea: each
+  input is named after the group (`seo[title]`, or `faqs[0][answer][body]` inside a repeater
+  row), the stored value is unchanged, one JSON object, and a sub-field's error shows under
+  its input (`seo.title`). A repeater and a group nest in each other.
 
 ### Changed
 
-- A repeater on a resource form renders as rows (see Added), so its markup changed; a form
+- A repeater, group or clone on a resource form renders as sub-fields (see Added), so its
+  markup changed; a form
   with one loads the form script and `form.css`. A structured value's nested errors are all
   checked and recorded, not only the first. A `name[key]` form key is now also kept as sent,
   beside the object the panel builds under `name`.

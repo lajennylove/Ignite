@@ -1095,15 +1095,15 @@ pub(crate) struct FieldView {
     pub(crate) has_error: bool,
     pub(crate) error: String,
     /// Whether a resource form renders the field as rows of sub-fields
-    /// (`partials/structure`), and its parts. A repeater elsewhere, such as on the profile, is
-    /// edited as JSON.
+    /// (`partials/structure`), and its parts. A repeater, group or clone elsewhere, such as on
+    /// the profile, is edited as JSON.
     pub(crate) is_structured: bool,
     pub(crate) parts: Vec<PartView>,
 }
 
-/// One part of a structured field, in display order: the start of a repeater (`is_open`),
-/// the start of one of its rows (`is_row`), the sub-fields of a row (`fields`), the end of a
-/// row (`is_row_end`), and the end of the field with
+/// One part of a structured field, in display order: the start of a repeater or group
+/// (`is_open`), the start of one of its rows (`is_row`), the sub-fields of a row or group
+/// (`fields`), the end of a row (`is_row_end`), and the end of the field with
 /// its add button and its error (`is_close`). A structured sub-field adds its own parts in its
 /// place, so a template without recursion renders any nesting.
 #[derive(Debug, Clone, Default, Serialize)]
@@ -1119,12 +1119,12 @@ pub(crate) struct PartView {
     pub(crate) name: String,
     pub(crate) label: String,
     pub(crate) required: bool,
-    /// `repeater`, for `data-ignite-structure`.
+    /// `repeater` or `group`, for `data-ignite-structure`.
     pub(crate) kind: &'static str,
     /// Whether the field is a list of rows: it sends its name blank, so no rows clears it.
     pub(crate) is_list: bool,
-    /// The hidden input that keeps a row whose inputs send nothing, such as an unticked
-    /// checkbox.
+    /// The hidden input that keeps a row or group whose inputs send nothing, such as an
+    /// unticked checkbox.
     pub(crate) marker: String,
     /// Where the add, delete and move buttons send the form: the form's live URL.
     pub(crate) ops_url: String,
@@ -1740,60 +1740,74 @@ fn container_parts(
             ..add
         });
     };
-    if let FieldKindDef::Repeater(fields) = &field.kind {
-        let settings = context.repeaters.get(&place.schema);
-        let rows: &[Value] = value.as_array().map(Vec::as_slice).unwrap_or(&[]);
-        parts.push(PartView {
-            is_list: true,
-            ..open
-        });
-        for (index, row) in rows.iter().enumerate() {
-            let row_place = place.child(&index.to_string(), None);
+    match &field.kind {
+        FieldKindDef::Group(fields) | FieldKindDef::Clone(fields) => {
+            parts.push(PartView {
+                kind: "group",
+                marker: format!("{}[_ignite_group]", place.input),
+                ..open
+            });
             let empty = serde_json::Map::new();
-            let values = row.as_object().unwrap_or(&empty);
-            let label = settings
-                .get_item_label()
-                .and_then(|name| values.get(name))
-                .map(|value| cell_text(Some(value)))
-                .filter(|text| !text.trim().is_empty())
-                .unwrap_or_else(|| format!("Row {}", index + 1));
-            let op = |verb: &str| format!("{verb}:{}", row_place.path);
-            parts.push(PartView {
-                is_row: true,
-                name: row_place.input.clone(),
-                label,
-                marker: format!("{}[_ignite_row]", row_place.input),
-                ops_url: context.ops_url.to_string(),
-                can_up: settings.is_reorderable() && index > 0,
-                up_op: op("up"),
-                can_down: settings.is_reorderable() && index + 1 < rows.len(),
-                down_op: op("down"),
-                can_delete: settings.is_deletable(),
-                delete_op: op("delete"),
-                ..PartView::default()
-            });
-            sub_field_parts(fields, values, &row_place, context, parts);
-            parts.push(PartView {
-                is_row_end: true,
-                ..PartView::default()
-            });
+            let values = value.as_object().unwrap_or(&empty);
+            sub_field_parts(fields, values, place, context, parts);
+            close(parts, PartView::default());
         }
-        let full = settings
-            .get_max_items()
-            .is_some_and(|max| rows.len() >= max);
-        let add_label = settings
-            .get_add_action_label()
-            .map(str::to_string)
-            .unwrap_or_else(|| format!("Add to {}", field.label));
-        close(
-            parts,
-            PartView {
-                can_add: settings.is_addable() && !full,
-                add_op: format!("add:{}", place.path),
-                add_label,
-                ..PartView::default()
-            },
-        );
+        FieldKindDef::Repeater(fields) => {
+            let settings = context.repeaters.get(&place.schema);
+            let rows: &[Value] = value.as_array().map(Vec::as_slice).unwrap_or(&[]);
+            parts.push(PartView {
+                is_list: true,
+                ..open
+            });
+            for (index, row) in rows.iter().enumerate() {
+                let row_place = place.child(&index.to_string(), None);
+                let empty = serde_json::Map::new();
+                let values = row.as_object().unwrap_or(&empty);
+                let label = settings
+                    .get_item_label()
+                    .and_then(|name| values.get(name))
+                    .map(|value| cell_text(Some(value)))
+                    .filter(|text| !text.trim().is_empty())
+                    .unwrap_or_else(|| format!("Row {}", index + 1));
+                let op = |verb: &str| format!("{verb}:{}", row_place.path);
+                parts.push(PartView {
+                    is_row: true,
+                    name: row_place.input.clone(),
+                    label,
+                    marker: format!("{}[_ignite_row]", row_place.input),
+                    ops_url: context.ops_url.to_string(),
+                    can_up: settings.is_reorderable() && index > 0,
+                    up_op: op("up"),
+                    can_down: settings.is_reorderable() && index + 1 < rows.len(),
+                    down_op: op("down"),
+                    can_delete: settings.is_deletable(),
+                    delete_op: op("delete"),
+                    ..PartView::default()
+                });
+                sub_field_parts(fields, values, &row_place, context, parts);
+                parts.push(PartView {
+                    is_row_end: true,
+                    ..PartView::default()
+                });
+            }
+            let full = settings
+                .get_max_items()
+                .is_some_and(|max| rows.len() >= max);
+            let add_label = settings
+                .get_add_action_label()
+                .map(str::to_string)
+                .unwrap_or_else(|| format!("Add to {}", field.label));
+            close(
+                parts,
+                PartView {
+                    can_add: settings.is_addable() && !full,
+                    add_op: format!("add:{}", place.path),
+                    add_label,
+                    ..PartView::default()
+                },
+            );
+        }
+        _ => {}
     }
 }
 

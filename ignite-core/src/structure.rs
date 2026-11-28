@@ -1,14 +1,15 @@
-//! Repeaters edited as rows of sub-fields, as Filament's `Repeater`: the settings of a
-//! repeater ([`RepeaterSettings`]), the values a form sends for one ([`structured_input`]),
-//! and the add, delete and move buttons ([`apply_operation`]).
+//! Repeaters and groups edited as sub-fields, as Filament's `Repeater` and `Fieldset`: the
+//! settings of a repeater ([`RepeaterSettings`]), the values a form sends for one
+//! ([`structured_input`]), and the add, delete and move buttons ([`apply_operation`]).
 //!
 //! The form names each sub-field input after its place, as PHP and Laravel read nested
-//! arrays: `members[0][name]` is the `name` of the first row of `members`. The panel turns
-//! them into the JSON value the field stores, a list of rows, so the checks and the data layer
-//! see the same value as when the form sends the field as JSON text.
+//! arrays: `members[0][name]` is the `name` of the first row of `members`, and `seo[title]`
+//! the `title` of the group `seo`. The panel turns them into the JSON value the field stores,
+//! a list of rows or one object, so the checks and the data layer see the same value as when
+//! the form sends the field as JSON text.
 //!
 //! An error on a sub-field is keyed by its dotted path, as Laravel keys the errors of a nested
-//! array: `members.0.name`. A repeater's settings are
+//! array: `members.0.name`, `seo.title`. A repeater's settings are
 //! keyed by the names of the fields that lead to it, without row numbers: `members`, or
 //! `groups.rules` for the repeater `rules` inside each row of `groups`, as Filament's state
 //! path without the item keys.
@@ -161,14 +162,17 @@ impl Repeaters {
     }
 }
 
-/// Whether a field of `kind` is edited as sub-fields: a repeater.
+/// Whether a field of `kind` is edited as sub-fields: a repeater, a group or a clone.
 pub fn is_structured(kind: &FieldKindDef) -> bool {
-    matches!(kind, FieldKindDef::Repeater(_))
+    matches!(
+        kind,
+        FieldKindDef::Repeater(_) | FieldKindDef::Group(_) | FieldKindDef::Clone(_)
+    )
 }
 
 /// `form`, with the value of each structured field of `fields` built from the sub-field
 /// inputs it sent (`members[0][name]` and so on), as JSON text under the field's name: a list
-/// of rows for a repeater. Rows come
+/// of rows for a repeater, one object for a group or a clone. Rows come
 /// in the order of their numbers, numbered again from 0. A field the form sent no sub-field
 /// input for keeps what the form sent under its name, such as JSON text, or nothing.
 pub fn structured_input(fields: &[FieldDef], form: &FormInput) -> FormInput {
@@ -193,6 +197,9 @@ fn collect(kind: &FieldKindDef, base: &str, form: &FormInput) -> Value {
                 .map(|row| Value::Object(object(fields, &format!("{base}[{row}]"), form)))
                 .collect(),
         ),
+        FieldKindDef::Group(fields) | FieldKindDef::Clone(fields) => {
+            Value::Object(object(fields, base, form))
+        }
         _ => Value::Null,
     }
 }
@@ -389,6 +396,17 @@ fn locate<'k, 'v>(
                 .entry(name.to_string())
                 .or_insert(Value::Null);
             locate(&field.kind, &format!("{schema}.{name}"), inner, rest)
+        }
+        FieldKindDef::Group(fields) | FieldKindDef::Clone(fields) => {
+            let field = fields.iter().find(|f| f.name == *first)?;
+            if !value.is_object() {
+                *value = Value::Object(Map::new());
+            }
+            let inner = value
+                .as_object_mut()?
+                .entry(first.to_string())
+                .or_insert(Value::Null);
+            locate(&field.kind, &format!("{schema}.{first}"), inner, rest)
         }
         _ => None,
     }
