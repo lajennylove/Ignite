@@ -567,7 +567,19 @@ impl Ignite {
         self
     }
 
-    /// Sets the height of the [`brand_logo`](Self::brand_logo), as Filament's
+    /// Sets the logo shown in dark mode, as Filament's `darkModeBrandLogo`: the path or URL of
+    /// an image, such as `/images/logo-dark.webp`, for a logo that does not show on the dark
+    /// navigation. In dark mode it replaces the [`brand_logo`](Self::brand_logo) (or the brand
+    /// name, when there is no logo), at the same height and with the name as its alternative
+    /// text; in light mode the default logo shows. A theme whose `dark_mode` is off never shows
+    /// it. The default is none: the one logo shows in both modes.
+    pub fn dark_mode_brand_logo(mut self, url: impl Into<String>) -> Self {
+        self.brand.dark_logo = Some(url.into());
+        self
+    }
+
+    /// Sets the height of the [`brand_logo`](Self::brand_logo) and the
+    /// [`dark_mode_brand_logo`](Self::dark_mode_brand_logo), as Filament's
     /// `brandLogoHeight`: a CSS length, such as `2rem` or `48px`. The default is `1.5rem`, as
     /// in Filament. The width follows the image.
     ///

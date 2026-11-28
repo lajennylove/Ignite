@@ -73,6 +73,10 @@
 :root:not([data-theme="dark"]) .ig-theme-sun { display: none; }
 :root[data-theme="dark"] .ig-theme-moon { display: none; }
 
+/* With a dark mode logo (Filament's darkModeBrandLogo), each logo shows in its own theme. */
+:root:not([data-theme="dark"]) .ig-logo-dark { display: none; }
+:root[data-theme="dark"] .ig-logo-light { display: none; }
+
 @layer base {
     body {
         @apply bg-page font-sans text-[15px] leading-6 text-text antialiased;

@@ -4,6 +4,19 @@ All notable changes to Ignite are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- A brand logo for dark mode, as Filament's `darkModeBrandLogo()`:
+  `Ignite::dark_mode_brand_logo(url)`. In dark mode it replaces the `brand_logo` (or the brand
+  name) in the navigation and the sign-in bar, at the `brand_logo_height`; in light mode the
+  default logo shows. Both are in the page, so the theme switch changes the logo without a
+  reload: the `ignite` theme wraps the light logo in `ig-logo-light` and gives the dark one
+  `ig-logo-dark`, and the panel's stylesheet hides the one that does not match the page's
+  `data-theme`. The brand has the theme values `has_dark_logo` and `dark_logo`. Without a dark
+  logo, the markup does not change.
+
 ## [0.6.7] - 2026-11-27
 
 ### Added

@@ -1,5 +1,5 @@
 //! The panel's brand: the name, the logo and the favicon, as Filament's panel sets them with
-//! `brandName`, `brandLogo`, `brandLogoHeight` and `favicon`, and the app's stylesheets, as
+//! `brandName`, `brandLogo`, `darkModeBrandLogo`, `brandLogoHeight` and `favicon`, and the app's stylesheets, as
 //! Filament registers an app's CSS with `FilamentAsset::register`. The app sets them on the
 //! [`Ignite`](crate::Ignite) builder; the views read them from every page's `brand` value, so
 //! the compiled views of a release build show them too.
@@ -17,6 +17,8 @@ pub(crate) const DEFAULT_LOGO_HEIGHT: &str = "1.5rem";
 pub(crate) struct Brand {
     pub(crate) name: Option<String>,
     pub(crate) logo: Option<String>,
+    /// The logo shown in dark mode, as Filament's `darkModeBrandLogo`.
+    pub(crate) dark_logo: Option<String>,
     pub(crate) logo_height: Option<String>,
     pub(crate) favicon: Option<String>,
     /// The app's stylesheets, in the order the app added them.
@@ -34,7 +36,13 @@ pub(crate) struct BrandView {
     pub(crate) has_logo: bool,
     /// The path or URL of the app's logo.
     pub(crate) logo: String,
-    /// The CSS height of the app's logo, such as `2rem`.
+    /// Whether the app set a logo for dark mode, as Filament's `darkModeBrandLogo`. The views
+    /// then show it only in dark mode (`ig-logo-dark`), and the logo or the name only in light
+    /// mode (`ig-logo-light`).
+    pub(crate) has_dark_logo: bool,
+    /// The path or URL of the app's dark mode logo.
+    pub(crate) dark_logo: String,
+    /// The CSS height of the app's logos, such as `2rem`.
     pub(crate) logo_height: String,
     /// Whether the views show the Ignite mark beside the name: only when the app set neither a
     /// name nor a logo, so the default brand is the one Ignite always showed.
@@ -58,11 +66,13 @@ impl BrandView {
                 .unwrap_or_else(|| DEFAULT_BRAND_NAME.to_string()),
             has_logo: brand.logo.is_some(),
             logo: brand.logo.clone().unwrap_or_default(),
+            has_dark_logo: brand.dark_logo.is_some(),
+            dark_logo: brand.dark_logo.clone().unwrap_or_default(),
             logo_height: brand
                 .logo_height
                 .clone()
                 .unwrap_or_else(|| DEFAULT_LOGO_HEIGHT.to_string()),
-            has_mark: brand.name.is_none() && brand.logo.is_none(),
+            has_mark: brand.name.is_none() && brand.logo.is_none() && brand.dark_logo.is_none(),
             has_favicon: brand.favicon.is_some(),
             favicon: brand.favicon.clone().unwrap_or_default(),
             stylesheets: brand.stylesheets.clone(),
@@ -118,6 +128,27 @@ mod tests {
             "the name stays the logo's alternative text"
         );
         assert_eq!(logo.logo_height, "1.5rem");
+        assert!(!logo.has_dark_logo);
+    }
+
+    #[test]
+    fn a_dark_mode_logo_is_its_own_choice() {
+        let view = BrandView::new(&Brand {
+            logo: Some("/images/logo.webp".into()),
+            dark_logo: Some("/images/logo-dark.webp".into()),
+            ..Brand::default()
+        });
+        assert!(view.has_logo);
+        assert!(view.has_dark_logo);
+        assert_eq!(view.dark_logo, "/images/logo-dark.webp");
+
+        // A dark logo alone keeps the name in light mode, without the Ignite mark.
+        let dark_only = BrandView::new(&Brand {
+            dark_logo: Some("/images/logo-dark.webp".into()),
+            ..Brand::default()
+        });
+        assert!(!dark_only.has_logo);
+        assert!(!dark_only.has_mark);
     }
 
     #[test]

@@ -62,7 +62,7 @@
 //!
 //! Besides each page's own values, every page has the values of the look: `admin_theme` (the
 //! page's theme: its `name` and its `stylesheets`), `brand` (the
-//! brand's `name`, `has_logo`, `logo`, `logo_height`, `has_mark`, `has_favicon`, `favicon` and
+//! brand's `name`, `has_logo`, `logo`, `has_dark_logo`, `dark_logo`, `logo_height`, `has_mark`, `has_favicon`, `favicon` and
 //! `stylesheets`, set with [`Ignite::brand_name`](crate::Ignite::brand_name) and the methods beside it),
 //! `nav_sections` (the sidebar in sections, each with `has_heading`, `heading` and `items`, as
 //! [`Ignite::navigation_groups`](crate::Ignite::navigation_groups) orders them) and `nav` (the
