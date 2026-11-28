@@ -544,6 +544,22 @@ impl From<Column> for ColumnDef {
     }
 }
 
+/// Where the panel goes after a successful save of a runtime resource's form, as Filament's
+/// `getRedirectUrl()` and the panel's `resourceCreatePageRedirect()` and
+/// `resourceEditPageRedirect()`. See [`RuntimeResource::redirect_after_create`] and
+/// [`RuntimeResource::redirect_after_update`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RedirectAfter {
+    /// The record's edit page, with the flash message: after a create, the new record's (or
+    /// the list, for a user who may not edit it), as Filament's default after creating; after
+    /// an update, the same page again, as Filament's default after saving (it stays on the
+    /// page and shows the notification).
+    Edit,
+    /// The resource's list page, with the flash message: Ignite's default before 0.6.8, as
+    /// Filament's `getUrl('index')`.
+    List,
+}
+
 /// A resource defined by data. Build it with [`new`](Self::new) and the
 /// [`field`](Self::field) and [`column`](Self::column) methods, then add it to the panel
 /// with [`register_runtime`].
@@ -630,6 +646,12 @@ pub struct RuntimeResource {
     /// `$recordRouteKeyName`. `None`, the default, is the numeric `id`. See
     /// [`record_route_key_name`](Self::record_route_key_name).
     pub record_route_key_name: Option<String>,
+    /// Where a successful create goes. `None`, the default, is the list page, as before 0.6.8.
+    /// See [`redirect_after_create`](Self::redirect_after_create).
+    pub redirect_after_create: Option<RedirectAfter>,
+    /// Where a successful update goes. `None`, the default, is the list page, as before 0.6.8.
+    /// See [`redirect_after_update`](Self::redirect_after_update).
+    pub redirect_after_update: Option<RedirectAfter>,
     /// The ability each action on the resource needs, when it is not `<slug>.<action>`. See
     /// [`ability`](Self::ability). The default is none: every action needs its default.
     pub abilities: BTreeMap<ResourceAction, String>,
@@ -666,6 +688,8 @@ impl fmt::Debug for RuntimeResource {
             .field("repeaters", &self.repeaters)
             .field("read_only", &self.read_only.is_some())
             .field("record_route_key_name", &self.record_route_key_name)
+            .field("redirect_after_create", &self.redirect_after_create)
+            .field("redirect_after_update", &self.redirect_after_update)
             .field("abilities", &self.abilities)
             .field("access_ability", &self.access_ability)
             .finish_non_exhaustive()
@@ -708,6 +732,8 @@ impl RuntimeResource {
             read_only: None,
             read_only_notice: None,
             record_route_key_name: None,
+            redirect_after_create: None,
+            redirect_after_update: None,
             abilities: BTreeMap::new(),
             access_ability: None,
         }
@@ -937,6 +963,25 @@ impl RuntimeResource {
     /// WordPress keeps a post type's key.
     pub fn record_route_key_name(mut self, key: impl Into<String>) -> Self {
         self.record_route_key_name = Some(key.into());
+        self
+    }
+
+    /// Where a successful create goes, as Filament's `getRedirectUrl()` on the Create page and
+    /// the panel's `resourceCreatePageRedirect()`: [`RedirectAfter::Edit`], Filament's default,
+    /// opens the new record's edit page (the list, for a user who may not edit it), and
+    /// [`RedirectAfter::List`] the list page. Without this call a create goes to the list, as
+    /// in 0.6.7. A dashboard form widget comes back to the dashboard either way.
+    pub fn redirect_after_create(mut self, redirect: RedirectAfter) -> Self {
+        self.redirect_after_create = Some(redirect);
+        self
+    }
+
+    /// Where a successful update goes, as Filament's `getRedirectUrl()` on the Edit page and
+    /// the panel's `resourceEditPageRedirect()`: [`RedirectAfter::Edit`], Filament's default,
+    /// stays on the record's edit page with the flash message, and [`RedirectAfter::List`]
+    /// goes to the list page. Without this call an update goes to the list, as in 0.6.7.
+    pub fn redirect_after_update(mut self, redirect: RedirectAfter) -> Self {
+        self.redirect_after_update = Some(redirect);
         self
     }
 
@@ -1406,6 +1451,22 @@ impl RegisteredResource {
             }
         }
         names
+    }
+
+    /// Where a successful create goes: the
+    /// [`redirect_after_create`](RuntimeResource::redirect_after_create), or the list.
+    pub fn redirect_after_create(&self) -> RedirectAfter {
+        self.resource
+            .redirect_after_create
+            .unwrap_or(RedirectAfter::List)
+    }
+
+    /// Where a successful update goes: the
+    /// [`redirect_after_update`](RuntimeResource::redirect_after_update), or the list.
+    pub fn redirect_after_update(&self) -> RedirectAfter {
+        self.resource
+            .redirect_after_update
+            .unwrap_or(RedirectAfter::List)
     }
 
     /// The row key that addresses a record in the panel's URLs: the

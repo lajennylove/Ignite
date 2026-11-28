@@ -9,7 +9,7 @@ use std::sync::{Arc, OnceLock};
 
 use ignite_core::{
     ActingUser, ColumnDef, Database, Direction, FieldDef, FieldErrors, FormContext, FormInput,
-    LatestRecords, ListQuery, Operation,
+    LatestRecords, ListQuery, Operation, RedirectAfter,
 };
 use orbit_orm::Error as OrbitError;
 use propel_rocket::PropelView;
@@ -1401,11 +1401,22 @@ async fn create(
         .map_err(db_status)?;
 
     match outcome {
-        Ok(_) => {
+        Ok(record) => {
             set_flash(cookies, &registry.secret, "Record created.");
             // A dashboard form widget comes back to the dashboard; nothing else is followed.
+            // Otherwise the resource's `redirect_after_create`: the new record's edit page, as
+            // Filament's default, for a user who may edit it, or the list.
             let target = if from_dashboard {
                 registry.mount.clone()
+            } else if resource.redirect_after_create() == RedirectAfter::Edit
+                && session.may(resource.slug(), Action::Update)
+                && record_allowed(db, resource.slug(), &session, Action::Update, &record).await?
+            {
+                // A data source whose create gives back no key leaves the list as the target.
+                match saved_key(resource.as_ref(), &record) {
+                    Some(key) => format!("{index_url}/{key}/edit"),
+                    None => index_url,
+                }
             } else {
                 index_url
             };
@@ -1605,9 +1616,21 @@ async fn update(
         .map_err(db_status)?;
 
     match outcome {
-        Ok(_) => {
+        Ok(saved) => {
             set_flash(cookies, &registry.secret, "Changes saved.");
-            Ok(Reply::Redirect(Box::new(Redirect::to(index_url))))
+            // The resource's `redirect_after_update`: the same edit page, as Filament's default,
+            // at the key the save left (a route key the form changed moves it), or the list.
+            let target = match resource.redirect_after_update() {
+                RedirectAfter::Edit => {
+                    let key = match saved_key(resource.as_ref(), &saved) {
+                        Some(key) => key,
+                        None => record_key(resource.as_ref(), &record)?,
+                    };
+                    format!("{index_url}/{key}/edit")
+                }
+                RedirectAfter::List => index_url,
+            };
+            Ok(Reply::Redirect(Box::new(Redirect::to(target))))
         }
         Err(errors) => {
             let form = live_values(resource.fields(), Some(&record), &form);
@@ -2238,6 +2261,15 @@ fn record_key(resource: &dyn Erased, record: &Value) -> Result<String, Status> {
         })?,
     };
     Ok(path_segment(&key))
+}
+
+/// The key of a record a save gave back, as [`record_key`], or `None` when the save gave back
+/// no usable key (a data source may give back only the values it wrote).
+fn saved_key(resource: &dyn Erased, record: &Value) -> Option<String> {
+    match record.get(resource.record_route_key_name()) {
+        Some(Value::Number(_)) | Some(Value::String(_)) => record_key(resource, record).ok(),
+        _ => None,
+    }
 }
 
 /// `text` as one URL path segment: every byte but the unreserved ones (`A-Z a-z 0-9 - . _ ~`)

@@ -38,7 +38,10 @@ fn an_empty_required_field_shows_its_message_on_the_dashboard() {
     let _guard = reset();
     let client = signed_in_with(|ignite| ignite.form_widget(quick_draft()).form_widget(second()));
     let dashboard = client.get("/admin").dispatch().into_string().unwrap();
-    assert!(dashboard.contains("name=\"_widget\" value=\"0\""), "{dashboard}");
+    assert!(
+        dashboard.contains("name=\"_widget\" value=\"0\""),
+        "{dashboard}"
+    );
     assert!(dashboard.contains("name=\"_widget\" value=\"1\""));
 
     let before = count_widgets();

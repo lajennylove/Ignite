@@ -16,8 +16,21 @@ All notable changes to Ignite are listed here. The format follows
   `ig-logo-dark`, and the panel's stylesheet hides the one that does not match the page's
   `data-theme`. The brand has the theme values `has_dark_logo` and `dark_logo`. Without a dark
   logo, the markup does not change.
+- Where a runtime resource's successful save goes, as Filament's `getRedirectUrl()` and the
+  panel's `resourceCreatePageRedirect()` and `resourceEditPageRedirect()`:
+  `RuntimeResource::redirect_after_create(RedirectAfter)` and
+  `RuntimeResource::redirect_after_update(RedirectAfter)`, with `ignite_core::RedirectAfter`
+  (`Edit`, `List`). `Edit` is Filament's default: after a create, the new record's edit page
+  (the list for a user who may not edit it, or when the data gives back no key); after an
+  update, the same edit page; both with the flash message. `List` goes to the list page. A
+  resource that sets neither goes to the list, as in 0.6.7, so existing apps do not change; a
+  dashboard form widget still comes back to the dashboard.
 
 ### Changed
+
+- **Breaking:** `RuntimeResource` has the new public fields `redirect_after_create` and
+  `redirect_after_update` (`Option<RedirectAfter>`, `None` by default), so code that builds it
+  with a struct literal must set them; `RuntimeResource::new` sets them.
 
 - **Breaking:** a form widget (`FormWidget`) whose save the resource refuses shows its
   validation messages on the dashboard, under the widget's fields and with the typed values

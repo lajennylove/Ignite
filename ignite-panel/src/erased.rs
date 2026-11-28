@@ -105,6 +105,16 @@ pub(crate) trait Erased: Send + Sync {
     fn record_route_key_name(&self) -> &str {
         "id"
     }
+    /// Where a successful create goes: a runtime resource's `redirect_after_create`, else the
+    /// list.
+    fn redirect_after_create(&self) -> ignite_core::RedirectAfter {
+        ignite_core::RedirectAfter::List
+    }
+    /// Where a successful update goes: a runtime resource's `redirect_after_update`, else the
+    /// list.
+    fn redirect_after_update(&self) -> ignite_core::RedirectAfter {
+        ignite_core::RedirectAfter::List
+    }
     /// `Err(errors)` when the form does not validate; the database is not touched then. The
     /// fields of `hidden` are left out: they are not checked and not written.
     async fn create(
@@ -935,6 +945,14 @@ impl Erased for RuntimeAdapter {
 
     fn record_route_key_name(&self) -> &str {
         self.0.record_route_key_name()
+    }
+
+    fn redirect_after_create(&self) -> ignite_core::RedirectAfter {
+        self.0.redirect_after_create()
+    }
+
+    fn redirect_after_update(&self) -> ignite_core::RedirectAfter {
+        self.0.redirect_after_update()
     }
 
     async fn create(

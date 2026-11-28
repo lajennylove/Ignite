@@ -106,9 +106,8 @@ fn without_a_dark_logo_the_logo_shows_in_both_modes() {
     let client = signed_in_with(|ignite| ignite.brand_logo("/logo.svg"));
     set_theme(&client, "dark");
     let html = page(&client, "/admin");
-    assert!(html.contains(
-        r#"<img src="/logo.svg" alt="Ignite" class="w-auto" style="height: 1.5rem">"#
-    ));
+    assert!(html
+        .contains(r#"<img src="/logo.svg" alt="Ignite" class="w-auto" style="height: 1.5rem">"#));
     assert!(!html.contains("ig-logo-light"));
     assert!(!html.contains("ig-logo-dark"));
 }
@@ -118,6 +117,9 @@ fn the_dark_logo_url_is_escaped() {
     let _guard = reset();
     let client = signed_in_with(|ignite| ignite.dark_mode_brand_logo("/x\"onerror=\"alert(1)"));
     let html = page(&client, "/admin");
-    assert!(html.contains("src=\"/x&quot;onerror=&quot;alert(1)\""), "{html}");
+    assert!(
+        html.contains("src=\"/x&quot;onerror=&quot;alert(1)\""),
+        "{html}"
+    );
     assert!(!html.contains("onerror=\"alert"));
 }
