@@ -1,5 +1,6 @@
 //! Fields that show only when a condition holds, as Filament's `visible()`, `hidden()`,
-//! `visibleOn()`, `hiddenOn()` and `live()`.
+//! `visibleOn()`, `hiddenOn()` and `live()`, and fields shown but not editable, as its
+//! `disabled()` and `disabledOn()`.
 //!
 //! A condition is a closure the server runs each time it builds or saves a form, given a
 //! [`FormContext`]: the operation, the record being edited (none on create), the signed-in
@@ -128,6 +129,8 @@ pub struct FieldConditions {
     slugs: HashMap<String, String>,
     /// When each slug field stops following its source, by slug field name.
     slug_locks: HashMap<String, Rule>,
+    /// When each field is shown but not editable, by field name.
+    disabled: HashMap<String, Rule>,
 }
 
 impl fmt::Debug for FieldConditions {
@@ -139,6 +142,7 @@ impl fmt::Debug for FieldConditions {
             .field("live", &self.live)
             .field("slugs", &self.slugs)
             .field("slug_locks", &names(&self.slug_locks))
+            .field("disabled", &names(&self.disabled))
             .finish()
     }
 }
@@ -179,6 +183,32 @@ impl FieldConditions {
     pub fn hidden_on(self, field: impl Into<String>, operations: &[Operation]) -> Self {
         let operations = operations.to_vec();
         self.hidden(field, move |form| operations.contains(&form.operation()))
+    }
+
+    /// Shows `field` but does not let the user change it when `rule` holds, as Filament's
+    /// `->disabled(fn () => ...)`: its input is disabled and, as in Filament, a disabled field
+    /// is not saved, so its stored value is kept whatever a request sends. A later
+    /// [`disabled`](Self::disabled) or [`disabled_on`](Self::disabled_on) for the field
+    /// replaces the earlier one.
+    pub fn disabled(
+        mut self,
+        field: impl Into<String>,
+        rule: impl Fn(&FormContext<'_>) -> bool + Send + Sync + 'static,
+    ) -> Self {
+        self.disabled.insert(field.into(), Arc::new(rule));
+        self
+    }
+
+    /// Disables `field` on the forms of `operations`, as Filament's `->disabledOn('edit')`:
+    /// such as a key that is set when the record is created and locked after its first save.
+    pub fn disabled_on(self, field: impl Into<String>, operations: &[Operation]) -> Self {
+        let operations = operations.to_vec();
+        self.disabled(field, move |form| operations.contains(&form.operation()))
+    }
+
+    /// Whether `field` is disabled on `form`.
+    pub fn is_disabled(&self, field: &str, form: &FormContext<'_>) -> bool {
+        self.disabled.get(field).is_some_and(|rule| rule(form))
     }
 
     /// Makes `field` live, as Filament's `->live()`: when its value changes in the browser,

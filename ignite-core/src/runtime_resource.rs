@@ -177,6 +177,53 @@ pub trait RuntimeData: Send + Sync + 'static {
         Box::pin(async move { self.create_for(db, user, input).await.map(Ok) })
     }
 
+    /// [`find_for`](Self::find_for) by the record's key in the URL, for a resource whose
+    /// records are addressed by a key other than the numeric `id`
+    /// ([`RuntimeResource::record_route_key_name`], as Filament's `$recordRouteKeyName`), such
+    /// as a post type's key. The default parses `key` as an id and calls
+    /// [`find_for`](Self::find_for); a key that is not a whole number finds nothing.
+    fn find_by_key_for<'a>(
+        &'a self,
+        db: &'a Database,
+        user: &'a ActingUser,
+        key: &'a str,
+    ) -> RuntimeFuture<'a, Option<Row>> {
+        match key.parse::<i64>() {
+            Ok(id) => self.find_for(db, user, id),
+            Err(_) => Box::pin(async { Ok(None) }),
+        }
+    }
+
+    /// [`try_update_for`](Self::try_update_for) by the record's key, as
+    /// [`find_by_key_for`](Self::find_by_key_for). The default parses `key` as an id.
+    fn try_update_by_key_for<'a>(
+        &'a self,
+        db: &'a Database,
+        user: &'a ActingUser,
+        key: &'a str,
+        input: Row,
+    ) -> RuntimeFuture<'a, Result<Row, ValidationError>> {
+        match key.parse::<i64>() {
+            Ok(id) => self.try_update_for(db, user, id, input),
+            Err(_) => Box::pin(async { Err(Error::NotFound { table: "records" }) }),
+        }
+    }
+
+    /// [`delete_for`](Self::delete_for) by the record's key, as
+    /// [`find_by_key_for`](Self::find_by_key_for). The default parses `key` as an id; a key
+    /// that is not a whole number deletes nothing.
+    fn delete_by_key_for<'a>(
+        &'a self,
+        db: &'a Database,
+        user: &'a ActingUser,
+        key: &'a str,
+    ) -> RuntimeFuture<'a, u64> {
+        match key.parse::<i64>() {
+            Ok(id) => self.delete_for(db, user, id),
+            Err(_) => Box::pin(async { Ok(0) }),
+        }
+    }
+
     /// [`update_for`](Self::update_for) that may refuse the row with field messages, as
     /// [`try_create_for`](Self::try_create_for) for the edit form. The panel calls it only
     /// after [`find_for`](Self::find_for) found the row and the policy allowed the update. The
@@ -579,6 +626,10 @@ pub struct RuntimeResource {
     /// The line the form of a read-only record shows. See
     /// [`read_only_notice`](Self::read_only_notice).
     pub read_only_notice: Option<FormNotice>,
+    /// The row key that addresses a record in the panel's URLs, as Filament's
+    /// `$recordRouteKeyName`. `None`, the default, is the numeric `id`. See
+    /// [`record_route_key_name`](Self::record_route_key_name).
+    pub record_route_key_name: Option<String>,
 }
 
 impl fmt::Debug for RuntimeResource {
@@ -608,6 +659,7 @@ impl fmt::Debug for RuntimeResource {
             .field("hide_default_delete_when", &self.hide_default_delete_when)
             .field("repeaters", &self.repeaters)
             .field("read_only", &self.read_only.is_some())
+            .field("record_route_key_name", &self.record_route_key_name)
             .finish_non_exhaustive()
     }
 }
@@ -647,6 +699,7 @@ impl RuntimeResource {
             repeaters: Repeaters::new(),
             read_only: None,
             read_only_notice: None,
+            record_route_key_name: None,
         }
     }
 
@@ -837,6 +890,38 @@ impl RuntimeResource {
     /// methods. See [`RepeaterSettings`].
     pub fn repeater(mut self, path: impl Into<String>, settings: RepeaterSettings) -> Self {
         self.repeaters = self.repeaters.repeater(path, settings);
+        self
+    }
+
+    /// Addresses each record in the panel's URLs by the row key `key` instead of the numeric
+    /// `id`, as Filament's `$recordRouteKeyName`: such as `"key"`, so a post type's edit form
+    /// is at `/admin/post-types/book/edit`. The rows the list gives must have the key, as text
+    /// or a number, and the data finds, updates and deletes them by it
+    /// ([`RuntimeData::find_by_key_for`], [`try_update_by_key_for`](RuntimeData::try_update_by_key_for)
+    /// and [`delete_by_key_for`](RuntimeData::delete_by_key_for)). A key that the form sets is
+    /// usually locked after the first save with [`disabled_on`](Self::disabled_on), as
+    /// WordPress keeps a post type's key.
+    pub fn record_route_key_name(mut self, key: impl Into<String>) -> Self {
+        self.record_route_key_name = Some(key.into());
+        self
+    }
+
+    /// Shows the field `field` but does not let the user change it when `rule` holds, as
+    /// Filament's `->disabled()`. A disabled field is not saved. See
+    /// [`FieldConditions::disabled`].
+    pub fn disabled(
+        mut self,
+        field: impl Into<String>,
+        rule: impl Fn(&FormContext<'_>) -> bool + Send + Sync + 'static,
+    ) -> Self {
+        self.conditions = self.conditions.disabled(field, rule);
+        self
+    }
+
+    /// Disables the field `field` on the forms of `operations`, as Filament's
+    /// `->disabledOn('edit')`. See [`FieldConditions::disabled_on`].
+    pub fn disabled_on(mut self, field: impl Into<String>, operations: &[Operation]) -> Self {
+        self.conditions = self.conditions.disabled_on(field, operations);
         self
     }
 
@@ -1248,6 +1333,15 @@ impl RegisteredResource {
     /// The settings of the form's repeaters and flexible content fields.
     pub fn repeaters(&self) -> &Repeaters {
         &self.resource.repeaters
+    }
+
+    /// The row key that addresses a record in the panel's URLs: the
+    /// [`record_route_key_name`](RuntimeResource::record_route_key_name), or `id`.
+    pub fn record_route_key_name(&self) -> &str {
+        self.resource
+            .record_route_key_name
+            .as_deref()
+            .unwrap_or("id")
     }
 
     /// Whether the record of the edit form `form` is read-only for its user

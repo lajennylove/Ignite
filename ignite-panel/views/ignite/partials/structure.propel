@@ -1,7 +1,7 @@
 {{-- A repeater, group or flexible content field on a resource form, as Filament's Repeater, Fieldset and Builder: its parts in order (see StructureContext in src/views.rs), so any nesting renders without recursion. Each sub-field input is named after its place, such as members[0][name], and the panel builds the field's JSON value from them. The buttons send the form to the form's live URL (formaction), which shows it again with the row added, deleted or moved and saves nothing; the form script does it without leaving the page. --}}
 @foreach (part in field.parts)
 @if (part.is_open)
-<div class="ig-structure grid gap-3" data-ignite-field="{{ $part.name }}" data-ignite-structure="{{ $part.kind }}">
+@if (part.disabled)<fieldset disabled style="border:0;margin:0;padding:0;min-width:0">@endif<div class="ig-structure grid gap-3" data-ignite-field="{{ $part.name }}" data-ignite-structure="{{ $part.kind }}">
   <span class="ig-label">{{ $part.label }}@if (part.required) *@endif</span>
   @if (part.is_list)<input type="hidden" name="{{ $part.name }}" value="">@else<input type="hidden" name="{{ $part.marker }}" value="1">@endif
   <div class="@if (part.is_list)grid gap-3@else{{-- a group: one bordered block --}}ig-structure-row grid gap-4 rounded-md border border-border@endif">
@@ -38,6 +38,6 @@
   @if (part.has_error)
   <p class="mt-1.5 mb-0 text-sm text-error-emphasis">{{ $part.error }}</p>
   @endif
-</div>
+</div>@if (part.disabled)</fieldset>@endif
 @endif
 @endforeach

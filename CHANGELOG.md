@@ -122,6 +122,18 @@ All notable changes to Ignite are listed here. The format follows
   of such a record has the heading "View <Singular> #<id>", its inputs in a disabled
   fieldset, no Save and a "Back" link; the list's button says "View"; its save and its live
   URL answer 403 Forbidden. `ignite_core::FormRule` and `FormNotice` are the rules' types.
+- String record keys, as Filament's `$recordRouteKeyName`:
+  `RuntimeResource::record_route_key_name("key")` addresses each record in the panel's URLs
+  (edit, save, live form, delete, row actions) by that row key instead of the numeric `id`,
+  percent-encoded as one path segment, and `RuntimeData::find_by_key_for`,
+  `try_update_by_key_for` and `delete_by_key_for` find, update and delete by it (the defaults
+  parse the key as an id and call the id methods, so existing data layers are unchanged). A
+  row action's handler is given the row's numeric `id`, or 0 when it has none.
+- Disabled fields, as Filament's `disabled()` and `disabledOn('edit')`:
+  `FieldConditions::disabled(field, rule)`, `disabled_on(field, operations)` and
+  `is_disabled`, with the same `RuntimeResource` builders. A disabled field shows its value
+  in a disabled fieldset and, as in Filament, is not saved, whatever a request sends: such as
+  a post type's key, set on create and locked after the first save.
 
 ### Changed
 

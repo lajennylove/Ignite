@@ -83,8 +83,19 @@ pub(crate) trait Erased: Send + Sync {
         user: &ActingUser,
         query: &ListQuery,
     ) -> Result<(Vec<Value>, i64), Error>;
-    async fn find(&self, db: &Database, user: &ActingUser, id: i64)
-        -> Result<Option<Value>, Error>;
+    /// The record addressed by `key` in the panel's URLs: the numeric `id`, or the key of a
+    /// runtime resource's [`record_route_key_name`](ignite_core::RuntimeResource::record_route_key_name).
+    async fn find(
+        &self,
+        db: &Database,
+        user: &ActingUser,
+        key: &str,
+    ) -> Result<Option<Value>, Error>;
+    /// The row key that addresses a record in the panel's URLs: `id`, or the runtime
+    /// resource's `record_route_key_name`.
+    fn record_route_key_name(&self) -> &str {
+        "id"
+    }
     /// `Err(errors)` when the form does not validate; the database is not touched then. The
     /// fields of `hidden` are left out: they are not checked and not written.
     async fn create(
@@ -98,11 +109,11 @@ pub(crate) trait Erased: Send + Sync {
         &self,
         db: &Database,
         user: &ActingUser,
-        id: i64,
+        key: &str,
         form: &FormInput,
         hidden: &BTreeSet<String>,
     ) -> Result<Result<Value, FieldErrors>, Error>;
-    async fn delete(&self, db: &Database, user: &ActingUser, id: i64) -> Result<u64, Error>;
+    async fn delete(&self, db: &Database, user: &ActingUser, key: &str) -> Result<u64, Error>;
     /// The dashboard cards this resource provides for `user`.
     async fn stats(&self, db: &Database, user: &ActingUser) -> Result<Vec<Stat>, Error>;
     /// The dashboard table this resource declares, if any.
@@ -310,8 +321,12 @@ impl<R: IgniteResource> Erased for Adapter<R> {
         &self,
         db: &Database,
         user: &ActingUser,
-        id: i64,
+        key: &str,
     ) -> Result<Option<Value>, Error> {
+        // A static resource's records are addressed by their id: other text is no record.
+        let Ok(id) = key.parse::<i64>() else {
+            return Ok(None);
+        };
         R::find_for(db, user, id).await?.map(to_json).transpose()
     }
 
@@ -337,10 +352,13 @@ impl<R: IgniteResource> Erased for Adapter<R> {
         &self,
         db: &Database,
         user: &ActingUser,
-        id: i64,
+        key: &str,
         form: &FormInput,
         hidden: &BTreeSet<String>,
     ) -> Result<Result<Value, FieldErrors>, Error> {
+        let id = key
+            .parse::<i64>()
+            .map_err(|_| Error::NotFound { table: R::SLUG })?;
         let form = form.without(hidden.iter().map(String::as_str));
         let validated = shown_errors(R::validate_update(&form), hidden, R::SLUG)?;
         match checked::<R>(db, user, &shown(&self.fields, hidden), &form, validated).await? {
@@ -352,8 +370,11 @@ impl<R: IgniteResource> Erased for Adapter<R> {
         }
     }
 
-    async fn delete(&self, db: &Database, user: &ActingUser, id: i64) -> Result<u64, Error> {
-        R::delete_for(db, user, id).await
+    async fn delete(&self, db: &Database, user: &ActingUser, key: &str) -> Result<u64, Error> {
+        match key.parse::<i64>() {
+            Ok(id) => R::delete_for(db, user, id).await,
+            Err(_) => Ok(0),
+        }
     }
 
     async fn stats(&self, db: &Database, user: &ActingUser) -> Result<Vec<Stat>, Error> {
@@ -884,15 +905,19 @@ impl Erased for RuntimeAdapter {
         &self,
         db: &Database,
         user: &ActingUser,
-        id: i64,
+        key: &str,
     ) -> Result<Option<Value>, Error> {
         Ok(self
             .0
             .resource()
             .data
-            .find_for(db, user, id)
+            .find_by_key_for(db, user, key)
             .await?
             .map(Value::Object))
+    }
+
+    fn record_route_key_name(&self) -> &str {
+        self.0.record_route_key_name()
     }
 
     async fn create(
@@ -912,18 +937,24 @@ impl Erased for RuntimeAdapter {
         &self,
         db: &Database,
         user: &ActingUser,
-        id: i64,
+        key: &str,
         form: &FormInput,
         hidden: &BTreeSet<String>,
     ) -> Result<Result<Value, FieldErrors>, Error> {
         let validated = self.checked(db, user, form, false, hidden).await?;
         let data = &self.0.resource().data;
-        self.save(validated, |row| data.try_update_for(db, user, id, row))
-            .await
+        self.save(validated, |row| {
+            data.try_update_by_key_for(db, user, key, row)
+        })
+        .await
     }
 
-    async fn delete(&self, db: &Database, user: &ActingUser, id: i64) -> Result<u64, Error> {
-        self.0.resource().data.delete_for(db, user, id).await
+    async fn delete(&self, db: &Database, user: &ActingUser, key: &str) -> Result<u64, Error> {
+        self.0
+            .resource()
+            .data
+            .delete_by_key_for(db, user, key)
+            .await
     }
 
     /// The cards its data source gives (none by default).

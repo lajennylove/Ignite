@@ -1,5 +1,5 @@
-{{-- One form field: its label, its input and its error. The form and the profile page include it inside `@foreach (field in ...)`. The kinds added for custom fields render through partials/fields. A live field is marked `data-ignite-live`: the panel's script shows the form again when it changes. A slug field is marked `data-ignite-slug-from` with the field it is filled from, and `data-ignite-slug-locked` when it no longer follows it. --}}
-<div data-ignite-field="{{ $field.name }}"@if (field.live) data-ignite-live@endif>
+{{-- One form field: its label, its input and its error. The form and the profile page include it inside `@foreach (field in ...)`. The kinds added for custom fields render through partials/fields. A live field is marked `data-ignite-live`: the panel's script shows the form again when it changes. A slug field is marked `data-ignite-slug-from` with the field it is filled from, and `data-ignite-slug-locked` when it no longer follows it. A disabled field (FieldConditions::disabled) has its input in a disabled fieldset, so the browser sends nothing for it. --}}
+<div data-ignite-field="{{ $field.name }}"@if (field.live) data-ignite-live@endif>@if (field.disabled)<fieldset disabled style="border:0;margin:0;padding:0;min-width:0">@endif
   @if (field.is_checkbox)
     <label class="flex items-center gap-2 text-sm font-semibold text-heading">
       <input type="checkbox" class="h-4 w-4 rounded border-bordergray text-primary focus:ring-primary" name="{{ $field.name }}" value="on" @if (field.checked)checked@endif>
@@ -58,4 +58,4 @@
   @if (field.has_error)
     <p class="mt-1.5 mb-0 text-sm text-error-emphasis">{{ $field.error }}</p>
   @endif
-</div>
+</div>@if (field.disabled)</fieldset>@endif

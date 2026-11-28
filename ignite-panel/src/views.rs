@@ -1108,6 +1108,9 @@ pub(crate) struct FieldView {
     /// elsewhere, such as on the profile, is edited as JSON.
     pub(crate) is_structured: bool,
     pub(crate) parts: Vec<PartView>,
+    /// Whether the field is shown but not editable (`FieldConditions::disabled`): its inputs
+    /// are in a disabled fieldset, so the browser sends nothing for them.
+    pub(crate) disabled: bool,
 }
 
 /// One part of a structured field, in display order: the start of a repeater, group or
@@ -1155,6 +1158,9 @@ pub(crate) struct PartView {
     pub(crate) blocks: Vec<BlockChoiceView>,
     pub(crate) has_error: bool,
     pub(crate) error: String,
+    /// Whether the structured field is disabled: its start and end parts open and close a
+    /// disabled fieldset.
+    pub(crate) disabled: bool,
 }
 
 /// One flag per kind added for custom fields. Propel reads a path, not a comparison, so the
@@ -1415,6 +1421,7 @@ impl FieldView {
             error: error.unwrap_or_default(),
             is_structured: false,
             parts: Vec::new(),
+            disabled: false,
         }
     }
 }

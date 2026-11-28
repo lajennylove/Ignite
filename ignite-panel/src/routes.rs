@@ -1123,7 +1123,7 @@ async fn index(
     let can_delete = session.may(slug, Action::Delete);
     let mut rows = Vec::with_capacity(records.len());
     for record in &records {
-        let id = record_id(record)?;
+        let key = record_key(resource.as_ref(), record)?;
         let record_can_update =
             can_update && record_allowed(db, slug, &session, Action::Update, record).await?;
         let record_can_delete =
@@ -1133,7 +1133,7 @@ async fn index(
         let actions = row_action_views(
             resource.as_ref(),
             record,
-            id,
+            &key,
             &index_url,
             record_can_update,
             record_can_delete,
@@ -1160,9 +1160,9 @@ async fn index(
                     }))
                 })
                 .collect(),
-            edit_url: format!("{index_url}/{id}/edit"),
+            edit_url: format!("{index_url}/{key}/edit"),
             edit_label: if read_only { "View" } else { "Edit" },
-            delete_url: format!("{index_url}/{id}/delete"),
+            delete_url: format!("{index_url}/{key}/delete"),
             can_update: record_can_update,
             can_delete: record_can_delete && !default_delete_hidden,
             has_actions: !actions.is_empty(),
@@ -1278,7 +1278,13 @@ async fn new_form(
         registry,
         layout,
         &resource,
-        FormTarget::create(registry, &resource),
+        FormTarget::create(registry, &resource).with_disabled(disabled_fields(
+            &resource,
+            Operation::Create,
+            None,
+            &session,
+            &form,
+        )),
         &form,
         &FieldErrors::new(),
         &choices,
@@ -1316,7 +1322,13 @@ async fn new_form_live(
         registry,
         layout,
         &resource,
-        FormTarget::create(registry, &resource),
+        FormTarget::create(registry, &resource).with_disabled(disabled_fields(
+            &resource,
+            Operation::Create,
+            None,
+            &session,
+            &form,
+        )),
         &form,
         &FieldErrors::new(),
         &choices,
@@ -1340,9 +1352,11 @@ async fn create(
     check_csrf(cookies, &registry.secret, form.get("_token"))?;
     let form = structured_input(resource.fields(), &form);
     let hidden = hidden_fields(&resource, Operation::Create, None, &session, &form);
+    // A disabled field is not saved, as in Filament: it is left out as a hidden one is.
+    let skipped = skipped_fields(&hidden, &resource, Operation::Create, None, &session, &form);
 
     let outcome = resource
-        .create(db.inner(), session.acting_user(), &form, &hidden)
+        .create(db.inner(), session.acting_user(), &form, &skipped)
         .await
         .map_err(db_status)?;
 
@@ -1373,7 +1387,13 @@ async fn create(
                     registry,
                     layout,
                     &resource,
-                    FormTarget::create(registry, &resource),
+                    FormTarget::create(registry, &resource).with_disabled(disabled_fields(
+                        &resource,
+                        Operation::Create,
+                        None,
+                        &session,
+                        &form,
+                    )),
                     &form,
                     &errors,
                     &choices,
@@ -1394,7 +1414,6 @@ async fn edit_form(
     db: &State<Database>,
 ) -> Result<PropelView, Status> {
     authorize(registry, &session, slug, Action::Update)?;
-    let id = parse_id(id)?;
     let resource = registry.find(slug).ok_or(Status::NotFound)?;
 
     let record = authorize_record(db, &session, &resource, id, Action::Update).await?;
@@ -1423,7 +1442,15 @@ async fn edit_form(
         registry,
         layout,
         &resource,
-        target.with_slug_locks(slug_locks(&resource, &record, &session, &form)),
+        target
+            .with_disabled(disabled_fields(
+                &resource,
+                Operation::Edit,
+                Some(&record),
+                &session,
+                &form,
+            ))
+            .with_slug_locks(slug_locks(&resource, &record, &session, &form)),
         &form,
         &FieldErrors::new(),
         &choices,
@@ -1445,7 +1472,6 @@ async fn edit_form_live(
     db: &State<Database>,
 ) -> Result<PropelView, Status> {
     authorize(registry, &session, slug, Action::Update)?;
-    let id = parse_id(id)?;
     let resource = registry.find(slug).ok_or(Status::NotFound)?;
     let form = read_form(body).await?;
     check_csrf(cookies, &registry.secret, form.get("_token"))?;
@@ -1470,6 +1496,13 @@ async fn edit_form_live(
         layout,
         &resource,
         FormTarget::edit(registry, &resource, id)
+            .with_disabled(disabled_fields(
+                &resource,
+                Operation::Edit,
+                Some(&record),
+                &session,
+                &form,
+            ))
             .with_slug_locks(slug_locks(&resource, &record, &session, &form)),
         &form,
         &FieldErrors::new(),
@@ -1489,7 +1522,6 @@ async fn update(
     db: &State<Database>,
 ) -> Result<Reply, Status> {
     authorize(registry, &session, slug, Action::Update)?;
-    let id = parse_id(id)?;
     let resource = registry.find(slug).ok_or(Status::NotFound)?;
     let index_url = format!("{}/{}", registry.mount, resource.slug());
     let form = read_form(body).await?;
@@ -1498,9 +1530,17 @@ async fn update(
     let record = authorize_record(db, &session, &resource, id, Action::Update).await?;
     refuse_read_only(resource.as_ref(), &record, &session)?;
     let hidden = hidden_fields(&resource, Operation::Edit, Some(&record), &session, &form);
+    let skipped = skipped_fields(
+        &hidden,
+        &resource,
+        Operation::Edit,
+        Some(&record),
+        &session,
+        &form,
+    );
 
     let outcome = resource
-        .update(db.inner(), session.acting_user(), id, &form, &hidden)
+        .update(db.inner(), session.acting_user(), id, &form, &skipped)
         .await
         .map_err(db_status)?;
 
@@ -1526,6 +1566,13 @@ async fn update(
                     layout,
                     &resource,
                     FormTarget::edit(registry, &resource, id)
+                        .with_disabled(disabled_fields(
+                            &resource,
+                            Operation::Edit,
+                            Some(&record),
+                            &session,
+                            &form,
+                        ))
                         .with_slug_locks(slug_locks(&resource, &record, &session, &form)),
                     &form,
                     &errors,
@@ -1550,7 +1597,6 @@ async fn destroy(
     authorize(registry, &session, slug, Action::Delete)?;
     let form = read_form(body).await?;
     check_csrf(cookies, &registry.secret, form.get("_token"))?;
-    let id = parse_id(id)?;
     let resource = registry.find(slug).ok_or(Status::NotFound)?;
     let index_url = format!("{}/{}", registry.mount, resource.slug());
 
@@ -1600,7 +1646,6 @@ async fn run_row_action(
     authorize(registry, &session, slug, ability)?;
     let form = read_form(body).await?;
     check_csrf(cookies, &registry.secret, form.get("_token"))?;
-    let id = parse_id(id)?;
     let index_url = format!("{}/{}", registry.mount, resource.slug());
 
     let record = authorize_record(db, &session, &resource, id, ability).await?;
@@ -1608,6 +1653,13 @@ async fn run_row_action(
     if !action.is_visible(&row) {
         return Err(Status::Forbidden);
     }
+    // The handler is given the record's numeric id; a record addressed by another key has
+    // it in the row, and 0 here when it has no `id`.
+    let id = row
+        .get("id")
+        .and_then(Value::as_i64)
+        .or_else(|| id.parse().ok())
+        .unwrap_or(0);
     let outcome = action
         .run(db.inner(), session.acting_user(), id, &row)
         .await
@@ -1662,7 +1714,7 @@ fn back_url(back: Option<&str>, index_url: &str) -> String {
 fn row_action_views(
     resource: &dyn Erased,
     record: &Value,
-    id: i64,
+    key: &str,
     index_url: &str,
     can_update: bool,
     can_delete: bool,
@@ -1682,7 +1734,7 @@ fn row_action_views(
                 if !allowed {
                     return None;
                 }
-                format!("{index_url}/{id}/actions/{}", action.name())
+                format!("{index_url}/{key}/actions/{}", action.name())
             } else {
                 action.url_for(row)?
             };
@@ -1735,6 +1787,8 @@ struct FormTarget {
     live_url: String,
     /// The slug fields that no longer follow their source (`slug_locked_when`).
     slug_locks: BTreeSet<String>,
+    /// The fields shown disabled (`FieldConditions::disabled`).
+    disabled: BTreeSet<String>,
 }
 
 impl FormTarget {
@@ -1749,20 +1803,23 @@ impl FormTarget {
             read_only: false,
             notice: None,
             slug_locks: BTreeSet::new(),
+            disabled: BTreeSet::new(),
         }
     }
 
     /// The form that edits the record `id` of `resource`.
-    fn edit(registry: &Registry, resource: &Arc<dyn Erased>, id: i64) -> Self {
+    fn edit(registry: &Registry, resource: &Arc<dyn Erased>, id: &str) -> Self {
         let index_url = format!("{}/{}", registry.mount, resource.slug());
+        let segment = path_segment(id);
         FormTarget {
             heading: format!("Edit {} #{id}", resource.singular()),
-            action: format!("{index_url}/{id}"),
+            action: format!("{index_url}/{segment}"),
             submit_label: "Save",
             read_only: false,
             notice: None,
-            live_url: format!("{index_url}/{id}/edit/live"),
+            live_url: format!("{index_url}/{segment}/edit/live"),
             slug_locks: BTreeSet::new(),
+            disabled: BTreeSet::new(),
         }
     }
 
@@ -1771,7 +1828,7 @@ impl FormTarget {
     fn view(
         registry: &Registry,
         resource: &Arc<dyn Erased>,
-        id: i64,
+        id: &str,
         notice: Option<String>,
     ) -> Self {
         FormTarget {
@@ -1780,6 +1837,12 @@ impl FormTarget {
             notice,
             ..FormTarget::edit(registry, resource, id)
         }
+    }
+
+    /// The form with the fields `disabled` shown disabled.
+    fn with_disabled(mut self, disabled: BTreeSet<String>) -> Self {
+        self.disabled = disabled;
+        self
     }
 
     /// The form with the slug fields `locks` no longer following their source.
@@ -1824,11 +1887,19 @@ fn form_view(
             ops_url: &target.live_url,
         },
     );
+    for field in &mut fields {
+        field.disabled = target.disabled.contains(&field.name);
+    }
+    for part in fields.iter_mut().flat_map(|field| field.parts.iter_mut()) {
+        part.disabled = target.disabled.contains(&part.name);
+    }
     let has_structure = fields.iter().any(|field| field.is_structured);
     // A read-only form changes nothing, so it sends nothing to the live URL.
     let has_live = !target.read_only && (has_structure || fields.iter().any(|field| field.live));
+    // A disabled field sends nothing, so the live form shows its stored value.
     let shown_fields = fields
         .iter()
+        .filter(|field| !field.disabled)
         .map(|field| field.name.as_str())
         .collect::<Vec<_>>()
         .join(",");
@@ -1967,6 +2038,43 @@ fn hidden_fields(
     )
 }
 
+/// The fields of `resource` disabled on the form for `operation`, editing `record`, whose
+/// fields hold `form` (see `FieldConditions::disabled`).
+fn disabled_fields(
+    resource: &Arc<dyn Erased>,
+    operation: Operation,
+    record: Option<&Value>,
+    session: &AdminUser,
+    form: &FormInput,
+) -> BTreeSet<String> {
+    let context = FormContext::new(
+        operation,
+        record.and_then(Value::as_object),
+        session.acting_user(),
+        form,
+    );
+    resource
+        .fields()
+        .iter()
+        .filter(|field| resource.conditions().is_disabled(&field.name, &context))
+        .map(|field| field.name.clone())
+        .collect()
+}
+
+/// The fields a save leaves out: the `hidden` ones and the disabled ones.
+fn skipped_fields(
+    hidden: &BTreeSet<String>,
+    resource: &Arc<dyn Erased>,
+    operation: Operation,
+    record: Option<&Value>,
+    session: &AdminUser,
+    form: &FormInput,
+) -> BTreeSet<String> {
+    let mut skipped = hidden.clone();
+    skipped.extend(disabled_fields(resource, operation, record, session, form));
+    skipped
+}
+
 /// Refuses a request the signed-in user may not make on the resource at `slug`: 404 for an
 /// unknown resource, and 403 Forbidden when the user lacks the ability. Each resource
 /// route calls it first, as Laravel's policies do.
@@ -1992,7 +2100,7 @@ async fn authorize_record(
     db: &State<Database>,
     session: &AdminUser,
     resource: &Arc<dyn Erased>,
-    id: i64,
+    id: &str,
     action: Action,
 ) -> Result<Value, Status> {
     let record = resource
@@ -2052,16 +2160,37 @@ pub(crate) fn db_status(error: OrbitError) -> Status {
     }
 }
 
-/// Parses the id in a path. Anything that is not a whole number is not a row, so 404.
-fn parse_id(id: &str) -> Result<i64, Status> {
-    id.parse().map_err(|_| Status::NotFound)
+/// The key that addresses `record` in the panel's URLs, as one path segment: its numeric
+/// `id`, or the value of the resource's `record_route_key_name`, percent-encoded. A record
+/// without it is a server error.
+fn record_key(resource: &dyn Erased, record: &Value) -> Result<String, Status> {
+    let name = resource.record_route_key_name();
+    let key = match record.get(name) {
+        Some(Value::Number(number)) if name != "id" || number.is_i64() => number.to_string(),
+        Some(Value::String(text)) if name != "id" && !text.is_empty() => text.clone(),
+        _ => None.ok_or_else(|| {
+            if name == "id" {
+                rocket::error!("ignite: a record has no numeric `id` key; see https://ignite.rocketboost.rs/docs/resources");
+            } else {
+                rocket::error!("ignite: a record of `{}` has no `{name}` key, its route key", resource.slug());
+            }
+            Status::InternalServerError
+        })?,
+    };
+    Ok(path_segment(&key))
 }
 
-fn record_id(record: &Value) -> Result<i64, Status> {
-    record.get("id").and_then(Value::as_i64).ok_or_else(|| {
-        rocket::error!("ignite: a record has no numeric `id` key; see https://ignite.rocketboost.rs/docs/resources");
-        Status::InternalServerError
-    })
+/// `text` as one URL path segment: every byte but the unreserved ones (`A-Z a-z 0-9 - . _ ~`)
+/// percent-encoded, so a key with a slash or a space stays one segment.
+fn path_segment(text: &str) -> String {
+    text.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                (b as char).to_string()
+            }
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
 }
 
 /// The list URL with the search, tab, sort and page kept in the query string.
