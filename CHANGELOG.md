@@ -17,6 +17,16 @@ All notable changes to Ignite are listed here. The format follows
   `data-theme`. The brand has the theme values `has_dark_logo` and `dark_logo`. Without a dark
   logo, the markup does not change.
 
+### Changed
+
+- **Breaking:** a form widget (`FormWidget`) whose save the resource refuses shows its
+  validation messages on the dashboard, under the widget's fields and with the typed values
+  kept, with the status 422, as a Filament widget's form shows its errors in place; before, the
+  resource's create page showed them. The widget's form sends `_widget`, its place among the
+  dashboard's widgets, so the messages go to the widget that was sent (a form without it, or
+  with an unknown one, shows them on the resource's first form widget). The theme value
+  `widget_key` of each widget is that place. A resource's own create form is unchanged.
+
 ## [0.6.7] - 2026-11-27
 
 ### Added

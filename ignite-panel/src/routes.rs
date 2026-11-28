@@ -129,6 +129,27 @@ async fn dashboard(
 ) -> Result<PropelView, Status> {
     let flash = take_flash(cookies, &registry.secret);
     let token = csrf_token(cookies, &registry.secret);
+    dashboard_page(registry, &session, db.inner(), flash, token, None).await
+}
+
+/// A form widget whose save the resource refused: the widget, by its place among the
+/// dashboard's widgets, and the values and messages it shows again.
+struct RefusedWidget<'a> {
+    index: usize,
+    form: &'a FormInput,
+    errors: &'a FieldErrors,
+}
+
+/// The dashboard page, with the form widget `refused` showing its typed values and its
+/// validation messages, if any.
+async fn dashboard_page(
+    registry: &Registry,
+    session: &AdminUser,
+    db: &Database,
+    flash: Option<String>,
+    token: String,
+    refused: Option<RefusedWidget<'_>>,
+) -> Result<PropelView, Status> {
     // The dashboard shows a resource's cards and table only when the user may view its records.
     let resources: Vec<Arc<dyn Erased>> = registry
         .all()
@@ -140,11 +161,11 @@ async fn dashboard(
     let user = session.acting_user();
     let mut stats = Vec::new();
     for widget in registry.widgets.iter().filter(|w| w.can_view(user)) {
-        stats.extend(widget.stats(db.inner(), user).await.map_err(db_status)?);
+        stats.extend(widget.stats(db, user).await.map_err(db_status)?);
     }
     let mut tables = Vec::new();
     for resource in &resources {
-        let database = db.inner();
+        let database = db;
         stats.extend(resource.stats(database, user).await.map_err(db_status)?);
         if let Some(declared) = resource.latest_records() {
             let limit = declared.limit.max(1);
@@ -167,8 +188,8 @@ async fn dashboard(
         })
         .collect();
 
-    let widgets = dashboard_widgets(registry, &session, db.inner(), &token).await?;
-    let layout = Layout::new(registry, Some(&session), "", flash, token.clone());
+    let widgets = dashboard_widgets(registry, session, db, &token, refused.as_ref()).await?;
+    let layout = Layout::new(registry, Some(session), "", flash, token.clone());
     let page = DashboardPage {
         home_url: layout.home_url,
         signed_in: layout.signed_in,
@@ -209,12 +230,13 @@ async fn dashboard(
 
 /// The list and form widgets of the dashboard the signed-in user sees, in the order they were
 /// added: a list widget its `can_view` allows, and a form widget whose resource exists and lets
-/// the user create a record.
+/// the user create a record. The form widget `refused` shows its typed values and messages.
 async fn dashboard_widgets(
     registry: &Registry,
     session: &AdminUser,
     db: &Database,
     token: &str,
+    refused: Option<&RefusedWidget<'_>>,
 ) -> Result<Vec<WidgetView>, Status> {
     let user = session.acting_user();
     let mut views = Vec::new();
@@ -253,17 +275,18 @@ async fn dashboard_widgets(
                     lookups,
                     media: HashMap::new(),
                 };
+                let empty = (FormInput::default(), FieldErrors::new());
+                let (values, errors) = match refused {
+                    Some(refused) if refused.index == index => (refused.form, refused.errors),
+                    _ => (&empty.0, &empty.1),
+                };
                 views.push(WidgetView {
                     is_form: true,
                     action: format!("{}/{}", registry.mount, resource.slug()),
                     csrf_token: token.to_string(),
                     back_url: registry.mount.clone(),
-                    fields: field_views_with(
-                        &defs,
-                        &FormInput::default(),
-                        &FieldErrors::new(),
-                        &choices,
-                    ),
+                    widget_key: index.to_string(),
+                    fields: field_views_with(&defs, values, errors, &choices),
                     hidden: widget
                         .get_hidden()
                         .iter()
@@ -279,6 +302,22 @@ async fn dashboard_widgets(
         }
     }
     Ok(views)
+}
+
+/// The place among the dashboard's widgets of the form widget of the resource `slug` whose
+/// save was refused: the one the form names in `_widget`, else the resource's first form
+/// widget. `None` when the dashboard has no form widget of the resource.
+fn refused_widget(registry: &Registry, slug: &str, form: &FormInput) -> Option<usize> {
+    let of_resource = |index: &usize| {
+        matches!(
+            registry.dashboard_widgets.get(*index),
+            Some(DashboardWidget::Form(widget)) if widget.get_resource() == slug
+        )
+    };
+    form.get("_widget")
+        .and_then(|key| key.parse::<usize>().ok())
+        .filter(of_resource)
+        .or_else(|| (0..registry.dashboard_widgets.len()).find(of_resource))
 }
 
 /// Serves the panel's built stylesheet and script, under `{mount}/build`. The names are
@@ -1355,6 +1394,7 @@ async fn create(
     // A disabled field is not saved, as in Filament: it is left out as a hidden one is.
     let skipped = skipped_fields(&hidden, &resource, Operation::Create, None, &session, &form);
 
+    let from_dashboard = form.get("_back") == Some(registry.mount.as_str());
     let outcome = resource
         .create(db.inner(), session.acting_user(), &form, &skipped)
         .await
@@ -1364,7 +1404,7 @@ async fn create(
         Ok(_) => {
             set_flash(cookies, &registry.secret, "Record created.");
             // A dashboard form widget comes back to the dashboard; nothing else is followed.
-            let target = if form.get("_back") == Some(registry.mount.as_str()) {
+            let target = if from_dashboard {
                 registry.mount.clone()
             } else {
                 index_url
@@ -1373,6 +1413,26 @@ async fn create(
         }
         Err(errors) => {
             let form = live_values(resource.fields(), None, &form);
+            // A dashboard form widget shows its messages on the dashboard, under its fields,
+            // with the values typed, as a Filament widget's form shows its validation errors.
+            if from_dashboard {
+                if let Some(index) = refused_widget(registry, resource.slug(), &form) {
+                    let page = dashboard_page(
+                        registry,
+                        &session,
+                        db.inner(),
+                        None,
+                        csrf_token(cookies, &registry.secret),
+                        Some(RefusedWidget {
+                            index,
+                            form: &form,
+                            errors: &errors,
+                        }),
+                    )
+                    .await?;
+                    return Ok(Reply::Page(Status::UnprocessableEntity, page));
+                }
+            }
             let choices = form_choices(db, &session, &resource, &form).await?;
             let layout = Layout::new(
                 registry,

@@ -1,9 +1,10 @@
-{{-- A form widget of the dashboard (FormWidget): a short form that creates a record of a resource, as WordPress's "Quick Draft". It posts to the resource's create route with the CSRF token, and comes back to the dashboard. --}}
+{{-- A form widget of the dashboard (FormWidget): a short form that creates a record of a resource, as WordPress's "Quick Draft". It posts to the resource's create route with the CSRF token, and comes back to the dashboard; a save the resource refuses shows the dashboard again, with the messages under this widget's fields. --}}
 <section class="ig-card" aria-labelledby="{{ $widget.title_id }}">
   <h2 class="mb-5" id="{{ $widget.title_id }}">{{ $widget.title }}</h2>
   <form class="grid gap-5" method="post" action="{{ $widget.action }}">
     <input type="hidden" name="_token" value="{{ $widget.csrf_token }}">
     <input type="hidden" name="_back" value="{{ $widget.back_url }}">
+    <input type="hidden" name="_widget" value="{{ $widget.widget_key }}">
     @foreach (input in widget.hidden)
       <input type="hidden" name="{{ $input.name }}" value="{{ $input.value }}">
     @endforeach

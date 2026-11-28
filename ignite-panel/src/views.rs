@@ -519,6 +519,9 @@ pub(crate) struct WidgetView {
     pub(crate) action: String,
     pub(crate) csrf_token: String,
     pub(crate) back_url: String,
+    /// The widget's place among the dashboard's widgets, sent as `_widget`, so a refused save
+    /// shows its messages on this widget.
+    pub(crate) widget_key: String,
     pub(crate) fields: Vec<FieldView>,
     pub(crate) hidden: Vec<HiddenView>,
     pub(crate) submit_label: String,
@@ -553,6 +556,7 @@ impl WidgetView {
             action: String::new(),
             csrf_token: String::new(),
             back_url: String::new(),
+            widget_key: String::new(),
             fields: Vec::new(),
             hidden: Vec::new(),
             submit_label: String::new(),

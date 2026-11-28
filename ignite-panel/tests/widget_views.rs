@@ -196,7 +196,7 @@ fn a_form_widget_creates_a_record_and_comes_back_to_the_dashboard() {
         Some("/admin/widgets")
     );
 
-    // A form that does not validate shows the resource's form with its errors.
+    // A form that does not validate shows the dashboard with its errors (see widget_errors.rs).
     let response = client
         .post("/admin/widgets")
         .header(ContentType::Form)
