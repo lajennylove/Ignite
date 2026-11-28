@@ -1070,6 +1070,19 @@ impl RuntimeResource {
     }
 }
 
+/// Turns a submitted form into a [`Row`] for the fields `fields` that are not a resource's,
+/// such as the fields an app adds to the panel's profile page, with the checks and the values of
+/// [`RegisteredResource::validate_update`]: a blank password and a field the form did not send
+/// are left out of the row, an optional field sent blank is `null`, and a checkbox the form did
+/// not send is `false`. Each error is keyed by its field's name. A lookup's value is not checked
+/// against its choices here: the panel checks it, as for a resource.
+pub fn validate_fields_for_update(
+    fields: &[FieldDef],
+    form: &FormInput,
+) -> Result<Row, FieldErrors> {
+    validate_fields(fields, form, false, &BTreeSet::new(), &Repeaters::default())
+}
+
 /// The checks of [`RegisteredResource::validate`]. Each error is keyed by its field's name.
 /// The fields of `hidden` are skipped: they are not checked and the row has no key for them.
 fn validate_fields(

@@ -437,13 +437,17 @@ impl Layout {
             signed_in: user.is_some(),
             user_name: user.map(|u| u.name().to_string()).unwrap_or_default(),
             user_initials: user.map(|u| initials(u.name())).unwrap_or_default(),
-            has_avatar: user.is_some_and(|u| u.has_avatar()),
-            // A timestamp in the URL makes the browser fetch the picture again after a change.
-            avatar_url: format!(
-                "{}/profile/avatar?v={}",
-                registry.mount,
-                chrono::Utc::now().timestamp_millis()
-            ),
+            has_avatar: user.is_some_and(|u| u.has_avatar() || u.avatar_url().is_some()),
+            // The app's picture of the user wins over an uploaded one. A timestamp in the URL of
+            // an uploaded picture makes the browser fetch it again after a change.
+            avatar_url: match user.and_then(AdminUser::avatar_url) {
+                Some(url) => url.to_string(),
+                None => format!(
+                    "{}/profile/avatar?v={}",
+                    registry.mount,
+                    chrono::Utc::now().timestamp_millis()
+                ),
+            },
             // A theme without a dark mode renders light, whatever the user chose elsewhere.
             theme: user
                 .filter(|_| admin_theme.theme.dark_mode())
@@ -807,6 +811,12 @@ pub(crate) struct ProfilePage {
     /// ([`AdminTheme::theme_switcher_note`](crate::AdminTheme::theme_switcher_note)).
     pub(crate) has_theme_switcher_note: bool,
     pub(crate) theme_switcher_note: String,
+    /// Whether the app replaced the picture upload with its own field
+    /// ([`Ignite::profile_picture`](crate::Ignite::profile_picture)): the picture card shows
+    /// `picture_fields` in a form that posts to `picture_action`.
+    pub(crate) has_picture_field: bool,
+    pub(crate) picture_action: String,
+    pub(crate) picture_fields: Vec<FieldView>,
 }
 
 /// The panel's 404 page (see [`crate::not_found`]): the layout's values, flat, then the page's

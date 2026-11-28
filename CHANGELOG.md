@@ -20,6 +20,37 @@ All notable changes to Ignite are listed here. The format follows
   is escaped. The catcher is registered at the mount path only, so the app's public 404 (its own
   catcher, or Rocket's) does not change. A one-segment path such as `/admin/unknown` is a
   resource's list, so a visitor is still sent to the sign-in page there.
+- Profile fields whose values the app keeps itself, as the components a Filament app adds to its
+  `EditProfile` form beside `getNameFormComponent()` and `getEmailFormComponent()`:
+  `Ignite::profile_fields(ProfileFields)`, with `ProfileFields::make()`, `field(FieldDef)`,
+  `load(|db, user| ...)` (the values for the signed-in user, as a `Row`), `save(|db, user,
+  values| ...)` (the validated values; `Ok(Err(ValidationError))` refuses with field messages)
+  and `options(|db, user, field| ...)` (the choices of a lookup). The fields render in "Your
+  details" after the name, the email and the `profile_field`s, with the panel's field markup,
+  and "Save details" checks them with the others (the checks of a runtime resource's edit form,
+  a lookup against its choices, a media id against the media library): each message shows under
+  its field with 422 and the typed values kept, and nothing is saved until every field passes.
+  The app's save runs before the name and the email are stored, and the page says "Profile
+  saved.". Each call adds a group with its own callbacks.
+- The app's own picture field, as a Filament app's avatar component and
+  `HasAvatar::getFilamentAvatarUrl()`: `Ignite::profile_picture(ProfilePicture)`, with
+  `ProfilePicture::make(FieldDef)`, `load`, `save`, `options` and `avatar_url(|db, user| ...)`.
+  The "Picture" card shows the field (a URL field, or an image field with the media library's
+  picker) in its own form, posted to the new route `POST {mount}/profile/picture`, with "Save
+  picture", in place of the upload and remove forms; a save says "Picture saved." and a refused
+  value shows under the field with 422. The URL `avatar_url` gives shows in the top bar and the
+  card on every page, in place of an uploaded picture (`AdminUser::avatar_url()`). The upload
+  stays the default, and the profile's markup does not change without these calls (the theme
+  snapshots are unchanged).
+- `ignite_core::validate_fields_for_update(fields, form)`: the checks of a runtime resource's
+  edit form for fields that are not a resource's, which the profile's app fields use.
+
+### Changed
+
+- **Breaking:** a 404 under the panel's mount path renders the panel's 404 page (see above)
+  instead of the app's 404 catcher or Rocket's default page. An app that registered its own 404
+  catcher at the panel's mount path must remove it, because Rocket refuses two catchers for one
+  status and base; its catcher at `/` still answers every other path.
 
 ## [0.6.8] - 2026-11-28
 

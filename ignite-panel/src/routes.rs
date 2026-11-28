@@ -9,7 +9,7 @@ use std::sync::{Arc, OnceLock};
 
 use ignite_core::{
     ActingUser, ColumnDef, Database, Direction, FieldDef, FieldErrors, FormContext, FormInput,
-    LatestRecords, ListQuery, Operation, RedirectAfter,
+    LatestRecords, ListQuery, Operation, RedirectAfter, ValidationError,
 };
 use orbit_orm::Error as OrbitError;
 use propel_rocket::PropelView;
@@ -30,7 +30,7 @@ use crate::authz::Action;
 
 use crate::erased::{self, Erased};
 use crate::ignite::{DashboardWidget, Registry};
-use crate::profile;
+use crate::profile::{self, ProfileFields, ProfilePicture};
 use crate::proxy::{self, TrustedProxies};
 use crate::session::{
     check_csrf, csrf_token, end_session, recaller, remember, session_id, set_flash, start_session,
@@ -76,6 +76,7 @@ pub(crate) fn all() -> Vec<Route> {
         logout_everywhere,
         profile_form,
         save_profile,
+        save_picture,
         change_password,
         upload_avatar,
         remove_avatar,
@@ -713,6 +714,7 @@ fn render_profile(
     values: &FormInput,
     errors: &FieldErrors,
     password_errors: &FieldErrors,
+    choices: &FormChoices,
 ) -> PropelView {
     let flash = take_flash(cookies, &registry.secret);
     let token = csrf_token(cookies, &registry.secret);
@@ -725,6 +727,21 @@ fn render_profile(
         .into_iter()
         .map(FieldDef::from)
         .collect();
+    // The fields the app keeps come after the name, the email and the stored fields, with the
+    // same markup.
+    let mut profile_fields = field_views(&fields, values, errors);
+    for group in &registry.profile_extensions {
+        profile_fields.extend(field_views_with(
+            group.get_fields(),
+            values,
+            errors,
+            choices,
+        ));
+    }
+    let picture_fields = match &registry.profile_picture {
+        Some(picture) => field_views_with(picture.fields().get_fields(), values, errors, choices),
+        None => Vec::new(),
+    };
     let password_fields: Vec<FieldDef> = profile::PASSWORD_FIELDS
         .into_iter()
         .map(FieldDef::from)
@@ -752,7 +769,7 @@ fn render_profile(
         brand: layout.brand,
         title: "Profile",
         profile_action: format!("{}/profile", registry.mount),
-        profile_fields: field_views(&fields, values, errors),
+        profile_fields,
         password_action: format!("{}/profile/password", registry.mount),
         password_fields: field_views(&password_fields, &FormInput::default(), password_errors),
         avatar_action: format!("{}/profile/avatar", registry.mount),
@@ -762,6 +779,9 @@ fn render_profile(
         admin_themes: admin_theme_options(session.admin_theme_choice()),
         has_theme_switcher_note: note.is_some(),
         theme_switcher_note: note.unwrap_or_default(),
+        has_picture_field: registry.profile_picture.is_some(),
+        picture_action: format!("{}/profile/picture", registry.mount),
+        picture_fields,
     };
     render_page("ignite::profile", &page, compiled::profile::render)
 }
@@ -774,6 +794,109 @@ async fn load_user(db: &State<Database>, id: i64) -> Result<users::User, Status>
         .ok_or(Status::NotFound)
 }
 
+/// The groups of profile fields whose values the app keeps: each [`ProfileFields`], then the
+/// picture field.
+fn kept_profile_fields(registry: &Registry) -> impl Iterator<Item = &ProfileFields> {
+    registry.profile_extensions.iter().chain(
+        registry
+            .profile_picture
+            .as_ref()
+            .map(ProfilePicture::fields),
+    )
+}
+
+/// The values the profile's forms start with: the name, the email and the stored fields, then
+/// the values the app loads for its own fields.
+async fn profile_values(
+    registry: &Registry,
+    db: &Database,
+    session: &AdminUser,
+    row: &users::User,
+) -> Result<HashMap<String, String>, Status> {
+    let mut values = profile::form_values(
+        &profile::profile_fields(registry),
+        &row.name,
+        &row.email,
+        row.profile.as_deref(),
+    );
+    for group in kept_profile_fields(registry) {
+        let loaded = group
+            .load_values(db, session.acting_user())
+            .await
+            .map_err(db_status)?;
+        values.extend(profile::row_values(group.get_fields(), &loaded));
+    }
+    Ok(values)
+}
+
+/// The choices of the app's profile fields that load their options, and the media library's
+/// items for the ids its media fields hold in `form`.
+async fn profile_choices(
+    registry: &Registry,
+    db: &Database,
+    session: &AdminUser,
+    form: &FormInput,
+) -> Result<FormChoices, Status> {
+    let user = session.acting_user();
+    let mut choices = FormChoices::default();
+    let mut kept: Vec<FieldDef> = Vec::new();
+    for group in kept_profile_fields(registry) {
+        for field in group.get_fields() {
+            if field.kind.loads_options() {
+                let options = group
+                    .options_of(db, user, &field.name)
+                    .await
+                    .map_err(db_status)?;
+                choices.lookups.insert(field.name.clone(), options);
+            }
+        }
+        kept.extend(group.get_fields().iter().cloned());
+    }
+    if let Some(library) = ignite_core::media_library() {
+        let ids = erased::media_ids(&kept, form);
+        if !ids.is_empty() {
+            let items = library.find(db, &ids).await.map_err(db_status)?;
+            choices
+                .media
+                .extend(items.into_iter().map(|item| (item.id, item)));
+        }
+    }
+    Ok(choices)
+}
+
+/// Checks the app's fields of `group` in `form`, as a runtime resource's fields are checked
+/// (a lookup's value against its choices, a media id against the media library). Gives the
+/// validated values when these fields pass, and adds their messages to `errors` otherwise.
+async fn check_kept_fields(
+    group: &ProfileFields,
+    db: &Database,
+    session: &AdminUser,
+    form: &FormInput,
+    errors: &mut FieldErrors,
+) -> Result<Option<ignite_core::Row>, Status> {
+    let user = session.acting_user();
+    let validated = ignite_core::validate_fields_for_update(group.get_fields(), form);
+    let mut found = match &validated {
+        Ok(_) => FieldErrors::new(),
+        Err(messages) => messages.clone(),
+    };
+    found = erased::lookup_errors(group.get_fields(), form, found, |field, _| async move {
+        group.options_of(db, user, &field).await
+    })
+    .await
+    .map_err(db_status)?;
+    found = erased::media_errors(db, group.get_fields(), form, found)
+        .await
+        .map_err(db_status)?;
+    if found.is_empty() {
+        return Ok(validated.ok());
+    }
+    for (field, message) in found {
+        errors.entry(field).or_insert(message);
+    }
+    Ok(None)
+}
+
 /// The profile page, linked from the top bar.
 #[get("/profile")]
 async fn profile_form(
@@ -783,12 +906,8 @@ async fn profile_form(
     db: &State<Database>,
 ) -> Result<PropelView, Status> {
     let row = load_user(db, session.user_id()).await?;
-    let values = profile::form_values(
-        &profile::profile_fields(registry),
-        &row.name,
-        &row.email,
-        row.profile.as_deref(),
-    );
+    let values = FormInput::new(profile_values(registry, db, &session, &row).await?);
+    let choices = profile_choices(registry, db, &session, &values).await?;
     Ok(render_profile(
         registry,
         &session,
@@ -796,10 +915,13 @@ async fn profile_form(
         &values,
         &FieldErrors::new(),
         &FieldErrors::new(),
+        &choices,
     ))
 }
 
-/// Saves the name, the email and the app's profile fields.
+/// Saves the name, the email and the app's profile fields. The app's fields it keeps itself
+/// ([`ProfileFields`]) are checked with the others, and saved through its callbacks before the
+/// name and the email, so a refusal from the app shows on the form with nothing saved.
 #[post("/profile", data = "<body>")]
 async fn save_profile(
     body: Data<'_>,
@@ -812,59 +934,135 @@ async fn save_profile(
     check_csrf(cookies, &registry.secret, form.get("_token"))?;
     let fields = profile::profile_fields(registry);
     let row = load_user(db, session.user_id()).await?;
-    let saved = match profile::validate(&fields, &form, row.profile.as_deref()) {
-        Ok(saved) => saved,
-        Err(errors) => {
-            return Ok(Reply::Page(
-                Status::UnprocessableEntity,
-                render_profile(
-                    registry,
-                    &session,
-                    cookies,
-                    &form,
-                    &errors,
-                    &FieldErrors::new(),
-                ),
-            ))
+    let database = db.inner();
+    let validated = profile::validate(&fields, &form, row.profile.as_deref());
+    let mut errors = match &validated {
+        Ok(_) => FieldErrors::new(),
+        Err(errors) => errors.clone(),
+    };
+    let mut kept = Vec::new();
+    for group in &registry.profile_extensions {
+        if let Some(values) =
+            check_kept_fields(group, database, &session, &form, &mut errors).await?
+        {
+            kept.push((group, values));
         }
+    }
+    // The form again with 422, each message under its field and the typed values kept.
+    let (session, form) = (&session, &form);
+    let refused = |errors: FieldErrors| async move {
+        let choices = profile_choices(registry, database, session, form).await?;
+        Ok::<Reply, Status>(Reply::Page(
+            Status::UnprocessableEntity,
+            render_profile(
+                registry,
+                session,
+                cookies,
+                form,
+                &errors,
+                &FieldErrors::new(),
+                &choices,
+            ),
+        ))
+    };
+    let saved = match validated {
+        Ok(saved) if errors.is_empty() => saved,
+        _ => return refused(errors).await,
     };
 
     let id = session.user_id();
-    let database = db.inner();
     let taken = users::email_taken(database, &saved.email, id)
         .await
         .map_err(db_status)?;
-    // Two saves can both pass the check above. The unique index then refuses the
-    // second one, and that refusal is the same field error as a taken email.
-    let saved_ok = if taken {
-        false
-    } else {
-        match users::update_profile(database, id, &saved.name, &saved.email, &saved.custom).await {
-            Ok(_) => true,
-            Err(error) if is_email_index_violation(&error) => false,
-            Err(error) => return Err(db_status(error)),
-        }
-    };
-    if !saved_ok {
+    let email_taken = || {
         let mut errors = FieldErrors::new();
         errors.insert(
             "email".to_string(),
             "Another user already has this email.".to_string(),
         );
+        errors
+    };
+    if taken {
+        return refused(email_taken()).await;
+    }
+    // The app's own fields, which it may refuse with field messages.
+    for (group, values) in kept {
+        if let Err(refusal) = group
+            .save_values(database, session.acting_user(), values)
+            .await
+            .map_err(db_status)?
+        {
+            return refused(refusal.into_errors()).await;
+        }
+    }
+    // Two saves can both pass the check above. The unique index then refuses the
+    // second one, and that refusal is the same field error as a taken email.
+    match users::update_profile(database, id, &saved.name, &saved.email, &saved.custom).await {
+        Ok(_) => {}
+        Err(error) if is_email_index_violation(&error) => return refused(email_taken()).await,
+        Err(error) => return Err(db_status(error)),
+    }
+
+    set_flash(cookies, &registry.secret, "Profile saved.");
+    Ok(Reply::Redirect(Box::new(Redirect::to(format!(
+        "{}/profile",
+        registry.mount
+    )))))
+}
+
+/// Saves the app's picture field ([`ProfilePicture`]), which replaces the upload. A refused
+/// value shows under the field with 422; a saved one says "Picture saved.". Without a picture
+/// field, the path is not found.
+#[post("/profile/picture", data = "<body>")]
+async fn save_picture(
+    body: Data<'_>,
+    session: AdminUser,
+    cookies: &CookieJar<'_>,
+    registry: &State<Registry>,
+    db: &State<Database>,
+) -> Result<Reply, Status> {
+    let form = read_form(body).await?;
+    check_csrf(cookies, &registry.secret, form.get("_token"))?;
+    let picture = registry.profile_picture.as_ref().ok_or(Status::NotFound)?;
+    let database = db.inner();
+    let mut errors = FieldErrors::new();
+    let checked =
+        check_kept_fields(picture.fields(), database, &session, &form, &mut errors).await?;
+    let refusal = match checked {
+        Some(values) => picture
+            .fields()
+            .save_values(database, session.acting_user(), values)
+            .await
+            .map_err(db_status)?
+            .err()
+            .map(ValidationError::into_errors),
+        None => Some(errors),
+    };
+    if let Some(errors) = refusal {
+        // The other forms show their stored values, and the picture field what was typed.
+        let row = load_user(db, session.user_id()).await?;
+        let mut values = profile_values(registry, database, &session, &row).await?;
+        let name = &picture.get_field().name;
+        match form.get(name) {
+            Some(typed) => values.insert(name.clone(), typed.to_string()),
+            None => values.remove(name),
+        };
+        let values = FormInput::new(values);
+        let choices = profile_choices(registry, database, &session, &values).await?;
         return Ok(Reply::Page(
             Status::UnprocessableEntity,
             render_profile(
                 registry,
                 &session,
                 cookies,
-                &form,
+                &values,
                 &errors,
                 &FieldErrors::new(),
+                &choices,
             ),
         ));
     }
-
-    set_flash(cookies, &registry.secret, "Profile saved.");
+    set_flash(cookies, &registry.secret, "Picture saved.");
     Ok(Reply::Redirect(Box::new(Redirect::to(format!(
         "{}/profile",
         registry.mount
@@ -895,12 +1093,8 @@ async fn change_password(
         .await
         .map_err(db_status)?;
     if let Some(seconds) = waiting {
-        let values = profile::form_values(
-            &profile::profile_fields(registry),
-            &row.name,
-            &row.email,
-            row.profile.as_deref(),
-        );
+        let values = FormInput::new(profile_values(registry, db, &session, &row).await?);
+        let choices = profile_choices(registry, db, &session, &values).await?;
         let mut errors = FieldErrors::new();
         errors.insert(
             "current_password".to_string(),
@@ -913,6 +1107,7 @@ async fn change_password(
             &values,
             &FieldErrors::new(),
             &errors,
+            &choices,
         );
         return Ok(Reply::Throttled(seconds, page));
     }
@@ -928,12 +1123,8 @@ async fn change_password(
     }
     let errors = profile::password_errors(current_ok, &new, confirm);
     if !errors.is_empty() {
-        let values = profile::form_values(
-            &profile::profile_fields(registry),
-            &row.name,
-            &row.email,
-            row.profile.as_deref(),
-        );
+        let values = FormInput::new(profile_values(registry, db, &session, &row).await?);
+        let choices = profile_choices(registry, db, &session, &values).await?;
         return Ok(Reply::Page(
             Status::UnprocessableEntity,
             render_profile(
@@ -943,6 +1134,7 @@ async fn change_password(
                 &values,
                 &FieldErrors::new(),
                 &errors,
+                &choices,
             ),
         ));
     }

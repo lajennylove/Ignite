@@ -79,7 +79,18 @@
       @endif
 
       <div class="grid flex-1 gap-3">
-        <h2 class="m-0">Picture</h2>
+        <h2 class="m-0">Picture</h2>@if (has_picture_field)
+        <form class="grid gap-5" method="post" action="{{ $picture_action }}">
+          <input type="hidden" name="_token" value="{{ $csrf_token }}">
+
+          @foreach (field in picture_fields)
+            @include('ignite::partials.field')
+          @endforeach
+
+          <div>
+            <button type="submit" class="ig-btn ig-btn-outline">Save picture</button>
+          </div>
+        </form>@else
         <p class="m-0 text-sm">PNG, JPEG or WebP, up to 1 MB. Without a picture, your initials show.</p>
         <form class="flex flex-wrap items-center gap-3" method="post" action="{{ $avatar_action }}" enctype="multipart/form-data">
           <input type="hidden" name="_token" value="{{ $csrf_token }}">
@@ -91,7 +102,7 @@
             <input type="hidden" name="_token" value="{{ $csrf_token }}">
             <button type="submit" class="ig-btn ig-btn-ghost">Remove picture</button>
           </form>
-        @endif
+        @endif@endif
       </div>
     </section>@if (has_admin_themes)
 

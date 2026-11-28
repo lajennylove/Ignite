@@ -305,6 +305,8 @@ pub struct AdminUser {
     theme: String,
     admin_theme: Option<String>,
     has_avatar: bool,
+    /// The URL of the user's picture from the app's [`ProfilePicture::avatar_url`](crate::ProfilePicture::avatar_url).
+    avatar_url: Option<String>,
     /// The abilities, such as `books.viewAny`, that the user holds but a resource's policy
     /// refuses: its `view_any` and `create`, which need no record, asked once per request.
     refused: HashSet<String>,
@@ -355,9 +357,18 @@ impl AdminUser {
         crate::theme::resolve_admin_theme(self.admin_theme_choice())
     }
 
-    /// Whether the user has a profile picture. Without one, the panel shows the initials.
+    /// Whether the user has a profile picture they uploaded on the profile page. Without one,
+    /// and without an [`avatar_url`](Self::avatar_url), the panel shows the initials.
     pub fn has_avatar(&self) -> bool {
         self.has_avatar
+    }
+
+    /// The URL of the user's picture that the app's
+    /// [`ProfilePicture::avatar_url`](crate::ProfilePicture::avatar_url) gave for this request,
+    /// as Filament's `getFilamentAvatarUrl()`. The panel shows it in place of an uploaded
+    /// picture. `None` when the app gives none.
+    pub fn avatar_url(&self) -> Option<&str> {
+        self.avatar_url.as_deref()
     }
 
     /// Whether the user may do `ability`, such as `reports.view`. Reads the abilities
@@ -500,8 +511,21 @@ impl<'r> FromRequest<'r> for AdminUser {
                         return Outcome::Error((Status::InternalServerError, ()));
                     }
                 };
+                // The app's picture of the user, as Filament asks `getFilamentAvatarUrl()`.
+                let avatar_url = match &registry.profile_picture {
+                    Some(picture) => match picture.avatar_url_for(db, &acting).await {
+                        Some(Ok(url)) => url.filter(|url| !url.trim().is_empty()),
+                        Some(Err(error)) => {
+                            rocket::error!("ignite: the app's avatar URL failed: {error}");
+                            None
+                        }
+                        None => None,
+                    },
+                    None => None,
+                };
                 Outcome::Success(AdminUser {
                     gates: gates(registry),
+                    avatar_url,
                     acting,
                     theme: user.theme,
                     admin_theme: user.admin_theme,

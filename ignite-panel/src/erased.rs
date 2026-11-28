@@ -453,7 +453,7 @@ async fn checked<R: IgniteResource>(
 /// must be a choice. A sub-field's error is keyed by its dotted path, and its structured
 /// field gets the message too, so the save is refused. Static and runtime resources share
 /// this check.
-async fn lookup_errors<F, Fut>(
+pub(crate) async fn lookup_errors<F, Fut>(
     fields: &[FieldDef],
     form: &FormInput,
     mut errors: FieldErrors,
@@ -690,7 +690,7 @@ pub(crate) fn media_ids(fields: &[FieldDef], form: &FormInput) -> Vec<i64> {
 /// `errors`, with "<label> must be the id of a media item." for each media field whose ids
 /// are not all items of the registered media library. With no library registered, the ids
 /// are only checked as numbers, by validation.
-async fn media_errors(
+pub(crate) async fn media_errors(
     db: &Database,
     fields: &[FieldDef],
     form: &FormInput,

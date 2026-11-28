@@ -39,9 +39,9 @@ pub use query::{escape_like, Direction, ListQuery, Page};
 pub use resource::{table_name_is, IgniteResource};
 pub use runtime_resource::{
     register_runtime, reserve_slugs, runtime_resource, runtime_resources, unregister_runtime,
-    BlockDef, ColumnDef, FieldDef, FieldKindDef, FormNotice, FormRule, RedirectAfter,
-    RegisteredResource, Row, RuntimeData, RuntimeError, RuntimeFuture, RuntimeResource,
-    MAX_FIELD_NAME,
+    validate_fields_for_update, BlockDef, ColumnDef, FieldDef, FieldKindDef, FormNotice, FormRule,
+    RedirectAfter, RegisteredResource, Row, RuntimeData, RuntimeError, RuntimeFuture,
+    RuntimeResource, MAX_FIELD_NAME,
 };
 pub use structure::{RepeaterSettings, Repeaters};
 pub use widget::{

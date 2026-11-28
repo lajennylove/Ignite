@@ -43,6 +43,7 @@ pub use ignite_core;
 pub use mail::{EmailitMailer, MailError, Mailer, Message, NotConfigured, RecordingMailer};
 pub use navigation::{NavigationGroup, NavigationItem};
 pub use not_found::NotFound;
+pub use profile::{ProfileFields, ProfilePicture};
 pub use roles::{role_label, Role};
 pub use session::AdminUser;
 pub use theme::{

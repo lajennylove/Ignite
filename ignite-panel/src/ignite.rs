@@ -18,6 +18,7 @@ use crate::erased::{Adapter, Erased, RuntimeAdapter};
 use crate::mail::{Mailer, NotConfigured};
 use crate::navigation::{NavigationGroup, NavigationItem};
 use crate::not_found::NotFound;
+use crate::profile::{ProfileFields, ProfilePicture};
 use crate::proxy::TrustedProxies;
 use crate::routes;
 use crate::session;
@@ -94,6 +95,10 @@ pub(crate) struct Registry {
     pub(crate) dashboard_widgets: Vec<DashboardWidget>,
     /// The panel's 404 page (see [`Ignite::not_found`]).
     pub(crate) not_found: NotFound,
+    /// The profile's fields whose values the app keeps (see [`Ignite::profile_fields`]).
+    pub(crate) profile_extensions: Vec<ProfileFields>,
+    /// The app's picture field, in place of the upload (see [`Ignite::profile_picture`]).
+    pub(crate) profile_picture: Option<ProfilePicture>,
 }
 
 /// A dashboard widget that renders its own view: a list or a form.
@@ -189,6 +194,8 @@ pub struct Ignite {
     roles: Vec<crate::Role>,
     abilities: Vec<String>,
     not_found: NotFound,
+    profile_extensions: Vec<ProfileFields>,
+    profile_picture: Option<ProfilePicture>,
 }
 
 impl Ignite {
@@ -265,6 +272,8 @@ impl Ignite {
             roles: Vec::new(),
             abilities: Vec::new(),
             not_found: NotFound::default(),
+            profile_extensions: Vec::new(),
+            profile_picture: None,
         }
     }
 
@@ -379,6 +388,32 @@ impl Ignite {
             field.name
         );
         self.profile_fields.push(field);
+        self
+    }
+
+    /// Adds fields to the profile form whose values the app loads and saves itself, such as a
+    /// user's meta rows, as a Filament app adds components to its `EditProfile` page's form
+    /// beside the name and the email. They render after the name, the email and the fields of
+    /// [`profile_field`](Self::profile_field), with the same markup, and are saved by "Save
+    /// details" with the same messages; see [`ProfileFields`]. Each call adds a group of fields
+    /// after the ones added before; each group is loaded and saved through its own callbacks.
+    ///
+    /// # Panics
+    ///
+    /// The names are checked when the fairing is built: the fairing panics when a field's name
+    /// is not a lowercase identifier, or when two of the profile's fields have the same name.
+    pub fn profile_fields(mut self, fields: ProfileFields) -> Self {
+        self.profile_extensions.push(fields);
+        self
+    }
+
+    /// Replaces the profile's picture upload with the app's own field, such as a URL to an
+    /// attachment or an image field with the media library's picker, loaded and saved through
+    /// the app's callbacks, and gives the URL of the user's picture, as Filament's
+    /// `HasAvatar::getFilamentAvatarUrl()`; see [`ProfilePicture`]. Without a call, the panel's
+    /// upload stays. A later call replaces an earlier one.
+    pub fn profile_picture(mut self, picture: ProfilePicture) -> Self {
+        self.profile_picture = Some(picture);
         self
     }
 
@@ -771,7 +806,14 @@ impl Ignite {
             roles,
             abilities: app_abilities,
             not_found,
+            profile_extensions,
+            profile_picture,
         } = self;
+        check_profile_names(
+            &profile_fields,
+            &profile_extensions,
+            profile_picture.as_ref(),
+        );
         for role in &roles {
             assert!(
                 crate::authz::valid_role_name(role.get_name()),
@@ -820,6 +862,8 @@ impl Ignite {
                 widgets,
                 dashboard_widgets,
                 not_found,
+                profile_extensions,
+                profile_picture,
             };
             // The panel's 404 page answers only under its mount path.
             let catcher_base = if mount.is_empty() {
@@ -843,6 +887,43 @@ impl Ignite {
                 .mount(mount, routes::all()))
         });
         PanelFairing { ignite }
+    }
+}
+
+/// Checks the names of the profile's fields: the name, the email, the app's
+/// [`Ignite::profile_field`]s, its [`ProfileFields`] and its picture field must all differ, and
+/// the fields the app keeps must have lowercase identifiers, as a runtime resource's fields do.
+fn check_profile_names(
+    stored: &[Field],
+    extensions: &[ProfileFields],
+    picture: Option<&ProfilePicture>,
+) {
+    let mut names: Vec<String> = ["name", "email"]
+        .into_iter()
+        .chain(stored.iter().map(|f| f.name))
+        .map(str::to_string)
+        .collect();
+    let kept = extensions
+        .iter()
+        .flat_map(|group| group.get_fields())
+        .chain(picture.map(ProfilePicture::get_field));
+    for field in kept {
+        let name = field.name.as_str();
+        let valid = name.len() <= ignite_core::MAX_FIELD_NAME
+            && name.bytes().next().is_some_and(|b| b.is_ascii_lowercase())
+            && name
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_');
+        assert!(
+            valid,
+            "the profile field `{name}` is not valid: use lowercase letters, digits and `_`, \
+             starting with a letter"
+        );
+        assert!(
+            !names.iter().any(|known| known == name),
+            "the profile already has a field named `{name}`"
+        );
+        names.push(name.to_string());
     }
 }
 
