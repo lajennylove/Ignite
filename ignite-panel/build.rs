@@ -25,6 +25,7 @@ fn main() {
         .view("forgot", "crate::views::ForgotPage")
         .view("index", "crate::views::IndexPage")
         .view("login", "crate::views::LoginPage")
+        .view("not_found", "crate::views::NotFoundView")
         .view("profile", "crate::views::ProfilePage")
         .view("reset", "crate::views::ResetPage")
         .build();

@@ -56,6 +56,7 @@ themed_pages!(
     ProfilePage,
     IndexPage,
     FormPage,
+    NotFoundView,
 );
 
 /// The admin theme a page renders in, as the views read it (`admin_theme.name`).
@@ -806,6 +807,73 @@ pub(crate) struct ProfilePage {
     /// ([`AdminTheme::theme_switcher_note`](crate::AdminTheme::theme_switcher_note)).
     pub(crate) has_theme_switcher_note: bool,
     pub(crate) theme_switcher_note: String,
+}
+
+/// The panel's 404 page (see [`crate::not_found`]): the layout's values, flat, then the page's
+/// title, message and link to the dashboard.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct NotFoundView {
+    pub(crate) home_url: String,
+    pub(crate) signed_in: bool,
+    pub(crate) user_name: String,
+    pub(crate) user_initials: String,
+    pub(crate) has_avatar: bool,
+    pub(crate) avatar_url: String,
+    pub(crate) theme: String,
+    pub(crate) theme_url: String,
+    pub(crate) theme_switcher: bool,
+    pub(crate) profile_url: String,
+    pub(crate) logout_everywhere_url: String,
+    pub(crate) csrf_token: String,
+    pub(crate) nav: Vec<NavGroup>,
+    pub(crate) nav_sections: Vec<NavSection>,
+    pub(crate) nav_collapsible: bool,
+    pub(crate) has_flash: bool,
+    pub(crate) flash: String,
+    pub(crate) theme_style: String,
+    pub(crate) admin_theme: AdminThemeView,
+    pub(crate) brand: BrandView,
+    pub(crate) title: String,
+    pub(crate) message: String,
+    pub(crate) link_label: String,
+    /// The panel's dashboard, which the page links to.
+    pub(crate) dashboard_url: String,
+}
+
+impl NotFoundView {
+    /// The 404 page in `layout`, with the app's title, message and link label.
+    pub(crate) fn new(layout: Layout, page: &crate::not_found::NotFound, mount: &str) -> Self {
+        NotFoundView {
+            home_url: layout.home_url,
+            signed_in: layout.signed_in,
+            user_name: layout.user_name,
+            user_initials: layout.user_initials,
+            has_avatar: layout.has_avatar,
+            avatar_url: layout.avatar_url,
+            theme: layout.theme,
+            theme_url: layout.theme_url,
+            theme_switcher: layout.theme_switcher,
+            profile_url: layout.profile_url,
+            logout_everywhere_url: layout.logout_everywhere_url,
+            csrf_token: layout.csrf_token,
+            nav: layout.nav,
+            nav_sections: layout.nav_sections,
+            nav_collapsible: layout.nav_collapsible,
+            has_flash: layout.has_flash,
+            flash: layout.flash,
+            theme_style: layout.theme_style,
+            admin_theme: layout.admin_theme,
+            brand: layout.brand,
+            title: page.get_title().to_string(),
+            message: page.get_message().to_string(),
+            link_label: page.get_link_label().to_string(),
+            dashboard_url: if mount.is_empty() {
+                "/".to_string()
+            } else {
+                mount.to_string()
+            },
+        }
+    }
 }
 
 /// The list view of a resource.

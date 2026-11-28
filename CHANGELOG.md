@@ -4,6 +4,23 @@ All notable changes to Ignite are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- The panel's 404 page inside the panel's layout, as Laravel's custom HTTP error page
+  (`resources/views/errors/404.blade.php`) rendered in the app's layout: a request under the
+  panel's mount path that finds nothing (a path no route matches, a resource slug that does not
+  exist, or the edit page of a record that is not there) answers 404 with the new view
+  `ignite::not_found`, in the admin theme of the request: the navigation and the top bar for a
+  signed-in user, the title "Not Found", the message "The page you are looking for could not be
+  found." and the link "Go to the dashboard". A signed-out visitor gets the page without the
+  navigation. `Ignite::not_found(NotFound)` sets the title, the message, the link's label and the
+  app's own view (`NotFound::make().title(..).message(..).link_label(..).view(..)`); every value
+  is escaped. The catcher is registered at the mount path only, so the app's public 404 (its own
+  catcher, or Rocket's) does not change. A one-segment path such as `/admin/unknown` is a
+  resource's list, so a visitor is still sent to the sign-in page there.
+
 ## [0.6.8] - 2026-11-28
 
 ### Added

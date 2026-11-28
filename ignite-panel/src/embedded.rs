@@ -22,6 +22,10 @@ pub(crate) const VIEWS: &[(&str, &str)] = &[
     ("index", include_str!("../views/ignite/index.propel")),
     ("login", include_str!("../views/ignite/login.propel")),
     (
+        "not_found",
+        include_str!("../views/ignite/not_found.propel"),
+    ),
+    (
         "layouts.app",
         include_str!("../views/ignite/layouts/app.propel"),
     ),

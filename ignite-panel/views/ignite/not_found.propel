@@ -1,0 +1,40 @@
+@extends('ignite::layouts.app')
+
+@section('ignite_brand_name'){{ $brand.name }}@endsection
+
+@section('ignite_favicon')@include('ignite::partials.favicon')@endsection
+
+@section('ignite_stylesheets')@include('ignite::partials.stylesheets')@endsection
+
+@section('ignite_head')@if (theme_style)<style>{!! $theme_style !!}</style>@endif@endsection
+
+@section('ignite_html')data-theme="{{ $theme }}"@endsection
+
+@section('ignite_aside')
+  @if (signed_in)
+    @include('ignite::partials.nav')
+  @endif
+@endsection
+
+@section('ignite_column')@if (signed_in)ig-with-sidebar@endif@endsection
+
+@section('ignite_bar')
+  <header class="sticky top-0 z-20 flex items-center border-b border-border bg-page px-5 py-3">
+    @include('ignite::partials.topbar')
+  </header>
+@endsection
+
+@section('title')
+  {{ $title }}
+@endsection
+
+@section('content')
+  <section class="ig-card mx-auto mt-10 grid w-full max-w-xl gap-4 text-center" data-ignite-not-found>
+    <p class="m-0 text-sm font-semibold text-primary">404</p>
+    <h1 class="m-0">{{ $title }}</h1>
+    <p class="m-0">{{ $message }}</p>
+    <div>
+      <a class="ig-btn ig-btn-primary" href="{{ $dashboard_url }}">{{ $link_label }}</a>
+    </div>
+  </section>
+@endsection

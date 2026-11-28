@@ -17,6 +17,7 @@ use crate::brand::{self, Brand};
 use crate::erased::{Adapter, Erased, RuntimeAdapter};
 use crate::mail::{Mailer, NotConfigured};
 use crate::navigation::{NavigationGroup, NavigationItem};
+use crate::not_found::NotFound;
 use crate::proxy::TrustedProxies;
 use crate::routes;
 use crate::session;
@@ -91,6 +92,8 @@ pub(crate) struct Registry {
     /// The list and form widgets of the dashboard, in the order they were added (see
     /// [`Ignite::list_widget`] and [`Ignite::form_widget`]).
     pub(crate) dashboard_widgets: Vec<DashboardWidget>,
+    /// The panel's 404 page (see [`Ignite::not_found`]).
+    pub(crate) not_found: NotFound,
 }
 
 /// A dashboard widget that renders its own view: a list or a form.
@@ -185,6 +188,7 @@ pub struct Ignite {
     dashboard_widgets: Vec<DashboardWidget>,
     roles: Vec<crate::Role>,
     abilities: Vec<String>,
+    not_found: NotFound,
 }
 
 impl Ignite {
@@ -260,6 +264,7 @@ impl Ignite {
             dashboard_widgets: Vec::new(),
             roles: Vec::new(),
             abilities: Vec::new(),
+            not_found: NotFound::default(),
         }
     }
 
@@ -709,6 +714,28 @@ impl Ignite {
         self
     }
 
+    /// Sets the panel's 404 page, as Laravel's `resources/views/errors/404.blade.php`: a request
+    /// under the panel's mount path that finds nothing (an unknown path, a resource or a record
+    /// that does not exist) answers 404 with this page inside the panel's layout, in the admin
+    /// theme of the request: the navigation and the top bar around the title, the message and a
+    /// link to the dashboard for a signed-in user, the page without them for a visitor. The app
+    /// sets the title, the message, the link's label and its own view with [`NotFound`]; every
+    /// value is escaped. Without a call, the page says "The page you are looking for could not
+    /// be found." with the link "Go to the dashboard".
+    ///
+    /// The panel's catcher is registered at the mount path only, so a 404 elsewhere, such as on
+    /// the app's public site, keeps the app's own 404 page. An app that registers its own 404
+    /// catcher at the panel's mount path collides with the panel's, and Rocket refuses to
+    /// launch.
+    ///
+    /// ```ignore
+    /// Ignite::new().not_found(NotFound::make().message("That screen does not exist."))
+    /// ```
+    pub fn not_found(mut self, page: NotFound) -> Self {
+        self.not_found = page;
+        self
+    }
+
     /// Changes the URL prefix of the panel. The default is `/admin`.
     pub fn mount(mut self, path: &str) -> Self {
         self.mount = path.trim_end_matches('/').to_string();
@@ -743,6 +770,7 @@ impl Ignite {
             dashboard_widgets,
             roles,
             abilities: app_abilities,
+            not_found,
         } = self;
         for role in &roles {
             assert!(
@@ -791,6 +819,13 @@ impl Ignite {
                 collapsible_navigation_groups,
                 widgets,
                 dashboard_widgets,
+                not_found,
+            };
+            // The panel's 404 page answers only under its mount path.
+            let catcher_base = if mount.is_empty() {
+                "/".to_string()
+            } else {
+                mount.clone()
             };
             Ok(rocket
                 .manage(db)
@@ -803,6 +838,7 @@ impl Ignite {
                         session::server_error
                     ],
                 )
+                .register(catcher_base, catchers![crate::not_found::not_found])
                 .mount("/", routes::health())
                 .mount(mount, routes::all()))
         });
