@@ -4,10 +4,10 @@ All notable changes to Ignite are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.6.8] - 2026-11-28
+
 
 ### Added
-
 - The panel's 404 page inside the panel's layout, as Laravel's custom HTTP error page
   (`resources/views/errors/404.blade.php`) rendered in the app's layout: a request under the
   panel's mount path that finds nothing (a path no route matches, a resource slug that does not
@@ -45,16 +45,6 @@ All notable changes to Ignite are listed here. The format follows
 - `ignite_core::validate_fields_for_update(fields, form)`: the checks of a runtime resource's
   edit form for fields that are not a resource's, which the profile's app fields use.
 
-### Changed
-
-- **Breaking:** a 404 under the panel's mount path renders the panel's 404 page (see above)
-  instead of the app's 404 catcher or Rocket's default page. An app that registered its own 404
-  catcher at the panel's mount path must remove it, because Rocket refuses two catchers for one
-  status and base; its catcher at `/` still answers every other path.
-
-## [0.6.8] - 2026-11-28
-
-### Added
 
 - A brand logo for dark mode, as Filament's `darkModeBrandLogo()`:
   `Ignite::dark_mode_brand_logo(url)`. In dark mode it replaces the `brand_logo` (or the brand
@@ -75,6 +65,11 @@ All notable changes to Ignite are listed here. The format follows
   dashboard form widget still comes back to the dashboard.
 
 ### Changed
+- **Breaking:** a 404 under the panel's mount path renders the panel's 404 page (see above)
+  instead of the app's 404 catcher or Rocket's default page. An app that registered its own 404
+  catcher at the panel's mount path must remove it, because Rocket refuses two catchers for one
+  status and base; its catcher at `/` still answers every other path.
+
 
 - **Breaking:** `RuntimeResource` has the new public fields `redirect_after_create` and
   `redirect_after_update` (`Option<RedirectAfter>`, `None` by default), so code that builds it
