@@ -29,7 +29,7 @@ pub use field::{Block, Column, Field, FieldKind};
 pub use form::{FieldErrors, FormInput, ValidationError};
 /// Derives `IgniteResource` for an Orbit model. See `ignite_macros` for the attributes.
 pub use ignite_macros::IgniteResource;
-pub use layout::{ColumnSpan, Component, FormLayout, Group, Section, Width};
+pub use layout::{ColumnSpan, Component, FormLayout, Group, Section, Tabs, Width};
 pub use list::{active_tab, BadgeColor, ColumnBadges, FilterCondition, ListFilter, Tab};
 pub use media::{media_library, register_media_library, MediaItem, MediaLibrary};
 pub use orbit_orm::Database;

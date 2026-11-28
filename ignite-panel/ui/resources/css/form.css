@@ -30,3 +30,29 @@
 .ig-structure-picker[open] > summary {
     margin-bottom: 0.75rem;
 }
+
+/*
+ * Tabs in a form layout (FormLayout with Tabs, as Filament's Tabs): the tab list, with the
+ * open tab underlined, above the open tab's panel.
+ */
+.ig-form-tablist {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.ig-form-tab {
+    margin-bottom: -1px;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 2px solid transparent;
+    color: var(--color-text);
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.ig-form-tab[aria-selected="true"] {
+    border-bottom-color: var(--color-primary);
+    color: var(--color-primary);
+}

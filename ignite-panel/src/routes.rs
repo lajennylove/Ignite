@@ -41,7 +41,7 @@ use crate::throttle;
 use crate::users;
 use crate::views::{
     admin_theme_options, cell_text, compiled, content_width_class, editor_for, field_views,
-    field_views_with, form_field_views, layout_columns, layout_grid_class, live_values,
+    field_views_with, form_field_views, has_tabs, layout_columns, layout_grid_class, live_values,
     record_form, render_page, structure_views, CardView, CellView, ColumnHead, DashboardPage,
     FormChoices, FormPage, HeaderView, HiddenView, IndexPage, LatestRow, LatestTable, Layout,
     LoginPage, ProfilePage, RowActionView, RowView, StructureContext, TabView, WidgetView,
@@ -1798,6 +1798,7 @@ fn form_view(
     // The form script asks before a changed form is left, and fills slug fields.
     let has_form_script = registry.unsaved_changes_alerts
         || has_structure
+        || has_tabs(resource.form_layout())
         || fields.iter().any(|field| field.has_slug_from);
     // A form with a layout places its fields in the layout's columns and cards; a form
     // without one renders them in one card, as before.

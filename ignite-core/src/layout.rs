@@ -1,7 +1,8 @@
 //! The layout of a resource's form, as Filament's layout components: a grid of
-//! [`columns`](FormLayout::columns), [`Section`]s that group fields under a heading, and
+//! [`columns`](FormLayout::columns), [`Section`]s that group fields under a heading,
 //! [`Group`]s that stack sections in one column, each with a
-//! [`column_span`](Section::column_span).
+//! [`column_span`](Section::column_span), and [`Tabs`] that show one [`Tab`] of fields at a
+//! time.
 //!
 //! A WordPress-like post editor puts the content in a main column two thirds wide and the
 //! publishing settings in a sidebar column one third wide, as a Filament form does with
@@ -48,7 +49,7 @@ pub enum ColumnSpan {
     Full,
 }
 
-/// One part of a form layout: a field by name, a [`Section`] or a [`Group`].
+/// One part of a form layout: a field by name, a [`Section`], a [`Group`] or [`Tabs`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Component {
     /// The field of this name, on its own.
@@ -57,6 +58,14 @@ pub enum Component {
     Section(Section),
     /// Sections and fields stacked in one column.
     Group(Group),
+    /// Tabs, each with its own fields and sections, one shown at a time.
+    Tabs(Tabs),
+}
+
+impl From<Tabs> for Component {
+    fn from(tabs: Tabs) -> Self {
+        Component::Tabs(tabs)
+    }
 }
 
 impl From<&str> for Component {
@@ -199,6 +208,131 @@ impl Group {
     }
 }
 
+/// Tabs, as Filament's `Tabs` schema component: one card whose tab list shows one [`Tab`] of
+/// fields at a time. The first tab is open when the form shows, as in Filament, unless
+/// [`active_tab`](Self::active_tab) names another. Every tab's fields are in the form, so a
+/// save sends them all, whichever tab is open.
+///
+/// ```
+/// use ignite_core::layout::{Tab, Tabs};
+/// use ignite_core::{FormLayout, Section};
+///
+/// let layout = FormLayout::new().schema([Tabs::make("Settings").tabs([
+///     Tab::make("General").schema(["description", "active"]),
+///     Tab::make("Labels").schema([Section::make("Menu").schema(["menu_name"])]),
+/// ])]);
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Tabs {
+    label: String,
+    tabs: Vec<Tab>,
+    active_tab: usize,
+    column_span: ColumnSpan,
+}
+
+impl Tabs {
+    /// Tabs with the label `label`, which names the tab list for a screen reader, as
+    /// `Tabs::make('Settings')`. They have no tabs until [`tabs`](Self::tabs).
+    pub fn make(label: impl Into<String>) -> Self {
+        Tabs {
+            label: label.into(),
+            tabs: Vec::new(),
+            active_tab: 1,
+            column_span: ColumnSpan::Columns(1),
+        }
+    }
+
+    /// The tabs, in display order, as `->tabs([...])`. Each call adds after the tabs given.
+    pub fn tabs(mut self, tabs: impl IntoIterator<Item = Tab>) -> Self {
+        self.tabs.extend(tabs);
+        self
+    }
+
+    /// The tab open when the form shows, counted from 1, as Filament's `->activeTab(2)`. A
+    /// number past the last tab opens the first.
+    pub fn active_tab(mut self, tab: usize) -> Self {
+        self.active_tab = tab;
+        self
+    }
+
+    /// The columns the tabs take in the form's grid, as `->columnSpan(2)`.
+    pub fn column_span(mut self, columns: u8) -> Self {
+        self.column_span = ColumnSpan::Columns(columns.clamp(1, 12));
+        self
+    }
+
+    /// Takes every column, as `->columnSpanFull()`.
+    pub fn column_span_full(mut self) -> Self {
+        self.column_span = ColumnSpan::Full;
+        self
+    }
+
+    /// The label of the tab list.
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+
+    /// The tabs, in display order.
+    pub fn get_tabs(&self) -> &[Tab] {
+        &self.tabs
+    }
+
+    /// The index (from 0) of the tab open when the form shows.
+    pub fn active_index(&self) -> usize {
+        match self.active_tab {
+            n if n >= 1 && n <= self.tabs.len() => n - 1,
+            _ => 0,
+        }
+    }
+
+    /// The columns the tabs take.
+    pub fn get_column_span(&self) -> ColumnSpan {
+        self.column_span
+    }
+}
+
+/// One tab of [`Tabs`], as Filament's `Tabs\Tab`: a label and its fields and sections. It is
+/// not re-exported at the crate root, where [`Tab`](crate::Tab) is a list page's tab; write
+/// `ignite_core::layout::Tab`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Tab {
+    label: String,
+    components: Vec<Component>,
+}
+
+impl Tab {
+    /// A tab labelled `label`, as `Tab::make('General')`, the label as the app gives it. It
+    /// has no fields until [`schema`](Self::schema).
+    pub fn make(label: impl Into<String>) -> Self {
+        Tab {
+            label: label.into(),
+            components: Vec::new(),
+        }
+    }
+
+    /// The tab's fields and sections, in display order, as `->schema([...])`. A group in a tab
+    /// adds its components in its place. Each call adds after the components given.
+    pub fn schema<I, C>(mut self, components: I) -> Self
+    where
+        I: IntoIterator<Item = C>,
+        C: Into<Component>,
+    {
+        self.components
+            .extend(components.into_iter().map(Into::into));
+        self
+    }
+
+    /// The tab's label.
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+
+    /// The tab's components, in display order.
+    pub fn components(&self) -> &[Component] {
+        &self.components
+    }
+}
+
 /// The layout of a resource's create and edit forms: the grid's columns, the components in
 /// it, and the page's content width. See the [module documentation](self).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -284,6 +418,14 @@ mod tests {
             Group::make(["a"]).column_span_full().get_column_span(),
             ColumnSpan::Full
         );
+    }
+
+    #[test]
+    fn the_first_tab_is_active_unless_another_is_named() {
+        let tabs = Tabs::make("Settings").tabs([Tab::make("A"), Tab::make("B")]);
+        assert_eq!(tabs.active_index(), 0);
+        assert_eq!(tabs.clone().active_tab(2).active_index(), 1);
+        assert_eq!(tabs.active_tab(9).active_index(), 0);
     }
 
     #[test]

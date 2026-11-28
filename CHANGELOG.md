@@ -90,6 +90,13 @@ All notable changes to Ignite are listed here. The format follows
   `content[0][data][...]`, and the stored value is unchanged (`{"type": ..., "data": {...}}`
   per row, as Filament stores a builder). A block's row is labelled by the block's label. The
   settings path of a block's sub-field names the block (`content.gallery.items`).
+- Tabs in a form layout, as Filament's `Tabs` schema component: `ignite_core::Tabs`
+  (`make(label)`, `tabs([...])`, `active_tab(n)` from 1 as `activeTab()`, `column_span`,
+  `column_span_full`) of `ignite_core::layout::Tab` (`make(label)`, `schema([...])` of fields,
+  sections and groups). The tabs are one card with a tab list of the app's labels and one
+  panel per tab; the first tab is open, the form script switches them, and every tab's fields
+  are sent with the form. A tab whose fields the conditions all hide is left out; tabs inside
+  a tab show their fields in place.
 
 ### Changed
 
@@ -98,6 +105,8 @@ All notable changes to Ignite are listed here. The format follows
   with one loads the form script and `form.css`. A structured value's nested errors are all
   checked and recorded, not only the first. A `name[key]` form key is now also kept as sent,
   beside the object the panel builds under `name`.
+- **Breaking:** `ignite_core::Component` has the new variant `Tabs`, so an exhaustive
+  `match` on it must handle it.
 - **Breaking:** `ignite_panel::authz::AuthzError` has the new variants `SuperAdminRole` and
   `InvalidRoleName`, so an exhaustive `match` on it must handle them.
 - The panel's checks are unchanged: each action needs the `<slug>.<action>` ability of one of

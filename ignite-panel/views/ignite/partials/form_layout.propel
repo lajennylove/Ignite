@@ -1,8 +1,29 @@
-{{-- The fields of a form with a layout (FormLayout, as Filament's layout components): one column of the form's grid per top-level section or group, which takes its column span, and in each column its cards, one under the other, so a sidebar stacks its sections. --}}
+{{-- The fields of a form with a layout (FormLayout, as Filament's layout components): one column of the form's grid per top-level section, group or tabs, which takes its column span, and in each column its cards, one under the other, so a sidebar stacks its sections. Tabs (Filament's Tabs) are one card: a tab list, and one panel per tab with the tab's sections; the open tab's panel shows, and the form script switches them. Every panel is in the form, so a save sends every tab's fields. --}}
 @foreach (column in layout_columns)
       <div class="{{ $column.class }}">
   @foreach (section in column.sections)
-        <section class="ig-card grid min-w-0 gap-5">
+        @if (section.is_tabs)<div class="ig-card ig-form-tabs grid min-w-0 gap-5" data-ignite-tabs>
+          <div class="ig-form-tablist" role="tablist" aria-label="{{ $section.tabs_label }}">
+      @foreach (tab in section.tabs)
+            <button type="button" class="ig-form-tab" role="tab" id="{{ $tab.id }}-tab" aria-controls="{{ $tab.id }}" aria-selected="{{ $tab.selected }}" data-ignite-tab="{{ $tab.id }}">{{ $tab.label }}</button>
+      @endforeach
+          </div>
+      @foreach (tab in section.tabs)
+          <div class="grid min-w-0 gap-5" role="tabpanel" id="{{ $tab.id }}" aria-labelledby="{{ $tab.id }}-tab"@if (tab.active)@else hidden@endif>
+        @foreach (part in tab.sections)
+          @if (part.has_heading)
+            <h3 class="m-0">{{ $part.heading }}</h3>
+          @endif
+          @if (part.has_description)
+            <p class="m-0 text-sm">{{ $part.description }}</p>
+          @endif
+          @foreach (field in part.fields)
+            @if (field.is_structured)@include('ignite::partials.structure')@else@include('ignite::partials.field')@endif
+          @endforeach
+        @endforeach
+          </div>
+      @endforeach
+        </div>@else<section class="ig-card grid min-w-0 gap-5">
     @if (section.has_heading)
           <header>
             <h2 class="m-0">{{ $section.heading }}</h2>
@@ -16,7 +37,7 @@
     @foreach (field in section.fields)
       @if (field.is_structured)@include('ignite::partials.structure')@else@include('ignite::partials.field')@endif
     @endforeach
-        </section>
+        </section>@endif
   @endforeach
       </div>
 @endforeach

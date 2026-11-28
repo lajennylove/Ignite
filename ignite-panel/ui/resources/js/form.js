@@ -140,3 +140,21 @@ document.addEventListener('click', async (event) => {
     current.replaceWith(document.importNode(fields, true));
     form.dispatchEvent(new CustomEvent('ignite:fields', { bubbles: true }));
 });
+
+// Tabs in a form layout (`data-ignite-tabs`, as Filament's Tabs): a tab shows its panel and
+// hides the others. Every panel stays in the form, so a save sends every tab's fields.
+document.addEventListener('click', (event) => {
+    const tab = event.target.closest?.('[data-ignite-tab]');
+    const tabs = tab?.closest('[data-ignite-tabs]');
+    if (!tab || !tabs) {
+        return;
+    }
+    for (const other of tabs.querySelectorAll('[data-ignite-tab]')) {
+        const open = other === tab;
+        other.setAttribute('aria-selected', open ? 'true' : 'false');
+        const panel = document.getElementById(other.dataset.igniteTab);
+        if (panel) {
+            panel.hidden = !open;
+        }
+    }
+});

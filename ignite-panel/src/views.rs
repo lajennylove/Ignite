@@ -1946,7 +1946,8 @@ pub(crate) struct LayoutColumnView {
     pub(crate) sections: Vec<LayoutSectionView>,
 }
 
-/// One card of a form layout: a section, or fields placed without a section.
+/// One card of a form layout: a section, fields placed without a section, or tabs
+/// (`is_tabs`), whose panels hold the sections of each tab.
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct LayoutSectionView {
     pub(crate) has_heading: bool,
@@ -1954,6 +1955,10 @@ pub(crate) struct LayoutSectionView {
     pub(crate) has_description: bool,
     pub(crate) description: String,
     pub(crate) fields: Vec<FieldView>,
+    pub(crate) is_tabs: bool,
+    /// The label of the tab list, for a screen reader.
+    pub(crate) tabs_label: String,
+    pub(crate) tabs: Vec<TabPanelView>,
 }
 
 impl LayoutSectionView {
@@ -1964,8 +1969,29 @@ impl LayoutSectionView {
             has_description: description.is_some(),
             description: description.unwrap_or_default().to_string(),
             fields: Vec::new(),
+            is_tabs: false,
+            tabs_label: String::new(),
+            tabs: Vec::new(),
         }
     }
+
+    /// Whether the card shows anything: fields, or a tab.
+    fn is_empty(&self) -> bool {
+        self.fields.is_empty() && self.tabs.is_empty()
+    }
+}
+
+/// One tab of a form's tabs, with its panel: the id the tab and the panel share, its label,
+/// whether it is the open one, and the sections of its fields. A tab whose fields the
+/// conditions all hide is left out.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct TabPanelView {
+    pub(crate) id: String,
+    pub(crate) label: String,
+    pub(crate) active: bool,
+    /// `aria-selected`: `"true"` for the open tab.
+    pub(crate) selected: &'static str,
+    pub(crate) sections: Vec<LayoutSectionView>,
 }
 
 /// The classes of the fields' container of a form with `layout`: a grid of its columns from
@@ -2010,15 +2036,17 @@ pub(crate) fn layout_columns(layout: &FormLayout, fields: Vec<FieldView>) -> Vec
         .map(|field| (field.name.clone(), field))
         .collect();
     let mut columns = Vec::new();
+    let mut tab_ids = 0;
     for component in layout.components() {
         let span = match component {
             Component::Field(_) => ColumnSpan::Columns(1),
             Component::Section(section) => section.get_column_span(),
             Component::Group(group) => group.get_column_span(),
+            Component::Tabs(tabs) => tabs.get_column_span(),
         };
         let mut sections = Vec::new();
-        place(component, &mut unplaced, &mut sections);
-        sections.retain(|section: &LayoutSectionView| !section.fields.is_empty());
+        place(component, &mut unplaced, &mut sections, &mut tab_ids, false);
+        sections.retain(|section: &LayoutSectionView| !section.is_empty());
         if !sections.is_empty() {
             columns.push(LayoutColumnView {
                 class: column_class(span),
@@ -2045,11 +2073,15 @@ pub(crate) fn layout_columns(layout: &FormLayout, fields: Vec<FieldView>) -> Vec
 }
 
 /// Adds the cards of `component` to `sections`, taking its fields from `unplaced`. Fields
-/// outside a section join the card before them when it has no heading.
+/// outside a section join the card before them when it has no heading. Tabs are one card,
+/// numbered by `tab_ids` so the ids of their tabs are unique on the page; tabs inside a tab
+/// add their tabs' fields in their place.
 fn place(
     component: &Component,
     unplaced: &mut HashMap<String, FieldView>,
     sections: &mut Vec<LayoutSectionView>,
+    tab_ids: &mut usize,
+    in_tab: bool,
 ) {
     match component {
         Component::Field(name) => {
@@ -2076,10 +2108,72 @@ fn place(
         }
         Component::Group(group) => {
             for inner in group.components() {
-                place(inner, unplaced, sections);
+                place(inner, unplaced, sections, tab_ids, in_tab);
+            }
+        }
+        Component::Tabs(tabs) if !in_tab => {
+            *tab_ids += 1;
+            let number = *tab_ids;
+            let mut panels: Vec<(usize, TabPanelView)> = Vec::new();
+            for (index, tab) in tabs.get_tabs().iter().enumerate() {
+                let mut inner = Vec::new();
+                for component in tab.components() {
+                    place(component, unplaced, &mut inner, tab_ids, true);
+                }
+                inner.retain(|section: &LayoutSectionView| !section.is_empty());
+                if inner.is_empty() {
+                    continue;
+                }
+                panels.push((
+                    index,
+                    TabPanelView {
+                        id: format!("ignite-tabs-{number}-{}", index + 1),
+                        label: tab.label().to_string(),
+                        active: false,
+                        selected: "false",
+                        sections: inner,
+                    },
+                ));
+            }
+            let active = panels
+                .iter()
+                .position(|(index, _)| *index == tabs.active_index())
+                .unwrap_or(0);
+            let mut view = LayoutSectionView::new("", None);
+            view.is_tabs = true;
+            view.tabs_label = tabs.label().to_string();
+            view.tabs = panels
+                .into_iter()
+                .enumerate()
+                .map(|(position, (_, mut panel))| {
+                    panel.active = position == active;
+                    panel.selected = if panel.active { "true" } else { "false" };
+                    panel
+                })
+                .collect();
+            sections.push(view);
+        }
+        // Tabs inside tabs show their tabs' fields in place.
+        Component::Tabs(tabs) => {
+            for tab in tabs.get_tabs() {
+                for inner in tab.components() {
+                    place(inner, unplaced, sections, tab_ids, true);
+                }
             }
         }
     }
+}
+
+/// Whether `layout` has tabs, whose form needs the form script to switch them.
+pub(crate) fn has_tabs(layout: &FormLayout) -> bool {
+    fn any(components: &[Component]) -> bool {
+        components.iter().any(|component| match component {
+            Component::Tabs(_) => true,
+            Component::Group(group) => any(group.components()),
+            _ => false,
+        })
+    }
+    any(layout.components())
 }
 
 /// The values a form of a resource with live fields shows again. A form sends `_ignite_shown`,
