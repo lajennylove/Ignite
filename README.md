@@ -10,8 +10,8 @@ Ignite is on crates.io. Orbit, Rocket and Propel come from crates.io too, so the
 
 ```toml
 [dependencies]
-ignite-panel = "0.6.7"
-ignite-core = "0.6.7"
+ignite-panel = "0.6.8"
+ignite-core = "0.6.8"
 orbit-orm = "0.4.0"
 rocket = "0.5.2"
 propel_rocket = "0.3.0"
@@ -24,7 +24,7 @@ dotenvy = "0.15"
 propel_compiler = "0.3.0"
 ```
 
-- **Ignite** 0.6.7: `ignite-panel`, `ignite-core` and `ignite-macros` are released together, at the same version. Upgrading from 0.6 has breaking changes (icon names, the admin theme trait, the list query's `filter`, collapsible navigation groups by default): see the migration notes in [CHANGELOG.md](CHANGELOG.md).
+- **Ignite** 0.6.8: `ignite-panel`, `ignite-core` and `ignite-macros` are released together, at the same version. Upgrading from 0.6 has breaking changes (icon names, the admin theme trait, the list query's `filter`, collapsible navigation groups by default): see the migration notes in [CHANGELOG.md](CHANGELOG.md).
 - **Orbit** (`orbit-orm`) 0.4.0. The models derive its `OrbitModel`.
 - **Rocket** 0.5.2 and **Propel** 0.3.0. Use the same versions as the panel, or Cargo builds a second copy and the panel's views would not match the app's.
 - **propel_compiler** 0.3.0 is a build dependency. An app with its own views compiles them in its `build.rs`.
