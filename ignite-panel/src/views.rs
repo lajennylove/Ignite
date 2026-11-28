@@ -70,8 +70,8 @@ pub(crate) struct AdminThemeView {
 
 use ignite_core::structure::is_structured;
 use ignite_core::{
-    ColumnSpan, Component, FieldConditions, FieldDef, FieldErrors, FieldKindDef, FormInput,
-    FormLayout, MediaItem, Repeaters, Width,
+    BlockDef, ColumnSpan, Component, FieldConditions, FieldDef, FieldErrors, FieldKindDef,
+    FormInput, FormLayout, MediaItem, Repeaters, Width,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -1095,14 +1095,14 @@ pub(crate) struct FieldView {
     pub(crate) has_error: bool,
     pub(crate) error: String,
     /// Whether a resource form renders the field as rows of sub-fields
-    /// (`partials/structure`), and its parts. A repeater, group or clone elsewhere, such as on
-    /// the profile, is edited as JSON.
+    /// (`partials/structure`), and its parts. A repeater, group, flexible content or clone
+    /// elsewhere, such as on the profile, is edited as JSON.
     pub(crate) is_structured: bool,
     pub(crate) parts: Vec<PartView>,
 }
 
-/// One part of a structured field, in display order: the start of a repeater or group
-/// (`is_open`), the start of one of its rows (`is_row`), the sub-fields of a row or group
+/// One part of a structured field, in display order: the start of a repeater, group or
+/// flexible content (`is_open`), the start of one of its rows (`is_row`), the sub-fields of a row or group
 /// (`fields`), the end of a row (`is_row_end`), and the end of the field with
 /// its add button and its error (`is_close`). A structured sub-field adds its own parts in its
 /// place, so a template without recursion renders any nesting.
@@ -1119,13 +1119,17 @@ pub(crate) struct PartView {
     pub(crate) name: String,
     pub(crate) label: String,
     pub(crate) required: bool,
-    /// `repeater` or `group`, for `data-ignite-structure`.
+    /// `repeater`, `group` or `flexible_content`, for `data-ignite-structure`.
     pub(crate) kind: &'static str,
     /// Whether the field is a list of rows: it sends its name blank, so no rows clears it.
     pub(crate) is_list: bool,
     /// The hidden input that keeps a row or group whose inputs send nothing, such as an
     /// unticked checkbox.
     pub(crate) marker: String,
+    /// The block of a flexible content row, sent as `<row>[type]`.
+    pub(crate) has_block: bool,
+    pub(crate) block_name: String,
+    pub(crate) block: String,
     /// Where the add, delete and move buttons send the form: the form's live URL.
     pub(crate) ops_url: String,
     pub(crate) can_up: bool,
@@ -1137,6 +1141,9 @@ pub(crate) struct PartView {
     pub(crate) can_add: bool,
     pub(crate) add_op: String,
     pub(crate) add_label: String,
+    /// The blocks a flexible content field adds from its picker, as Filament's Builder.
+    pub(crate) has_blocks: bool,
+    pub(crate) blocks: Vec<BlockChoiceView>,
     pub(crate) has_error: bool,
     pub(crate) error: String,
 }
@@ -1644,6 +1651,13 @@ pub(crate) fn form_field_views(
     views
 }
 
+/// One block of a flexible content field's picker: its label and the button's operation.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct BlockChoiceView {
+    pub(crate) label: String,
+    pub(crate) op: String,
+}
+
 /// What the parts of a structured field are built with: the form's conditions (a live
 /// sub-field is marked by its settings path), its repeater settings, its errors (by dotted
 /// path), its loaded choices (a sub-field's by its settings path), and the URL its buttons
@@ -1752,7 +1766,7 @@ fn container_parts(
             sub_field_parts(fields, values, place, context, parts);
             close(parts, PartView::default());
         }
-        FieldKindDef::Repeater(fields) => {
+        FieldKindDef::Repeater(_) | FieldKindDef::FlexibleContent(_) => {
             let settings = context.repeaters.get(&place.schema);
             let rows: &[Value] = value.as_array().map(Vec::as_slice).unwrap_or(&[]);
             parts.push(PartView {
@@ -1762,12 +1776,29 @@ fn container_parts(
             for (index, row) in rows.iter().enumerate() {
                 let row_place = place.child(&index.to_string(), None);
                 let empty = serde_json::Map::new();
-                let values = row.as_object().unwrap_or(&empty);
+                let (fields, values, block): (&[FieldDef], _, Option<&BlockDef>) = match &field.kind
+                {
+                    FieldKindDef::FlexibleContent(blocks) => {
+                        let kind = row.get("type").and_then(Value::as_str).unwrap_or("");
+                        let block = blocks.iter().find(|b| b.name == kind);
+                        let data = row.get("data").and_then(Value::as_object);
+                        (
+                            block.map(|b| b.fields.as_slice()).unwrap_or(&[]),
+                            data.unwrap_or(&empty),
+                            block,
+                        )
+                    }
+                    FieldKindDef::Repeater(fields) => {
+                        (fields.as_slice(), row.as_object().unwrap_or(&empty), None)
+                    }
+                    _ => continue,
+                };
                 let label = settings
                     .get_item_label()
                     .and_then(|name| values.get(name))
                     .map(|value| cell_text(Some(value)))
                     .filter(|text| !text.trim().is_empty())
+                    .or_else(|| block.map(|b| b.label.clone()))
                     .unwrap_or_else(|| format!("Row {}", index + 1));
                 let op = |verb: &str| format!("{verb}:{}", row_place.path);
                 parts.push(PartView {
@@ -1775,6 +1806,9 @@ fn container_parts(
                     name: row_place.input.clone(),
                     label,
                     marker: format!("{}[_ignite_row]", row_place.input),
+                    has_block: block.is_some(),
+                    block_name: format!("{}[type]", row_place.input),
+                    block: block.map(|b| b.name.clone()).unwrap_or_default(),
                     ops_url: context.ops_url.to_string(),
                     can_up: settings.is_reorderable() && index > 0,
                     up_op: op("up"),
@@ -1784,7 +1818,15 @@ fn container_parts(
                     delete_op: op("delete"),
                     ..PartView::default()
                 });
-                sub_field_parts(fields, values, &row_place, context, parts);
+                // A block's sub-fields are in its `data`, and their settings path names the block.
+                let data_place = match block {
+                    Some(block) => Place {
+                        schema: format!("{}.{}", place.schema, block.name),
+                        ..row_place.child("data", None)
+                    },
+                    None => row_place,
+                };
+                sub_field_parts(fields, values, &data_place, context, parts);
                 parts.push(PartView {
                     is_row_end: true,
                     ..PartView::default()
@@ -1797,12 +1839,25 @@ fn container_parts(
                 .get_add_action_label()
                 .map(str::to_string)
                 .unwrap_or_else(|| format!("Add to {}", field.label));
+            let blocks = match &field.kind {
+                FieldKindDef::FlexibleContent(blocks) => blocks
+                    .iter()
+                    .map(|block| BlockChoiceView {
+                        label: block.label.clone(),
+                        op: format!("add:{}:{}", place.path, block.name),
+                    })
+                    .collect(),
+                _ => Vec::new(),
+            };
+            let can_add = settings.is_addable() && !full;
             close(
                 parts,
                 PartView {
-                    can_add: settings.is_addable() && !full,
+                    can_add: can_add && blocks.is_empty(),
                     add_op: format!("add:{}", place.path),
                     add_label,
+                    has_blocks: can_add && !blocks.is_empty(),
+                    blocks,
                     ..PartView::default()
                 },
             );

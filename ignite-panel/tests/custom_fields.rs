@@ -251,7 +251,7 @@ fn each_new_type_renders_through_its_partial() {
         r#"name="related[]" multiple"#,
         // A repeater renders as rows of its sub-fields (see tests/repeater.rs).
         r#"data-ignite-field="slides" data-ignite-structure="repeater""#,
-        r#"data-ignite-structured="flexible_content""#,
+        r#"data-ignite-field="content" data-ignite-structure="flexible_content""#,
     ] {
         assert!(form.contains(expected), "missing {expected}\n{form}");
     }

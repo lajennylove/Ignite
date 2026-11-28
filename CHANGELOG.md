@@ -84,10 +84,16 @@ All notable changes to Ignite are listed here. The format follows
   input is named after the group (`seo[title]`, or `faqs[0][answer][body]` inside a repeater
   row), the stored value is unchanged, one JSON object, and a sub-field's error shows under
   its input (`seo.title`). A repeater and a group nest in each other.
+- Flexible content edited as rows that each take one block, as Filament's `Builder`, on the
+  repeater's rows, buttons and settings: its add button opens a picker of the blocks
+  (`add:<path>:<block>`), each row sends its block as `content[0][type]` and its values as
+  `content[0][data][...]`, and the stored value is unchanged (`{"type": ..., "data": {...}}`
+  per row, as Filament stores a builder). A block's row is labelled by the block's label. The
+  settings path of a block's sub-field names the block (`content.gallery.items`).
 
 ### Changed
 
-- A repeater, group or clone on a resource form renders as sub-fields (see Added), so its
+- A repeater, group, flexible content or clone on a resource form renders as sub-fields (see Added), so its
   markup changed; a form
   with one loads the form script and `form.css`. A structured value's nested errors are all
   checked and recorded, not only the first. A `name[key]` form key is now also kept as sent,

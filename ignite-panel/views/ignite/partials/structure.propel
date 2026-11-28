@@ -1,4 +1,4 @@
-{{-- A repeater or group on a resource form, as Filament's Repeater and Fieldset: its parts in order (see StructureContext in src/views.rs), so any nesting renders without recursion. Each sub-field input is named after its place, such as members[0][name], and the panel builds the field's JSON value from them. The buttons send the form to the form's live URL (formaction), which shows it again with the row added, deleted or moved and saves nothing; the form script does it without leaving the page. --}}
+{{-- A repeater, group or flexible content field on a resource form, as Filament's Repeater, Fieldset and Builder: its parts in order (see StructureContext in src/views.rs), so any nesting renders without recursion. Each sub-field input is named after its place, such as members[0][name], and the panel builds the field's JSON value from them. The buttons send the form to the form's live URL (formaction), which shows it again with the row added, deleted or moved and saves nothing; the form script does it without leaving the page. --}}
 @foreach (part in field.parts)
 @if (part.is_open)
 <div class="ig-structure grid gap-3" data-ignite-field="{{ $part.name }}" data-ignite-structure="{{ $part.kind }}">
@@ -8,7 +8,7 @@
 @endif
 @if (part.is_row)
   <div class="ig-structure-row grid gap-4 rounded-md border border-border" data-ignite-row="{{ $part.name }}">
-    <input type="hidden" name="{{ $part.marker }}" value="1">
+    <input type="hidden" name="{{ $part.marker }}" value="1">@if (part.has_block)<input type="hidden" name="{{ $part.block_name }}" value="{{ $part.block }}">@endif
     <div class="flex flex-wrap items-center gap-2">
       <span class="font-semibold text-heading text-sm">{{ $part.label }}</span>
       <span class="ml-auto flex flex-wrap gap-2">
@@ -27,6 +27,14 @@
 @if (part.is_close)
   </div>
   @if (part.can_add)<div><button type="submit" class="ig-btn ig-btn-outline" formaction="{{ $part.ops_url }}" formnovalidate name="_ignite_op" value="{{ $part.add_op }}" data-ignite-op>{{ $part.add_label }}</button></div>@endif
+  @if (part.has_blocks)
+  <details class="ig-structure-picker">
+    <summary class="ig-btn ig-btn-outline">{{ $part.add_label }}</summary>
+    <div class="flex flex-wrap gap-2">
+      @foreach (choice in part.blocks)<button type="submit" class="ig-btn ig-btn-ghost px-3 py-1" formaction="{{ $part.ops_url }}" formnovalidate name="_ignite_op" value="{{ $choice.op }}" data-ignite-op>{{ $choice.label }}</button>@endforeach
+    </div>
+  </details>
+  @endif
   @if (part.has_error)
   <p class="mt-1.5 mb-0 text-sm text-error-emphasis">{{ $part.error }}</p>
   @endif

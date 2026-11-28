@@ -1,15 +1,18 @@
-//! Repeaters and groups edited as sub-fields, as Filament's `Repeater` and `Fieldset`: the
-//! settings of a repeater ([`RepeaterSettings`]), the values a form sends for one
-//! ([`structured_input`]), and the add, delete and move buttons ([`apply_operation`]).
+//! Repeaters, groups and flexible content edited as sub-fields, as Filament's `Repeater`,
+//! `Fieldset` and `Builder`: the settings of a repeater or flexible content
+//! ([`RepeaterSettings`]), the values a form sends for one ([`structured_input`]), and the
+//! add, delete and move buttons ([`apply_operation`]).
 //!
 //! The form names each sub-field input after its place, as PHP and Laravel read nested
-//! arrays: `members[0][name]` is the `name` of the first row of `members`, and `seo[title]`
-//! the `title` of the group `seo`. The panel turns them into the JSON value the field stores,
-//! a list of rows or one object, so the checks and the data layer see the same value as when
-//! the form sends the field as JSON text.
+//! arrays: `members[0][name]` is the `name` of the first row of `members`, `seo[title]` the
+//! `title` of the group `seo`, and `content[1][data][heading]` the `heading` of the second
+//! block of `content`, whose type is `content[1][type]`. The panel turns them into the JSON
+//! value the field stores, a list of rows or one object, so the checks and the data layer see
+//! the same value as when the form sends the field as JSON text.
 //!
 //! An error on a sub-field is keyed by its dotted path, as Laravel keys the errors of a nested
-//! array: `members.0.name`, `seo.title`. A repeater's settings are
+//! array: `members.0.name`, `seo.title`, `content.1.data.heading`. The settings path of a
+//! block's sub-field names the block: `content.hero.items`. A repeater's settings are
 //! keyed by the names of the fields that lead to it, without row numbers: `members`, or
 //! `groups.rules` for the repeater `rules` inside each row of `groups`, as Filament's state
 //! path without the item keys.
@@ -162,17 +165,21 @@ impl Repeaters {
     }
 }
 
-/// Whether a field of `kind` is edited as sub-fields: a repeater, a group or a clone.
+/// Whether a field of `kind` is edited as sub-fields: a repeater, a group, flexible content
+/// or a clone.
 pub fn is_structured(kind: &FieldKindDef) -> bool {
     matches!(
         kind,
-        FieldKindDef::Repeater(_) | FieldKindDef::Group(_) | FieldKindDef::Clone(_)
+        FieldKindDef::Repeater(_)
+            | FieldKindDef::Group(_)
+            | FieldKindDef::FlexibleContent(_)
+            | FieldKindDef::Clone(_)
     )
 }
 
 /// `form`, with the value of each structured field of `fields` built from the sub-field
 /// inputs it sent (`members[0][name]` and so on), as JSON text under the field's name: a list
-/// of rows for a repeater, one object for a group or a clone. Rows come
+/// of rows for a repeater or flexible content, one object for a group or a clone. Rows come
 /// in the order of their numbers, numbered again from 0. A field the form sent no sub-field
 /// input for keeps what the form sent under its name, such as JSON text, or nothing.
 pub fn structured_input(fields: &[FieldDef], form: &FormInput) -> FormInput {
@@ -195,6 +202,22 @@ fn collect(kind: &FieldKindDef, base: &str, form: &FormInput) -> Value {
             rows(base, form)
                 .iter()
                 .map(|row| Value::Object(object(fields, &format!("{base}[{row}]"), form)))
+                .collect(),
+        ),
+        FieldKindDef::FlexibleContent(blocks) => Value::Array(
+            rows(base, form)
+                .iter()
+                .filter_map(|row| {
+                    let at = format!("{base}[{row}]");
+                    let kind = form.raw(&format!("{at}[type]"))?.trim().to_string();
+                    let fields = blocks
+                        .iter()
+                        .find(|block| block.name == kind)
+                        .map(|block| block.fields.as_slice())
+                        .unwrap_or(&[]);
+                    let data = object(fields, &format!("{at}[data]"), form);
+                    Some(serde_json::json!({ "type": kind, "data": data }))
+                })
                 .collect(),
         ),
         FieldKindDef::Group(fields) | FieldKindDef::Clone(fields) => {
@@ -287,7 +310,8 @@ fn rows(base: &str, form: &FormInput) -> Vec<String> {
 
 /// `form`, with the button `operation` applied to the structured fields of `fields`, as
 /// Filament's repeater actions change the form's state without saving it. An operation is
-/// `add:<path>` (a blank row at the end of the repeater at `path`), `delete:<path>.<row>`, `up:<path>.<row>` or
+/// `add:<path>` (a blank row at the end of the repeater at `path`), `add:<path>:<block>` (a
+/// blank block of flexible content, as Filament's block picker adds one), `delete:<path>.<row>`, `up:<path>.<row>` or
 /// `down:<path>.<row>`. `path` is the dotted path of the field's value, such as `members` or
 /// `groups.0.rules`. An operation that does not apply, or that the field's settings in
 /// `repeaters` do not allow, changes nothing.
@@ -335,6 +359,11 @@ pub fn apply_operation(
                 .is_some_and(|max| list.len() >= max);
             let blank = match (kind, block) {
                 (FieldKindDef::Repeater(_), None) => Some(Value::Object(Map::new())),
+                (FieldKindDef::FlexibleContent(blocks), Some(block))
+                    if blocks.iter().any(|b| b.name == block) =>
+                {
+                    Some(serde_json::json!({ "type": block, "data": {} }))
+                }
                 _ => None,
             };
             match blank.filter(|_| !full) {
@@ -376,7 +405,10 @@ fn locate<'k, 'v>(
     segments: &[&str],
 ) -> Option<(&'k FieldKindDef, String, &'v mut Vec<Value>)> {
     let Some((first, rest)) = segments.split_first() else {
-        if !matches!(kind, FieldKindDef::Repeater(_)) {
+        if !matches!(
+            kind,
+            FieldKindDef::Repeater(_) | FieldKindDef::FlexibleContent(_)
+        ) {
             return None;
         }
         if !value.is_array() {
@@ -396,6 +428,32 @@ fn locate<'k, 'v>(
                 .entry(name.to_string())
                 .or_insert(Value::Null);
             locate(&field.kind, &format!("{schema}.{name}"), inner, rest)
+        }
+        FieldKindDef::FlexibleContent(blocks) => {
+            let row = value
+                .as_array_mut()?
+                .get_mut(first.parse::<usize>().ok()?)?;
+            let block = row.get("type")?.as_str()?.to_string();
+            let fields = &blocks.iter().find(|b| b.name == block)?.fields;
+            let (data, rest) = rest.split_first()?;
+            if *data != "data" {
+                return None;
+            }
+            let (name, rest) = rest.split_first()?;
+            let field = fields.iter().find(|f| f.name == *name)?;
+            let inner = row
+                .as_object_mut()?
+                .entry("data")
+                .or_insert_with(|| Value::Object(Map::new()))
+                .as_object_mut()?
+                .entry(name.to_string())
+                .or_insert(Value::Null);
+            locate(
+                &field.kind,
+                &format!("{schema}.{block}.{name}"),
+                inner,
+                rest,
+            )
         }
         FieldKindDef::Group(fields) | FieldKindDef::Clone(fields) => {
             let field = fields.iter().find(|f| f.name == *first)?;
