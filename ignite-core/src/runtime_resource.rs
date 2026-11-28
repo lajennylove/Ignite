@@ -292,6 +292,9 @@ pub enum FieldKindDef {
     Wysiwyg,
     /// One post, from options [`RuntimeData::options`] loads. See [`FieldKind::PostObject`].
     PostObject,
+    /// Several choices from a list of `(value, label)` pairs, as checkboxes; with no pairs,
+    /// from options [`RuntimeData::options`] loads. See [`FieldKind::CheckboxList`].
+    CheckboxList(Vec<(String, String)>),
     /// Several choices, from options [`RuntimeData::options`] loads. See
     /// [`FieldKind::Relationship`].
     Relationship,
@@ -317,14 +320,17 @@ impl FieldKindDef {
     /// Whether the field's choices come from [`RuntimeData::options`] each time its form is
     /// shown. See [`FieldKind::loads_options`].
     pub fn loads_options(&self) -> bool {
-        matches!(
-            self,
-            FieldKindDef::Lookup
-                | FieldKindDef::PostObject
-                | FieldKindDef::Relationship
-                | FieldKindDef::Taxonomy
-                | FieldKindDef::User
-        )
+        match self {
+            FieldKindDef::CheckboxList(choices) => choices.is_empty(),
+            _ => matches!(
+                self,
+                FieldKindDef::Lookup
+                    | FieldKindDef::PostObject
+                    | FieldKindDef::Relationship
+                    | FieldKindDef::Taxonomy
+                    | FieldKindDef::User
+            ),
+        }
     }
 
     /// Whether the field holds media library ids: an image, a file or a gallery.
@@ -392,6 +398,7 @@ impl From<FieldKind> for FieldKindDef {
             FieldKind::Link => FieldKindDef::Link,
             FieldKind::Wysiwyg => FieldKindDef::Wysiwyg,
             FieldKind::PostObject => FieldKindDef::PostObject,
+            FieldKind::CheckboxList(choices) => FieldKindDef::CheckboxList(owned_choices(choices)),
             FieldKind::Relationship => FieldKindDef::Relationship,
             FieldKind::Taxonomy => FieldKindDef::Taxonomy,
             FieldKind::User => FieldKindDef::User,
@@ -1073,7 +1080,8 @@ impl RegisteredResource {
     /// field:
     ///
     /// - text, textarea, select, lookup: a string. A required value is trimmed.
-    /// - email, URL, radio, color, image, file, link, wysiwyg, post object, relationship,
+    /// - email, URL, radio, color, image, file, link, wysiwyg, post object, checkbox list,
+    ///   relationship,
     ///   taxonomy, user, repeater, group, flexible content, gallery, clone: the text
     ///   [`Field::check_value`](crate::Field::check_value) returns. The structured kinds
     ///   hold JSON text.

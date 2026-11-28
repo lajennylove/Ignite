@@ -97,6 +97,14 @@ All notable changes to Ignite are listed here. The format follows
   panel per tab; the first tab is open, the form script switches them, and every tab's fields
   are sent with the form. A tab whose fields the conditions all hide is left out; tabs inside
   a tab show their fields in place.
+- A checkbox list, as Filament's `CheckboxList` (ACF's checkbox field, Mission Control's gap
+  M1): `FieldKind::CheckboxList(&[(value, label)])` and `FieldKindDef::CheckboxList(Vec<...>)`,
+  rendered as one checkbox per choice (`partials/fields/checkbox_list`). The value is a JSON
+  list of the ticked values, as Filament stores it; a value that is not a choice is refused
+  with "Choose one of the options."; nothing ticked is blank. With no choices of its own the
+  list loads them each time the form is shown (`loads_options()`), through `options` and
+  `options_for`, as Filament's `options(fn () => ...)`, and the panel checks the ticked values
+  against them. It also works inside a repeater row (`screens[0][hide][]`).
 
 ### Changed
 
@@ -105,6 +113,8 @@ All notable changes to Ignite are listed here. The format follows
   with one loads the form script and `form.css`. A structured value's nested errors are all
   checked and recorded, not only the first. A `name[key]` form key is now also kept as sent,
   beside the object the panel builds under `name`.
+- **Breaking:** `ignite_core::FieldKind` and `FieldKindDef` have the new variant
+  `CheckboxList`, so an exhaustive `match` on them must handle it.
 - **Breaking:** `ignite_core::Component` has the new variant `Tabs`, so an exhaustive
   `match` on it must handle it.
 - **Breaking:** `ignite_panel::authz::AuthzError` has the new variants `SuperAdminRole` and

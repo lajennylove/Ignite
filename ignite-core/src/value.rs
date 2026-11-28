@@ -56,6 +56,7 @@ pub(crate) fn check_value_in(
             Some(text.trim().to_string())
         }
         FieldKindDef::Link
+        | FieldKindDef::CheckboxList(_)
         | FieldKindDef::Relationship
         | FieldKindDef::Gallery
         | FieldKindDef::Repeater(_)
@@ -128,7 +129,9 @@ fn media_message(label: &str) -> String {
 fn shape_message(kind: &FieldKindDef, label: &str) -> String {
     match kind {
         FieldKindDef::Link => format!("{label} must be a link with a valid URL."),
-        FieldKindDef::Relationship => format!("{label} must be a list of choices."),
+        FieldKindDef::Relationship | FieldKindDef::CheckboxList(_) => {
+            format!("{label} must be a list of choices.")
+        }
         FieldKindDef::Gallery => format!("{label} must be a list of media ids."),
         FieldKindDef::Repeater(_) => format!("{label} must be a list of rows."),
         FieldKindDef::FlexibleContent(_) => format!("{label} must be a list of blocks."),
@@ -168,6 +171,25 @@ fn structured(
     let shape = || shape_message(kind, label);
     let checked = match kind {
         FieldKindDef::Link => check::link_value(value).ok_or_else(shape),
+        FieldKindDef::CheckboxList(choices) => {
+            let items = value.as_array().ok_or_else(shape)?;
+            let mut chosen = Vec::with_capacity(items.len());
+            for item in items {
+                let text = match item {
+                    Value::String(text) => text.trim().to_string(),
+                    Value::Number(number) => number.to_string(),
+                    _ => return Err(shape()),
+                };
+                // Loaded choices (none of its own) are checked by the panel, which reads them.
+                if !choices.is_empty() && !choices.iter().any(|(value, _)| *value == text) {
+                    return Err("Choose one of the options.".to_string());
+                }
+                if !text.is_empty() && !chosen.contains(&Value::from(text.as_str())) {
+                    chosen.push(Value::from(text));
+                }
+            }
+            Ok(Value::Array(chosen))
+        }
         FieldKindDef::Relationship => {
             let items = value.as_array().ok_or_else(shape)?;
             items
@@ -402,6 +424,7 @@ fn nested(
             .map(Value::from)
             .ok_or_else(|| media_message(label)),
         kind @ (FieldKindDef::Link
+        | FieldKindDef::CheckboxList(_)
         | FieldKindDef::Relationship
         | FieldKindDef::Gallery
         | FieldKindDef::Repeater(_)

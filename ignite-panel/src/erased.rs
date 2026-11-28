@@ -401,7 +401,10 @@ where
         let Some(value) = form.get(name) else {
             continue;
         };
-        let values = if field.kind == FieldKindDef::Relationship {
+        let values = if matches!(
+            field.kind,
+            FieldKindDef::Relationship | FieldKindDef::CheckboxList(_)
+        ) {
             match serde_json::from_str::<Vec<Value>>(value) {
                 Ok(items) => items
                     .iter()

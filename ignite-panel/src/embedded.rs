@@ -50,6 +50,10 @@ pub(crate) const VIEWS: &[(&str, &str)] = &[
         include_str!("../views/ignite/partials/structure.propel"),
     ),
     (
+        "partials.fields.checkbox_list",
+        include_str!("../views/ignite/partials/fields/checkbox_list.propel"),
+    ),
+    (
         "partials.fields.clone",
         include_str!("../views/ignite/partials/fields/clone.propel"),
     ),

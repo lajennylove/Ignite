@@ -65,6 +65,12 @@ pub enum FieldKind {
     /// One post, chosen from options loaded each time the form is shown, as a
     /// [`Lookup`](Self::Lookup) is (ACF's post object field).
     PostObject,
+    /// Several choices from a list of `(value, label)` pairs, shown as checkboxes, as
+    /// Filament's `CheckboxList` (ACF's checkbox field). The value is a JSON array of the
+    /// chosen values, such as `["title","editor"]`, as Filament stores it. Each value must be
+    /// one of the choices. With no pairs, the choices are loaded each time the form is shown,
+    /// as a [`Lookup`](Self::Lookup)'s are, as Filament's `options(fn () => ...)`.
+    CheckboxList(&'static [(&'static str, &'static str)]),
     /// Several choices from options loaded each time the form is shown (ACF's relationship
     /// field): the multi-value [`PostObject`](Self::PostObject). The value is a JSON array
     /// of the chosen option values, as strings, such as `["12","40"]`.
@@ -97,16 +103,19 @@ impl FieldKind {
     /// Whether the field's choices are loaded each time its form is shown, through
     /// [`IgniteResource::options`](crate::IgniteResource::options) or
     /// [`RuntimeData::options`](crate::RuntimeData::options): a lookup, post object,
-    /// relationship, taxonomy or user field.
+    /// relationship, taxonomy or user field, and a checkbox list with no choices of its own.
     pub fn loads_options(&self) -> bool {
-        matches!(
-            self,
-            FieldKind::Lookup
-                | FieldKind::PostObject
-                | FieldKind::Relationship
-                | FieldKind::Taxonomy
-                | FieldKind::User
-        )
+        match self {
+            FieldKind::CheckboxList(choices) => choices.is_empty(),
+            _ => matches!(
+                self,
+                FieldKind::Lookup
+                    | FieldKind::PostObject
+                    | FieldKind::Relationship
+                    | FieldKind::Taxonomy
+                    | FieldKind::User
+            ),
+        }
     }
 }
 

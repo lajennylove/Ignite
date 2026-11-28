@@ -281,9 +281,13 @@ fn object(fields: &[FieldDef], base: &str, form: &FormInput) -> Map<String, Valu
     values
 }
 
-/// Whether a field of `kind` sends a list (`name[]`): a relationship or a gallery.
+/// Whether a field of `kind` sends a list (`name[]`): a checkbox list, a relationship or a
+/// gallery.
 fn takes_list(kind: &FieldKindDef) -> bool {
-    matches!(kind, FieldKindDef::Relationship | FieldKindDef::Gallery)
+    matches!(
+        kind,
+        FieldKindDef::CheckboxList(_) | FieldKindDef::Relationship | FieldKindDef::Gallery
+    )
 }
 
 /// The row keys the form sent under `base` (`{base}[{row}]...`), in the order of their

@@ -1,0 +1,10 @@
+{{-- Several choices as checkboxes (FieldKind::CheckboxList), as Filament's CheckboxList. The panel reads the name[] values as a JSON list; the hidden input sends the field blank when nothing is ticked. --}}
+<input type="hidden" name="{{ $field.name }}[]" value="">
+<div class="grid gap-2" id="{{ $field.name }}" role="group">
+  @foreach (option in field.options)
+    <label class="flex items-center gap-2 text-sm">
+      <input type="checkbox" class="h-4 w-4 rounded border-bordergray text-primary focus:ring-primary" name="{{ $field.name }}[]" value="{{ $option.value }}" @if (option.selected)checked@endif>
+      {{ $option.label }}
+    </label>
+  @endforeach
+</div>

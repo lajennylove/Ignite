@@ -1162,6 +1162,7 @@ pub(crate) struct KindFlags {
     pub(crate) wysiwyg: bool,
     pub(crate) post_object: bool,
     pub(crate) relationship: bool,
+    pub(crate) checkbox_list: bool,
     pub(crate) taxonomy: bool,
     pub(crate) user: bool,
     pub(crate) repeater: bool,
@@ -1185,6 +1186,7 @@ impl KindFlags {
             FieldKindDef::Wysiwyg => flags.wysiwyg = true,
             FieldKindDef::PostObject => flags.post_object = true,
             FieldKindDef::Relationship => flags.relationship = true,
+            FieldKindDef::CheckboxList(_) => flags.checkbox_list = true,
             FieldKindDef::Taxonomy => flags.taxonomy = true,
             FieldKindDef::User => flags.user = true,
             FieldKindDef::Repeater(_) => flags.repeater = true,
@@ -1299,13 +1301,16 @@ impl FieldView {
             _ => form.get(&field.name).unwrap_or("").to_string(),
         };
         let choices: Vec<(String, String)> = match &field.kind {
-            FieldKindDef::Select(choices) | FieldKindDef::Radio(choices) => choices.clone(),
             kind if kind.loads_options() => lookup.to_vec(),
+            FieldKindDef::Select(choices)
+            | FieldKindDef::Radio(choices)
+            | FieldKindDef::CheckboxList(choices) => choices.clone(),
             _ => Vec::new(),
         };
         let options = match &field.kind {
-            // Radios and a relationship mark each chosen value; nothing is chosen at first.
-            FieldKindDef::Radio(_) | FieldKindDef::Relationship => {
+            // Radios, checkboxes and a relationship mark each chosen value; nothing is chosen
+            // at first.
+            FieldKindDef::Radio(_) | FieldKindDef::Relationship | FieldKindDef::CheckboxList(_) => {
                 let chosen = list_values(&value);
                 let chosen = if chosen.is_empty() && !value.is_empty() {
                     vec![value.trim().to_string()]
@@ -1473,6 +1478,7 @@ fn kind_name(kind: &FieldKindDef) -> &'static str {
         FieldKindDef::Wysiwyg => "wysiwyg",
         FieldKindDef::PostObject => "post_object",
         FieldKindDef::Relationship => "relationship",
+        FieldKindDef::CheckboxList(_) => "checkbox_list",
         FieldKindDef::Taxonomy => "taxonomy",
         FieldKindDef::User => "user",
         FieldKindDef::Repeater(_) => "repeater",
@@ -1501,7 +1507,9 @@ fn schema_of(kind: &FieldKindDef) -> Value {
     let mut schema = serde_json::Map::new();
     schema.insert("type".into(), Value::from(kind_name(kind)));
     match kind {
-        FieldKindDef::Select(choices) | FieldKindDef::Radio(choices) => {
+        FieldKindDef::Select(choices)
+        | FieldKindDef::Radio(choices)
+        | FieldKindDef::CheckboxList(choices) => {
             let choices = choices
                 .iter()
                 .map(|(value, label)| serde_json::json!({ "value": value, "label": label }))

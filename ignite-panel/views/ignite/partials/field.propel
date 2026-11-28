@@ -49,6 +49,8 @@
       @include('ignite::partials.fields.gallery')
     @elseif (field.is.clone)
       @include('ignite::partials.fields.clone')
+    @elseif (field.is.checkbox_list)
+      @include('ignite::partials.fields.checkbox_list')
     @else
       <input class="ig-input" id="{{ $field.name }}" name="{{ $field.name }}" type="{{ $field.input_type }}" @if (field.has_step)step="{{ $field.step }}" @endif value="{{ $field.value }}"@if (field.has_slug_from) data-ignite-slug-from="{{ $field.slug_from }}"@if (field.slug_locked) data-ignite-slug-locked@endif@endif>
     @endif
