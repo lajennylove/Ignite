@@ -45,7 +45,7 @@ pub(crate) enum Action {
 }
 
 /// Every action, in the order the panel registers them.
-const ACTIONS: [Action; 5] = [
+pub(crate) const ACTIONS: [Action; 5] = [
     Action::ViewAny,
     Action::View,
     Action::Create,
@@ -54,6 +54,28 @@ const ACTIONS: [Action; 5] = [
 ];
 
 impl Action {
+    /// The action as `ignite_core` names it, for a runtime resource's abilities.
+    pub(crate) fn resource_action(self) -> ignite_core::ResourceAction {
+        match self {
+            Action::ViewAny => ignite_core::ResourceAction::ViewAny,
+            Action::View => ignite_core::ResourceAction::View,
+            Action::Create => ignite_core::ResourceAction::Create,
+            Action::Update => ignite_core::ResourceAction::Update,
+            Action::Delete => ignite_core::ResourceAction::Delete,
+        }
+    }
+
+    /// The action's place in [`ACTIONS`].
+    pub(crate) fn index(self) -> usize {
+        match self {
+            Action::ViewAny => 0,
+            Action::View => 1,
+            Action::Create => 2,
+            Action::Update => 3,
+            Action::Delete => 4,
+        }
+    }
+
     fn suffix(self) -> &'static str {
         match self {
             Action::ViewAny => "viewAny",
@@ -70,11 +92,13 @@ pub(crate) fn ability(slug: &str, action: Action) -> String {
     format!("{slug}.{}", action.suffix())
 }
 
-/// Every ability of the resources, for the permission rows the panel registers.
+/// Every ability of the resources, for the permission rows the panel registers: each
+/// action's own (`<slug>.<action>`, or the one a runtime resource names) and a runtime
+/// resource's access ability.
 pub(crate) fn resource_abilities(resources: &[Arc<dyn Erased>]) -> Vec<String> {
     resources
         .iter()
-        .flat_map(|resource| slug_abilities(resource.slug()))
+        .flat_map(|resource| resource.ability_names())
         .collect()
 }
 

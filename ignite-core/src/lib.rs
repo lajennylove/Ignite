@@ -34,7 +34,7 @@ pub use list::{active_tab, BadgeColor, ColumnBadges, FilterCondition, ListFilter
 pub use media::{media_library, register_media_library, MediaItem, MediaLibrary};
 pub use orbit_orm::Database;
 pub use password::{hash_password, verify_password};
-pub use policy::{policy, register_policy, unregister_policy, ActingUser, Policy};
+pub use policy::{policy, register_policy, unregister_policy, ActingUser, Policy, ResourceAction};
 pub use query::{escape_like, Direction, ListQuery, Page};
 pub use resource::{table_name_is, IgniteResource};
 pub use runtime_resource::{

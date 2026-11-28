@@ -63,8 +63,10 @@ pub fn load_env() {
     }
 }
 
-/// Creates the five permission rows of the runtime resource at `slug` (`<slug>.viewAny`,
-/// `.view`, `.create`, `.update` and `.delete`), so a role can be granted them at once. Call it
+/// Creates the permission rows of the runtime resource at `slug`: the five abilities of its
+/// actions (`<slug>.viewAny`, `.view`, `.create`, `.update` and `.delete`, or the ones the
+/// resource names with `RuntimeResource::ability`) and its access ability, if any, so a role
+/// can be granted them at once. Call it
 /// with [`ignite_core::register_runtime`], in the same request, as a static resource gets its
 /// rows when the app starts. Running it again changes nothing. If the app does not call it,
 /// the panel creates the rows on the next signed-in request.
@@ -75,12 +77,27 @@ pub async fn register_runtime_permissions(
     db: &Database,
     slug: &str,
 ) -> Result<(), authz::AuthzError> {
-    if ignite_core::runtime_resource(slug).is_none() {
+    let Some(resource) = ignite_core::runtime_resource(slug) else {
         return Err(authz::AuthzError::NotFound(format!(
             "The runtime resource {slug}"
         )));
-    }
-    authz::register(db, &authz::slug_abilities(slug)).await?;
+    };
+    authz::register(db, &resource.ability_names()).await?;
+    Ok(())
+}
+
+/// Registers `abilities` as permissions while the app runs, as
+/// [`Ignite::abilities`](crate::Ignite::abilities) does when it starts: the Roles screen lists
+/// them from the next request on and a role can be granted them, without a restart. Such as
+/// the capabilities of a post type created on Mission Control's screens (`edit_books`,
+/// `delete_books`). Registering an ability again changes nothing.
+pub async fn register_abilities<I, S>(db: &Database, abilities: I) -> Result<(), authz::AuthzError>
+where
+    I: IntoIterator<Item = S>,
+    S: Into<String>,
+{
+    let names: Vec<String> = abilities.into_iter().map(Into::into).collect();
+    authz::register(db, &names).await?;
     Ok(())
 }
 

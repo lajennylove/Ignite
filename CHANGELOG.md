@@ -134,6 +134,18 @@ All notable changes to Ignite are listed here. The format follows
   `is_disabled`, with the same `RuntimeResource` builders. A disabled field shows its value
   in a disabled fieldset and, as in Filament, is not saved, whatever a request sends: such as
   a post type's key, set on create and locked after the first save.
+- Runtime abilities that gate a whole resource, as a Filament resource policy checking the
+  permission it chooses and `canAccess()`: `ignite_core::ResourceAction` (`ViewAny`, `View`,
+  `Create`, `Update`, `Delete`), `RuntimeResource::ability(action, name)` (such as a post
+  type's `edit_books` and `delete_books`, in place of `<slug>.<action>`) and
+  `RuntimeResource::access_ability(name)` (such as `manage_options`, needed beside each
+  action's own). They gate the navigation entry, the list, the forms, the saves and the
+  deletes; a `Policy` still decides each record. `RegisteredResource::ability_for`,
+  `access_ability`, `required_abilities` and `ability_names`. A runtime resource registered
+  while the app runs gets its abilities as permissions on the next signed-in request (or at
+  once with `register_runtime_permissions`), so the Roles screen lists them without a restart,
+  and `ignite_panel::register_abilities(db, names)` registers others at run time, as
+  `Ignite::abilities` does at start.
 
 ### Changed
 
@@ -145,6 +157,9 @@ All notable changes to Ignite are listed here. The format follows
   with one loads the form script and `form.css`. A structured value's nested errors are all
   checked and recorded, not only the first. A `name[key]` form key is now also kept as sent,
   beside the object the panel builds under `name`.
+- A runtime resource that names its abilities no longer gets the `<slug>.<action>`
+  permissions it does not use; the others keep theirs. `register_runtime_permissions`
+  registers the abilities the resource names.
 - **Breaking:** `ignite_core::FieldKind` and `FieldKindDef` have the new variant
   `CheckboxList`, so an exhaustive `match` on them must handle it.
 - **Breaking:** `ignite_core::Component` has the new variant `Tabs`, so an exhaustive

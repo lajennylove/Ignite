@@ -102,6 +102,47 @@ impl ActingUser {
     }
 }
 
+/// An action on a resource as a whole, as the methods of a Filament resource policy
+/// (`viewAny`, `view`, `create`, `update`, `delete`): each needs the resource's ability for it,
+/// `<slug>.<action>` unless the resource names another (see
+/// [`RuntimeResource::ability`](crate::RuntimeResource::ability)).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum ResourceAction {
+    /// See the list and the navigation entry, as `viewAny`.
+    ViewAny,
+    /// See one record, as `view`.
+    View,
+    /// Open the new form and save it, as `create`.
+    Create,
+    /// Open the edit form and save it, as `update`.
+    Update,
+    /// Delete a record, as `delete`.
+    Delete,
+}
+
+impl ResourceAction {
+    /// Every action, in the order the panel registers their abilities.
+    pub const ALL: [ResourceAction; 5] = [
+        ResourceAction::ViewAny,
+        ResourceAction::View,
+        ResourceAction::Create,
+        ResourceAction::Update,
+        ResourceAction::Delete,
+    ];
+
+    /// The action's name as the policy method and the default ability spell it, such as
+    /// `"viewAny"`.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ResourceAction::ViewAny => "viewAny",
+            ResourceAction::View => "view",
+            ResourceAction::Create => "create",
+            ResourceAction::Update => "update",
+            ResourceAction::Delete => "delete",
+        }
+    }
+}
+
 /// What a user may do with the records of one resource, decided for the user and, where there
 /// is one, the record, as a Laravel policy decides. Register it for the resource's slug with
 /// [`register_policy`]. The record is the row as the resource returns it: a

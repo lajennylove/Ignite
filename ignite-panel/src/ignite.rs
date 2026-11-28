@@ -120,29 +120,34 @@ impl Registry {
         self.resources.iter().cloned().chain(runtime).collect()
     }
 
-    /// Registers the permission rows of the runtime resources that do not have them yet, as
-    /// the panel registers a static resource's rows when it starts. The panel calls it on each
-    /// signed-in request, before it loads the user's abilities. No lock is held across the
-    /// database call. A failure is logged, and the next request tries again.
+    /// Registers the permission rows of the runtime resources' abilities that do not have them
+    /// yet (each action's ability and the access ability, see
+    /// `RegisteredResource::ability_names`), as the panel registers a static resource's rows
+    /// when it starts, so the Roles screen lists a resource's abilities without a restart. The
+    /// panel calls it on each signed-in request, before it loads the user's abilities. No lock
+    /// is held across the database call. A failure is logged, and the next request tries
+    /// again.
     pub(crate) async fn sync_runtime_permissions(&self, db: &Database) {
         let missing: Vec<String> = {
             let done = self
                 .runtime_permissions
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner);
-            ignite_core::runtime_resources()
+            let mut missing: Vec<String> = Vec::new();
+            for name in ignite_core::runtime_resources()
                 .iter()
-                .map(|r| r.slug().to_string())
-                .filter(|slug| !done.contains(slug))
-                .collect()
+                .flat_map(|r| r.ability_names())
+            {
+                if !done.contains(&name) && !missing.contains(&name) {
+                    missing.push(name);
+                }
+            }
+            missing
         };
         if missing.is_empty() {
             return;
         }
-        let names: Vec<String> = missing
-            .iter()
-            .flat_map(|slug| crate::authz::slug_abilities(slug))
-            .collect();
+        let names = missing.clone();
         match crate::authz::register(db, &names).await {
             Ok(()) => self
                 .runtime_permissions

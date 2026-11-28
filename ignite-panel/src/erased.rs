@@ -44,6 +44,15 @@ pub(crate) trait Erased: Send + Sync {
     fn form_layout(&self) -> &FormLayout;
     /// The settings of the form's repeaters and flexible content fields.
     fn repeaters(&self) -> &Repeaters;
+    /// Every ability `action` on the resource needs: `<slug>.<action>`, or for a runtime
+    /// resource the ability it names and its access ability.
+    fn required_abilities(&self, action: crate::authz::Action) -> Vec<String> {
+        vec![crate::authz::ability(self.slug(), action)]
+    }
+    /// Every ability the resource's actions need, without repeats: its permissions.
+    fn ability_names(&self) -> Vec<String> {
+        crate::authz::slug_abilities(self.slug()).to_vec()
+    }
     /// Whether the record of the edit form `form` is read-only for its user, as a runtime
     /// resource's `read_only_when` says. A static resource has no read-only records.
     fn is_read_only(&self, form: &FormContext<'_>) -> bool {
@@ -847,6 +856,14 @@ impl Erased for RuntimeAdapter {
 
     fn is_read_only(&self, form: &FormContext<'_>) -> bool {
         self.0.is_read_only(form)
+    }
+
+    fn required_abilities(&self, action: crate::authz::Action) -> Vec<String> {
+        self.0.required_abilities(action.resource_action())
+    }
+
+    fn ability_names(&self) -> Vec<String> {
+        self.0.ability_names()
     }
 
     fn read_only_notice(&self, form: &FormContext<'_>) -> Option<String> {

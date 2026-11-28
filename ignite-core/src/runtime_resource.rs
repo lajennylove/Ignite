@@ -17,7 +17,7 @@
 //! )?;
 //! ```
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
@@ -32,7 +32,7 @@ use crate::field::{self as check, Block, Column, Field, FieldKind};
 use crate::form::{FieldErrors, FormInput, ValidationError};
 use crate::layout::FormLayout;
 use crate::list::{BadgeColor, ColumnBadges, ListFilter, Tab};
-use crate::policy::ActingUser;
+use crate::policy::{ActingUser, ResourceAction};
 use crate::query::{ListQuery, Page};
 use crate::structure::{RepeaterSettings, Repeaters};
 
@@ -630,6 +630,12 @@ pub struct RuntimeResource {
     /// `$recordRouteKeyName`. `None`, the default, is the numeric `id`. See
     /// [`record_route_key_name`](Self::record_route_key_name).
     pub record_route_key_name: Option<String>,
+    /// The ability each action on the resource needs, when it is not `<slug>.<action>`. See
+    /// [`ability`](Self::ability). The default is none: every action needs its default.
+    pub abilities: BTreeMap<ResourceAction, String>,
+    /// The ability every action on the resource needs besides its own, if any. See
+    /// [`access_ability`](Self::access_ability).
+    pub access_ability: Option<String>,
 }
 
 impl fmt::Debug for RuntimeResource {
@@ -660,6 +666,8 @@ impl fmt::Debug for RuntimeResource {
             .field("repeaters", &self.repeaters)
             .field("read_only", &self.read_only.is_some())
             .field("record_route_key_name", &self.record_route_key_name)
+            .field("abilities", &self.abilities)
+            .field("access_ability", &self.access_ability)
             .finish_non_exhaustive()
     }
 }
@@ -700,6 +708,8 @@ impl RuntimeResource {
             read_only: None,
             read_only_notice: None,
             record_route_key_name: None,
+            abilities: BTreeMap::new(),
+            access_ability: None,
         }
     }
 
@@ -890,6 +900,30 @@ impl RuntimeResource {
     /// methods. See [`RepeaterSettings`].
     pub fn repeater(mut self, path: impl Into<String>, settings: RepeaterSettings) -> Self {
         self.repeaters = self.repeaters.repeater(path, settings);
+        self
+    }
+
+    /// Names the ability that allows `action` on the resource, in place of `<slug>.<action>`,
+    /// as a Filament resource policy's method checks the permission it chooses: such as
+    /// `ability(ResourceAction::Update, "edit_books")` for a post type whose capability type
+    /// is `book`, as WordPress maps `edit_post` to `edit_books`. The ability gates the
+    /// resource as a whole (its list and navigation entry for `ViewAny`, its forms and saves
+    /// for `Create` and `Update`, its delete for `Delete`); a [`Policy`](crate::Policy) still
+    /// decides each record. The panel registers the ability as a permission on the next
+    /// signed-in request after the resource is registered (or at once with
+    /// `ignite_panel::register_runtime_permissions`), so the Roles screen lists it without a
+    /// restart. Several actions may share one ability.
+    pub fn ability(mut self, action: ResourceAction, name: impl Into<String>) -> Self {
+        self.abilities.insert(action, name.into());
+        self
+    }
+
+    /// Requires the ability `name` for every action on the resource, besides each action's
+    /// own, as Filament's `canAccess()` and WordPress's `manage_options` for the settings
+    /// screens: a user without it does not see the navigation entry and gets 403 on every
+    /// route of the resource.
+    pub fn access_ability(mut self, name: impl Into<String>) -> Self {
+        self.access_ability = Some(name.into());
         self
     }
 
@@ -1333,6 +1367,45 @@ impl RegisteredResource {
     /// The settings of the form's repeaters and flexible content fields.
     pub fn repeaters(&self) -> &Repeaters {
         &self.resource.repeaters
+    }
+
+    /// The ability `action` on the resource needs: the one [`RuntimeResource::ability`]
+    /// names, or `<slug>.<action>`, such as `books.update`.
+    pub fn ability_for(&self, action: ResourceAction) -> String {
+        self.resource
+            .abilities
+            .get(&action)
+            .cloned()
+            .unwrap_or_else(|| format!("{}.{}", self.resource.slug, action.as_str()))
+    }
+
+    /// The ability every action needs besides its own, if any
+    /// ([`RuntimeResource::access_ability`]).
+    pub fn access_ability(&self) -> Option<&str> {
+        self.resource.access_ability.as_deref()
+    }
+
+    /// Every ability `action` needs: the access ability, if any, and the action's own.
+    pub fn required_abilities(&self, action: ResourceAction) -> Vec<String> {
+        self.access_ability()
+            .map(str::to_string)
+            .into_iter()
+            .chain(std::iter::once(self.ability_for(action)))
+            .collect()
+    }
+
+    /// Every ability the resource's actions need, without repeats, in action order: the
+    /// permissions the panel registers for it.
+    pub fn ability_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = Vec::new();
+        for action in ResourceAction::ALL {
+            for name in self.required_abilities(action) {
+                if !names.contains(&name) {
+                    names.push(name);
+                }
+            }
+        }
+        names
     }
 
     /// The row key that addresses a record in the panel's URLs: the

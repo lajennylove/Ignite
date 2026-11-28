@@ -2,7 +2,7 @@
 //! table, and its signed cookie holds only the row's id, so the server can end a
 //! session at any time. Flash messages live in their own signed cookie.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use base64::Engine;
@@ -308,6 +308,10 @@ pub struct AdminUser {
     /// The abilities, such as `books.viewAny`, that the user holds but a resource's policy
     /// refuses: its `view_any` and `create`, which need no record, asked once per request.
     refused: HashSet<String>,
+    /// The abilities each action needs, by resource slug and action, for the resources whose
+    /// actions need other abilities than `<slug>.<action>` (a runtime resource's `ability`
+    /// and `access_ability`), read from the registry on each request.
+    gates: HashMap<String, [Vec<String>; 5]>,
 }
 
 impl AdminUser {
@@ -386,8 +390,31 @@ impl AdminUser {
     /// ask the policy with the record (see `authz::policy_allows`).
     pub(crate) fn may(&self, slug: &str, action: Action) -> bool {
         let ability = authz::ability(slug, action);
-        self.can(&ability) && !self.refused.contains(&ability)
+        let held = match self.gates.get(slug) {
+            Some(gates) => gates[action.index()].iter().all(|name| self.can(name)),
+            None => self.can(&ability),
+        };
+        held && !self.refused.contains(&ability)
     }
+}
+
+/// The abilities each action needs, for the resources whose actions need others than
+/// `<slug>.<action>`. A runtime resource registered or changed since the last request is
+/// read as it is now.
+fn gates(registry: &Registry) -> HashMap<String, [Vec<String>; 5]> {
+    registry
+        .all()
+        .into_iter()
+        .filter_map(|resource| {
+            let slug = resource.slug();
+            let gates = authz::ACTIONS.map(|action| resource.required_abilities(action));
+            let default = authz::ACTIONS
+                .iter()
+                .zip(&gates)
+                .all(|(action, names)| names == &[authz::ability(slug, *action)]);
+            (!default).then(|| (slug.to_string(), gates))
+        })
+        .collect()
 }
 
 /// The abilities of `user` that a resource's policy refuses: `<slug>.viewAny` and
@@ -408,9 +435,12 @@ async fn policy_refusals(
             continue;
         }
         for action in [Action::ViewAny, Action::Create] {
-            let ability = authz::ability(slug, action);
-            if user.can(&ability) && !authz::policy_allows(db, slug, user, action, None).await? {
-                refused.insert(ability);
+            let held = resource
+                .required_abilities(action)
+                .iter()
+                .all(|name| user.can(name));
+            if held && !authz::policy_allows(db, slug, user, action, None).await? {
+                refused.insert(authz::ability(slug, action));
             }
         }
     }
@@ -471,6 +501,7 @@ impl<'r> FromRequest<'r> for AdminUser {
                     }
                 };
                 Outcome::Success(AdminUser {
+                    gates: gates(registry),
                     acting,
                     theme: user.theme,
                     admin_theme: user.admin_theme,
