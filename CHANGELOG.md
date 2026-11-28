@@ -105,6 +105,16 @@ All notable changes to Ignite are listed here. The format follows
   list loads them each time the form is shown (`loads_options()`), through `options` and
   `options_for`, as Filament's `options(fn () => ...)`, and the panel checks the ticked values
   against them. It also works inside a repeater row (`screens[0][hide][]`).
+- Dependent options, as Filament's dependent select (`options(fn (Get $get) => ...)` with the
+  controlling field `live()`): `RuntimeData::options_with(db, user, field, state)`, the
+  choices of the field at the path `field` (`city`, `rules.value`, `content.hero.style`) for
+  the values around it (`state`: the form's fields, or the row's values for a sub-field, as
+  `$get` reads siblings). The default is `options_for`. The panel calls it when it shows the
+  form, again when a live field changes (`RuntimeResource::live("rules.param")` marks a
+  sub-field live), and when it checks a save, so a value the current values leave out is
+  refused ("Choose one of the options.", under the sub-field's input for a row). A lookup,
+  post object, relationship, taxonomy, user or loaded checkbox list inside a repeater, group
+  or flexible content now loads its choices per row and is checked against them.
 
 ### Changed
 

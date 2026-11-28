@@ -223,6 +223,35 @@ pub trait RuntimeData: Send + Sync + 'static {
         self.options(db, field)
     }
 
+    /// The choices of the field at `field` for the form's current values, as Filament's
+    /// dependent select, `options(fn (Get $get) => ...)` on a field whose controlling field is
+    /// `live()`: such as a location rule's values, which depend on the rule's parameter. The
+    /// panel calls it each time it shows the form, again when a live field changes (see
+    /// [`FieldConditions::live`]), and when it checks a submitted value, so a choice the
+    /// current values leave out cannot be saved.
+    ///
+    /// `field` is the field's path of names, without row numbers: `"city"` for a field of the
+    /// form, `"rules.value"` for the sub-field `value` of each row of the repeater `rules`,
+    /// `"content.hero.style"` for a sub-field of a flexible content block. `state` holds the
+    /// current values around the field, as Filament's `$get` reads its siblings: the form's
+    /// fields for a field of the form (a structured field's value as JSON), and the row's (or
+    /// group's) values for a sub-field. A blank value is missing or `null`. The default is
+    /// [`options_for`](Self::options_for), which does not depend on the values.
+    ///
+    /// A value no longer among the choices after the controlling field changed shows as not
+    /// chosen, and is refused if saved, which is Filament's `afterStateUpdated` reset of the
+    /// dependent field, done by the server.
+    fn options_with<'a>(
+        &'a self,
+        db: &'a Database,
+        user: &'a ActingUser,
+        field: &'a str,
+        state: &'a Row,
+    ) -> RuntimeFuture<'a, Vec<(String, String)>> {
+        let _ = state;
+        self.options_for(db, user, field)
+    }
+
     /// The tabs of the list page for the signed-in `user`, computed on each list request, as
     /// Filament's `getTabs()` is a method of the List page: such as one tab per role on a users
     /// list, which changes when a role is added. `None`, the default, keeps the resource's

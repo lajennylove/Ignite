@@ -1668,7 +1668,7 @@ pub(crate) struct BlockChoiceView {
 
 /// What the parts of a structured field are built with: the form's conditions (a live
 /// sub-field is marked by its settings path), its repeater settings, its errors (by dotted
-/// path), its loaded choices (a sub-field's by its settings path), and the URL its buttons
+/// path), its loaded choices (a sub-field's by its dotted path), and the URL its buttons
 /// send the form to.
 pub(crate) struct StructureContext<'a> {
     pub(crate) conditions: &'a FieldConditions,
@@ -1935,10 +1935,12 @@ fn leaf_view(
         name: place.input.clone(),
         ..field.clone()
     };
+    // A sub-field's choices are loaded for its own row, by its dotted path.
     let lookup = context
         .choices
         .lookups
-        .get(&place.schema)
+        .get(&place.path)
+        .or_else(|| context.choices.lookups.get(&place.schema))
         .map(Vec::as_slice)
         .unwrap_or(&[]);
     let mut view = FieldView::new(&def, &form, &errors, lookup, &context.choices.media);

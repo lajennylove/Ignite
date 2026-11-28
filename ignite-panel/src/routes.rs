@@ -2094,11 +2094,6 @@ pub(crate) fn form_values<'a>(
     values
 }
 
-/// The names of a resource's form fields.
-fn field_names(resource: &dyn Erased) -> Vec<&str> {
-    resource.fields().iter().map(|f| f.name.as_str()).collect()
-}
-
 /// The choices of the lookup fields among `names`, by field name, as the panel shows
 /// them. A field that is not a lookup is skipped, so a list loads only what it shows.
 async fn lookup_choices(
@@ -2119,22 +2114,34 @@ async fn lookup_choices(
     Ok(choices)
 }
 
-/// What a form shows beside its values: the choices of its lookup fields, read from the
-/// database, and the media library's items for the ids its media fields hold in `form`.
+/// What a form shows beside its values: the choices of its lookup fields for the values of
+/// `form` (a dependent field's choices follow the field it depends on), read from the
+/// database, by field name and, for a sub-field of a repeater, group or flexible content, by
+/// its dotted path; and the media library's items for the ids its media fields hold in
+/// `form`.
 async fn form_choices(
     db: &State<Database>,
     session: &AdminUser,
     resource: &Arc<dyn Erased>,
     form: &FormInput,
 ) -> Result<FormChoices, Status> {
-    let lookups = lookup_choices(
-        db.inner(),
-        session.acting_user(),
-        resource.as_ref(),
-        &field_names(resource.as_ref()),
-    )
-    .await
-    .map_err(db_status)?;
+    let user = session.acting_user();
+    let state = erased::form_state(resource.fields(), form);
+    let mut lookups = HashMap::new();
+    for field in resource.fields().iter().filter(|f| f.kind.loads_options()) {
+        let choices = resource
+            .options_with(db.inner(), user, &field.name, &state)
+            .await
+            .map_err(db_status)?;
+        lookups.insert(field.name.clone(), choices);
+    }
+    for lookup in erased::nested_lookups(resource.fields(), &state) {
+        let choices = resource
+            .options_with(db.inner(), user, &lookup.schema, &lookup.container)
+            .await
+            .map_err(db_status)?;
+        lookups.insert(lookup.path, choices);
+    }
     let mut media = HashMap::new();
     if let Some(library) = ignite_core::media_library() {
         let ids = erased::media_ids(resource.fields(), form);

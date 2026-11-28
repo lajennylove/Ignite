@@ -105,6 +105,19 @@ pub(crate) trait Erased: Send + Sync {
         user: &ActingUser,
         field: &str,
     ) -> Result<Vec<(String, String)>, Error>;
+    /// The choices of the field at the path `field` for the values `state` around it: a
+    /// runtime resource's [`RuntimeData::options_with`](ignite_core::RuntimeData::options_with),
+    /// else [`options`](Self::options).
+    async fn options_with(
+        &self,
+        db: &Database,
+        user: &ActingUser,
+        field: &str,
+        state: &Row,
+    ) -> Result<Vec<(String, String)>, Error> {
+        let _ = state;
+        self.options(db, user, field).await
+    }
 }
 
 /// Wraps an [`IgniteResource`] type as an [`Erased`] value. Its fields and columns are
@@ -370,8 +383,8 @@ async fn checked<R: IgniteResource>(
     validated: Result<R::Input, FieldErrors>,
 ) -> Result<Result<R::Input, FieldErrors>, Error> {
     let errors = validated.as_ref().err().cloned().unwrap_or_default();
-    let errors = lookup_errors(fields, form, errors, |field| {
-        R::options_for(db, user, field)
+    let errors = lookup_errors(fields, form, errors, |field, _| async move {
+        R::options_for(db, user, &field).await
     })
     .await?;
     let errors = media_errors(db, fields, form, errors).await?;
@@ -383,56 +396,210 @@ async fn checked<R: IgniteResource>(
 }
 
 /// `errors`, with "Choose one of the options." for each field of `fields` that loads its
-/// options and whose submitted value is not one of the choices `options` returns for it. For
-/// a relationship, each value of its JSON list must be a choice. Static and runtime
-/// resources share this check.
-async fn lookup_errors<'a, F, Fut>(
-    fields: &'a [FieldDef],
+/// options and whose submitted value is not one of the choices `options` returns for it,
+/// given the field's path and the values around it (see [`form_state`] and
+/// [`nested_lookups`]). For a relationship or a checkbox list, each value of its JSON list
+/// must be a choice. A sub-field's error is keyed by its dotted path, and its structured
+/// field gets the message too, so the save is refused. Static and runtime resources share
+/// this check.
+async fn lookup_errors<F, Fut>(
+    fields: &[FieldDef],
     form: &FormInput,
     mut errors: FieldErrors,
     options: F,
 ) -> Result<FieldErrors, Error>
 where
-    F: Fn(&'a str) -> Fut,
+    F: Fn(String, Row) -> Fut,
     Fut: Future<Output = Result<Vec<(String, String)>, Error>>,
 {
-    for field in fields.iter().filter(|f| f.kind.loads_options()) {
-        let name = field.name.as_str();
-        let Some(value) = form.get(name) else {
-            continue;
-        };
-        let values = if matches!(
-            field.kind,
-            FieldKindDef::Relationship | FieldKindDef::CheckboxList(_)
-        ) {
-            match serde_json::from_str::<Vec<Value>>(value) {
-                Ok(items) => items
-                    .iter()
-                    .map(|item| match item {
-                        Value::String(text) => text.trim().to_string(),
-                        other => other.to_string(),
-                    })
-                    .collect(),
-                // Validation has already refused a value that is not a list.
-                Err(_) => continue,
-            }
-        } else {
-            vec![value.trim().to_string()]
-        };
+    let state = form_state(fields, form);
+    let mut checks: Vec<(String, Option<String>, String, Row, Value)> = fields
+        .iter()
+        .filter(|f| f.kind.loads_options())
+        .map(|f| {
+            let value = state.get(&f.name).cloned().unwrap_or(Value::Null);
+            (f.name.clone(), None, f.name.clone(), state.clone(), value)
+        })
+        .collect();
+    checks.extend(nested_lookups(fields, &state).into_iter().map(|lookup| {
+        (
+            lookup.path,
+            Some(lookup.top),
+            lookup.schema,
+            lookup.container,
+            lookup.value,
+        )
+    }));
+    for (key, top, schema, container, value) in checks {
+        let values = chosen_values(&value);
         if values.is_empty() {
             continue;
         }
-        let choices = options(name).await?;
+        let choices = options(schema, container).await?;
         if !values
             .iter()
             .all(|value| choices.iter().any(|(choice, _)| choice == value))
         {
-            errors
-                .entry(name.to_string())
-                .or_insert_with(|| "Choose one of the options.".to_string());
+            let message = "Choose one of the options.".to_string();
+            if let Some(top) = top {
+                errors.entry(top).or_insert_with(|| message.clone());
+            }
+            errors.entry(key).or_insert(message);
         }
     }
     Ok(errors)
+}
+
+/// The chosen values of a lookup's value: each item of a list, or the text of one value.
+fn chosen_values(value: &Value) -> Vec<String> {
+    let text = |item: &Value| match item {
+        Value::String(text) => text.trim().to_string(),
+        Value::Null => String::new(),
+        other => other.to_string(),
+    };
+    match value {
+        Value::Array(items) => items.iter().map(text).filter(|t| !t.is_empty()).collect(),
+        other => Some(text(other))
+            .filter(|t| !t.is_empty())
+            .into_iter()
+            .collect(),
+    }
+}
+
+/// The form's values as a dependent field's `state` sees them: each field of `fields` the
+/// form sent, as text, a checkbox as `true` or `false`, and a structured or list value as
+/// its JSON.
+pub(crate) fn form_state(fields: &[FieldDef], form: &FormInput) -> Row {
+    let mut state = Row::new();
+    for field in fields {
+        let value = match &field.kind {
+            FieldKindDef::Checkbox => Value::Bool(form.checkbox(&field.name)),
+            kind => match form.get(&field.name) {
+                None => continue,
+                Some(text)
+                    if ignite_core::structure::is_structured(kind)
+                        || matches!(
+                            kind,
+                            FieldKindDef::Relationship
+                                | FieldKindDef::CheckboxList(_)
+                                | FieldKindDef::Gallery
+                                | FieldKindDef::Link
+                        ) =>
+                {
+                    serde_json::from_str(text).unwrap_or_else(|_| Value::from(text))
+                }
+                Some(text) => Value::from(text),
+            },
+        };
+        state.insert(field.name.clone(), value);
+    }
+    state
+}
+
+/// A sub-field that loads its options, inside a repeater, group or flexible content: its
+/// dotted path (`rules.0.value`), the field of the form it is in (`rules`), its settings path
+/// (`rules.value`), the values of its row or group, and its own value.
+pub(crate) struct NestedLookup {
+    pub(crate) path: String,
+    pub(crate) top: String,
+    pub(crate) schema: String,
+    pub(crate) container: Row,
+    pub(crate) value: Value,
+}
+
+/// Every sub-field of the structured fields of `fields` that loads its options, in the values
+/// of `state` (see [`form_state`]), at any depth, whether it has a value or not.
+pub(crate) fn nested_lookups(fields: &[FieldDef], state: &Row) -> Vec<NestedLookup> {
+    let mut found = Vec::new();
+    for field in fields {
+        if let Some(value) = state.get(&field.name) {
+            walk(
+                &field.kind,
+                value,
+                &field.name,
+                &field.name,
+                &field.name,
+                &mut found,
+            );
+        }
+    }
+    found
+}
+
+/// Adds the lookups inside `value`, a value of `kind` at the dotted `path` with the settings
+/// path `schema`, in the form's field `top`.
+fn walk(
+    kind: &FieldKindDef,
+    value: &Value,
+    path: &str,
+    schema: &str,
+    top: &str,
+    found: &mut Vec<NestedLookup>,
+) {
+    let empty = Row::new();
+    match kind {
+        FieldKindDef::Repeater(fields) => {
+            for (index, row) in value.as_array().into_iter().flatten().enumerate() {
+                let row = row.as_object().unwrap_or(&empty);
+                container(fields, row, &format!("{path}.{index}"), schema, top, found);
+            }
+        }
+        FieldKindDef::Group(fields) | FieldKindDef::Clone(fields) => {
+            container(
+                fields,
+                value.as_object().unwrap_or(&empty),
+                path,
+                schema,
+                top,
+                found,
+            );
+        }
+        FieldKindDef::FlexibleContent(blocks) => {
+            for (index, row) in value.as_array().into_iter().flatten().enumerate() {
+                let kind = row.get("type").and_then(Value::as_str).unwrap_or("");
+                let Some(block) = blocks.iter().find(|b| b.name == kind) else {
+                    continue;
+                };
+                let data = row.get("data").and_then(Value::as_object).unwrap_or(&empty);
+                container(
+                    &block.fields,
+                    data,
+                    &format!("{path}.{index}.data"),
+                    &format!("{schema}.{kind}"),
+                    top,
+                    found,
+                );
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Adds the lookups among the sub-fields `fields` of one row or group holding `values`.
+fn container(
+    fields: &[FieldDef],
+    values: &Row,
+    path: &str,
+    schema: &str,
+    top: &str,
+    found: &mut Vec<NestedLookup>,
+) {
+    for field in fields {
+        let field_path = format!("{path}.{}", field.name);
+        let field_schema = format!("{schema}.{}", field.name);
+        let value = values.get(&field.name).cloned().unwrap_or(Value::Null);
+        if field.kind.loads_options() {
+            found.push(NestedLookup {
+                path: field_path,
+                top: top.to_string(),
+                schema: field_schema,
+                container: values.clone(),
+                value,
+            });
+        } else {
+            walk(&field.kind, &value, &field_path, &field_schema, top, found);
+        }
+    }
 }
 
 /// The media ids a field of `fields` holds in `form`: the id of an image or file field, and
@@ -542,8 +709,8 @@ impl RuntimeAdapter {
         };
         let fields = &shown(self.0.fields(), hidden);
         let data = &self.0.resource().data;
-        let errors = lookup_errors(fields, form, errors, |field| {
-            data.options_for(db, user, field)
+        let errors = lookup_errors(fields, form, errors, |field, state| async move {
+            data.options_with(db, user, &field, &state).await
         })
         .await?;
         let errors = media_errors(db, fields, form, errors).await?;
@@ -761,6 +928,20 @@ impl Erased for RuntimeAdapter {
         field: &str,
     ) -> Result<Vec<(String, String)>, Error> {
         self.0.resource().data.options_for(db, user, field).await
+    }
+
+    async fn options_with(
+        &self,
+        db: &Database,
+        user: &ActingUser,
+        field: &str,
+        state: &Row,
+    ) -> Result<Vec<(String, String)>, Error> {
+        self.0
+            .resource()
+            .data
+            .options_with(db, user, field, state)
+            .await
     }
 }
 
