@@ -8,8 +8,8 @@ use std::sync::Arc;
 
 use ignite_core::{
     ActingUser, ColumnBadges, ColumnDef, Database, FieldConditions, FieldDef, FieldErrors,
-    FieldKindDef, FormInput, FormLayout, IgniteResource, LatestRecords, ListFilter, ListQuery,
-    RegisteredResource, Repeaters, Row, RowAction, Stat, Tab,
+    FieldKindDef, FormContext, FormInput, FormLayout, IgniteResource, LatestRecords, ListFilter,
+    ListQuery, RegisteredResource, Repeaters, Row, RowAction, Stat, Tab,
 };
 use orbit_orm::Error;
 use serde::Serialize;
@@ -44,6 +44,17 @@ pub(crate) trait Erased: Send + Sync {
     fn form_layout(&self) -> &FormLayout;
     /// The settings of the form's repeaters and flexible content fields.
     fn repeaters(&self) -> &Repeaters;
+    /// Whether the record of the edit form `form` is read-only for its user, as a runtime
+    /// resource's `read_only_when` says. A static resource has no read-only records.
+    fn is_read_only(&self, form: &FormContext<'_>) -> bool {
+        let _ = form;
+        false
+    }
+    /// The line the form of a read-only record shows, if any.
+    fn read_only_notice(&self, form: &FormContext<'_>) -> Option<String> {
+        let _ = form;
+        None
+    }
     /// The tabs of the list page, in display order.
     fn tabs(&self) -> &[Tab];
     /// The tabs of the list page for `user` on this request: a runtime resource's
@@ -811,6 +822,14 @@ impl Erased for RuntimeAdapter {
 
     fn repeaters(&self) -> &Repeaters {
         self.0.repeaters()
+    }
+
+    fn is_read_only(&self, form: &FormContext<'_>) -> bool {
+        self.0.is_read_only(form)
+    }
+
+    fn read_only_notice(&self, form: &FormContext<'_>) -> Option<String> {
+        self.0.read_only_notice(form)
     }
 
     fn tabs(&self) -> &[Tab] {

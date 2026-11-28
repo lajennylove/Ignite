@@ -1,11 +1,11 @@
-{{-- The fields of a form with a layout (FormLayout, as Filament's layout components): one column of the form's grid per top-level section, group or tabs, which takes its column span, and in each column its cards, one under the other, so a sidebar stacks its sections. Tabs (Filament's Tabs) are one card: a tab list, and one panel per tab with the tab's sections; the open tab's panel shows, and the form script switches them. Every panel is in the form, so a save sends every tab's fields. --}}
+{{-- The fields of a form with a layout (FormLayout, as Filament's layout components): one column of the form's grid per top-level section, group or tabs, which takes its column span, and in each column its cards, one under the other, so a sidebar stacks its sections. Tabs (Filament's Tabs) are one card: a tab list of links, which a read-only form's disabled fieldset leaves working, and one panel per tab with the tab's sections; the open tab's panel shows, and the form script switches them. Every panel is in the form, so a save sends every tab's fields. --}}
 @foreach (column in layout_columns)
       <div class="{{ $column.class }}">
   @foreach (section in column.sections)
         @if (section.is_tabs)<div class="ig-card ig-form-tabs grid min-w-0 gap-5" data-ignite-tabs>
           <div class="ig-form-tablist" role="tablist" aria-label="{{ $section.tabs_label }}">
       @foreach (tab in section.tabs)
-            <button type="button" class="ig-form-tab" role="tab" id="{{ $tab.id }}-tab" aria-controls="{{ $tab.id }}" aria-selected="{{ $tab.selected }}" data-ignite-tab="{{ $tab.id }}">{{ $tab.label }}</button>
+            <a class="ig-form-tab" href="#{{ $tab.id }}" role="tab" id="{{ $tab.id }}-tab" aria-controls="{{ $tab.id }}" aria-selected="{{ $tab.selected }}" data-ignite-tab="{{ $tab.id }}">{{ $tab.label }}</a>
       @endforeach
           </div>
       @foreach (tab in section.tabs)

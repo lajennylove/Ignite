@@ -33,23 +33,24 @@
 @endsection
 
 @section('content')
-  <h1 class="mb-6">{{ $heading }}</h1>
+  <h1 class="mb-6">{{ $heading }}</h1>@if (has_notice)
+  <p class="mb-6 text-sm">{{ $notice }}</p>@endif
 
   <form class="@if (has_layout)grid gap-5@else{{-- no layout: one card, as before --}}ig-card grid max-w-2xl gap-5@endif" method="post" action="{{ $action }}"@if (has_live) data-ignite-live-url="{{ $live_url }}"@endif@if (unsaved_changes_alert) data-ignite-unsaved-changes-alert@endif@if (has_unsaved_changes) data-ignite-unsaved@endif>
     <input type="hidden" name="_token" value="{{ $csrf_token }}">
 
-    <div class="@if (has_layout){{ $layout_class }}@else{{-- no layout --}}grid gap-5@endif" data-ignite-fields>@if (has_layout)@include('ignite::partials.form_layout')@endif
+    @if (read_only){{-- a read-only record, as Filament's View page: every input disabled --}}<fieldset disabled style="border:0;margin:0;padding:0;min-width:0">@endif<div class="@if (has_layout){{ $layout_class }}@else{{-- no layout --}}grid gap-5@endif" data-ignite-fields>@if (has_layout)@include('ignite::partials.form_layout')@endif
       @if (has_live)
         <input type="hidden" name="_ignite_shown" value="{{ $shown_fields }}">
       @endif
       @foreach (field in fields)
         @if (field.is_structured)@include('ignite::partials.structure')@else@include('ignite::partials.field')@endif
       @endforeach
-    </div>
+    </div>@if (read_only)</fieldset>@endif
 
     <div class="flex flex-wrap items-center gap-3">
-      <button type="submit" class="ig-btn ig-btn-primary">{{ $submit_label }}</button>
-      <a class="ig-btn ig-btn-outline" href="{{ $back_url }}">Cancel</a>
+      @if (read_only)@else<button type="submit" class="ig-btn ig-btn-primary">{{ $submit_label }}</button>@endif
+      <a class="ig-btn ig-btn-outline" href="{{ $back_url }}">{{ $cancel_label }}</a>
     </div>
   </form>@if (has_form_script)@vite(['ui::resources/js/form.js'])@endif
   @if (has_editor)

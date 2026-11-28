@@ -75,7 +75,7 @@
               @endforeach
               <td class="whitespace-nowrap text-right">
                 @if (row.can_update)
-                  <a class="ig-btn ig-btn-ghost px-3 py-1" href="{{ $row.edit_url }}">Edit</a>
+                  <a class="ig-btn ig-btn-ghost px-3 py-1" href="{{ $row.edit_url }}">{{ $row.edit_label }}</a>
                 @endif@if (row.has_actions)@foreach (action in row.actions)
                 @if (action.is_post)<form class="inline" method="post" action="{{ $action.url }}"@if (action.has_confirm) data-confirm="{{ $action.confirm }}"@endif><input type="hidden" name="_token" value="{{ $csrf_token }}"><input type="hidden" name="_back" value="{{ $return_url }}"><button type="submit" class="{{ $action.class }}">{{ $action.label }}</button></form>@else<a class="{{ $action.class }}" href="{{ $action.url }}">{{ $action.label }}</a>@endif@endforeach
 @endif

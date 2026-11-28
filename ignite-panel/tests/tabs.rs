@@ -87,11 +87,9 @@ fn the_first_tab_is_open_and_each_tab_renders_its_fields_together() {
         "{html}"
     );
     assert!(html.contains(
-        r#"role="tab" id="ignite-tabs-1-1-tab" aria-controls="ignite-tabs-1-1" aria-selected="true" data-ignite-tab="ignite-tabs-1-1">General</button>"#
+        r##"href="#ignite-tabs-1-1" role="tab" id="ignite-tabs-1-1-tab" aria-controls="ignite-tabs-1-1" aria-selected="true" data-ignite-tab="ignite-tabs-1-1">General</a>"##
     ));
-    assert!(
-        html.contains(r#"aria-selected="false" data-ignite-tab="ignite-tabs-1-2">Labels</button>"#)
-    );
+    assert!(html.contains(r#"aria-selected="false" data-ignite-tab="ignite-tabs-1-2">Labels</a>"#));
     assert!(html.contains(
         r#"role="tabpanel" id="ignite-tabs-1-1" aria-labelledby="ignite-tabs-1-1-tab">"#
     ));
@@ -107,7 +105,7 @@ fn the_first_tab_is_open_and_each_tab_renders_its_fields_together() {
     assert!(general < plural && plural < description && description < labels);
     assert!(labels < heading && heading < menu);
     assert!(
-        html.contains("Advanced</button>"),
+        html.contains("Advanced</a>"),
         "a super-admin sees the third tab"
     );
     assert!(
@@ -130,8 +128,8 @@ fn the_first_tab_is_open_and_each_tab_renders_its_fields_together() {
         .into_string()
         .unwrap();
     unregister_runtime(SLUG).expect("unregister");
-    assert!(html.contains("Labels</button>"), "{html}");
-    assert!(!html.contains("Advanced</button>"));
+    assert!(html.contains("Labels</a>"), "{html}");
+    assert!(!html.contains("Advanced</a>"));
     assert!(!html.contains(r#"data-ignite-field="rest_base""#));
 }
 
@@ -146,11 +144,8 @@ fn active_tab_opens_another_tab() {
         .into_string()
         .unwrap();
     unregister_runtime(SLUG).expect("unregister");
-    assert!(html
-        .contains(r#"aria-selected="false" data-ignite-tab="ignite-tabs-1-1">General</button>"#));
-    assert!(
-        html.contains(r#"aria-selected="true" data-ignite-tab="ignite-tabs-1-2">Labels</button>"#)
-    );
+    assert!(html.contains(r#"aria-selected="false" data-ignite-tab="ignite-tabs-1-1">General</a>"#));
+    assert!(html.contains(r#"aria-selected="true" data-ignite-tab="ignite-tabs-1-2">Labels</a>"#));
     assert!(html.contains(r#"id="ignite-tabs-1-1" aria-labelledby="ignite-tabs-1-1-tab" hidden>"#));
 }
 

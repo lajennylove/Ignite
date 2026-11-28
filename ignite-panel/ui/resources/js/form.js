@@ -149,6 +149,7 @@ document.addEventListener('click', (event) => {
     if (!tab || !tabs) {
         return;
     }
+    event.preventDefault();
     for (const other of tabs.querySelectorAll('[data-ignite-tab]')) {
         const open = other === tab;
         other.setAttribute('aria-selected', open ? 'true' : 'false');

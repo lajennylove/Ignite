@@ -1129,6 +1129,7 @@ async fn index(
         let record_can_delete =
             can_delete && record_allowed(db, slug, &session, Action::Delete, record).await?;
         let default_delete_hidden = default_delete_hidden(resource.as_ref(), record);
+        let read_only = record_read_only(resource.as_ref(), record, &session);
         let actions = row_action_views(
             resource.as_ref(),
             record,
@@ -1160,6 +1161,7 @@ async fn index(
                 })
                 .collect(),
             edit_url: format!("{index_url}/{id}/edit"),
+            edit_label: if read_only { "View" } else { "Edit" },
             delete_url: format!("{index_url}/{id}/delete"),
             can_update: record_can_update,
             can_delete: record_can_delete && !default_delete_hidden,
@@ -1406,12 +1408,22 @@ async fn edit_form(
         take_flash(cookies, &registry.secret),
         csrf_token(cookies, &registry.secret),
     );
+    let context = FormContext::new(
+        Operation::Edit,
+        record.as_object(),
+        session.acting_user(),
+        &form,
+    );
+    let target = if resource.is_read_only(&context) {
+        FormTarget::view(registry, &resource, id, resource.read_only_notice(&context))
+    } else {
+        FormTarget::edit(registry, &resource, id)
+    };
     Ok(form_view(
         registry,
         layout,
         &resource,
-        FormTarget::edit(registry, &resource, id)
-            .with_slug_locks(slug_locks(&resource, &record, &session, &form)),
+        target.with_slug_locks(slug_locks(&resource, &record, &session, &form)),
         &form,
         &FieldErrors::new(),
         &choices,
@@ -1438,6 +1450,7 @@ async fn edit_form_live(
     let form = read_form(body).await?;
     check_csrf(cookies, &registry.secret, form.get("_token"))?;
     let record = authorize_record(db, &session, &resource, id, Action::Update).await?;
+    refuse_read_only(resource.as_ref(), &record, &session)?;
     let form = live_values(
         resource.fields(),
         Some(&record),
@@ -1483,6 +1496,7 @@ async fn update(
     check_csrf(cookies, &registry.secret, form.get("_token"))?;
     let form = structured_input(resource.fields(), &form);
     let record = authorize_record(db, &session, &resource, id, Action::Update).await?;
+    refuse_read_only(resource.as_ref(), &record, &session)?;
     let hidden = hidden_fields(&resource, Operation::Edit, Some(&record), &session, &form);
 
     let outcome = resource
@@ -1714,6 +1728,9 @@ struct FormTarget {
     heading: String,
     action: String,
     submit_label: &'static str,
+    /// Whether the form shows a read-only record, and the line it shows.
+    read_only: bool,
+    notice: Option<String>,
     /// Where the form sends its values when a live field changes.
     live_url: String,
     /// The slug fields that no longer follow their source (`slug_locked_when`).
@@ -1729,6 +1746,8 @@ impl FormTarget {
             live_url: format!("{index_url}/new/live"),
             action: index_url,
             submit_label: "Create",
+            read_only: false,
+            notice: None,
             slug_locks: BTreeSet::new(),
         }
     }
@@ -1740,8 +1759,26 @@ impl FormTarget {
             heading: format!("Edit {} #{id}", resource.singular()),
             action: format!("{index_url}/{id}"),
             submit_label: "Save",
+            read_only: false,
+            notice: None,
             live_url: format!("{index_url}/{id}/edit/live"),
             slug_locks: BTreeSet::new(),
+        }
+    }
+
+    /// The edit form of the record `id`, read-only for the user, as Filament's View page,
+    /// with the line `notice`.
+    fn view(
+        registry: &Registry,
+        resource: &Arc<dyn Erased>,
+        id: i64,
+        notice: Option<String>,
+    ) -> Self {
+        FormTarget {
+            heading: format!("View {} #{id}", resource.singular()),
+            read_only: true,
+            notice,
+            ..FormTarget::edit(registry, resource, id)
         }
     }
 
@@ -1788,7 +1825,8 @@ fn form_view(
         },
     );
     let has_structure = fields.iter().any(|field| field.is_structured);
-    let has_live = has_structure || fields.iter().any(|field| field.live);
+    // A read-only form changes nothing, so it sends nothing to the live URL.
+    let has_live = !target.read_only && (has_structure || fields.iter().any(|field| field.live));
     let shown_fields = fields
         .iter()
         .map(|field| field.name.as_str())
@@ -1840,6 +1878,10 @@ fn form_view(
         action: target.action,
         submit_label: target.submit_label,
         back_url: format!("{}/{}", registry.mount, resource.slug()),
+        cancel_label: if target.read_only { "Back" } else { "Cancel" },
+        read_only: target.read_only,
+        has_notice: target.notice.is_some(),
+        notice: target.notice.unwrap_or_default(),
         fields,
         has_layout,
         has_form_styles: has_layout || has_structure,
@@ -1856,6 +1898,32 @@ fn form_view(
         editor_script: editor.unwrap_or_default(),
     };
     render_page("ignite::form", &page, compiled::form::render)
+}
+
+/// Whether `record` is read-only for the signed-in user (`read_only_when`), given its edit
+/// form's context with the stored values.
+fn record_read_only(resource: &dyn Erased, record: &Value, session: &AdminUser) -> bool {
+    let form = record_form(resource.fields(), record);
+    resource.is_read_only(&FormContext::new(
+        Operation::Edit,
+        record.as_object(),
+        session.acting_user(),
+        &form,
+    ))
+}
+
+/// Refuses with 403 a change to `record` when it is read-only for the signed-in user, as
+/// Filament refuses to save a View page.
+fn refuse_read_only(
+    resource: &dyn Erased,
+    record: &Value,
+    session: &AdminUser,
+) -> Result<(), Status> {
+    if record_read_only(resource, record, session) {
+        Err(Status::Forbidden)
+    } else {
+        Ok(())
+    }
 }
 
 /// The slug fields of `resource` that no longer follow their source on the edit form of

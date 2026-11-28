@@ -40,6 +40,13 @@ use crate::structure::{RepeaterSettings, Repeaters};
 /// edits must have a numeric `id`, and a key for each field and column it shows.
 pub type Row = Map<String, Value>;
 
+/// A rule on a record's form, given its [`FormContext`]: the operation, the record, the user
+/// and the form's values, as a Filament closure is given `$record` and `$operation`.
+pub type FormRule = Arc<dyn Fn(&FormContext<'_>) -> bool + Send + Sync>;
+
+/// A line a record's form shows, from its [`FormContext`], or none.
+pub type FormNotice = Arc<dyn Fn(&FormContext<'_>) -> Option<String> + Send + Sync>;
+
 /// The future a [`RuntimeData`] method returns: boxed, so the trait can be a trait object.
 /// Write the body as `Box::pin(async move { ... })`.
 pub type RuntimeFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, Error>> + Send + 'a>>;
@@ -566,6 +573,12 @@ pub struct RuntimeResource {
     /// Filament's `minItems()`, `maxItems()` and `itemLabel()`. See [`Repeaters`]. The default
     /// has none: every repeater has the default settings.
     pub repeaters: Repeaters,
+    /// The records the signed-in user may only view. See
+    /// [`read_only_when`](Self::read_only_when). The default is none.
+    pub read_only: Option<FormRule>,
+    /// The line the form of a read-only record shows. See
+    /// [`read_only_notice`](Self::read_only_notice).
+    pub read_only_notice: Option<FormNotice>,
 }
 
 impl fmt::Debug for RuntimeResource {
@@ -594,6 +607,7 @@ impl fmt::Debug for RuntimeResource {
             .field("row_actions", &self.row_actions)
             .field("hide_default_delete_when", &self.hide_default_delete_when)
             .field("repeaters", &self.repeaters)
+            .field("read_only", &self.read_only.is_some())
             .finish_non_exhaustive()
     }
 }
@@ -631,6 +645,8 @@ impl RuntimeResource {
             row_actions: Vec::new(),
             hide_default_delete_when: None,
             repeaters: Repeaters::new(),
+            read_only: None,
+            read_only_notice: None,
         }
     }
 
@@ -821,6 +837,34 @@ impl RuntimeResource {
     /// methods. See [`RepeaterSettings`].
     pub fn repeater(mut self, path: impl Into<String>, settings: RepeaterSettings) -> Self {
         self.repeaters = self.repeaters.repeater(path, settings);
+        self
+    }
+
+    /// Makes the records for which `rule` holds read-only for the signed-in user, as Filament's
+    /// View page, a disabled form with the record's data: their edit form shows the values
+    /// with every input disabled and no Save, its heading says "View", the list's button says
+    /// "View", and their save (and the form's live URL) answers 403 Forbidden. `rule` is given
+    /// the edit form's [`FormContext`]: the record, the user and the stored values. Such as a
+    /// post type defined in code, which the admin screens may show but not change:
+    ///
+    /// ```ignore
+    /// .read_only_when(|form| form.record().and_then(|r| r.get("origin")) != Some(&json!("admin")))
+    /// ```
+    pub fn read_only_when(
+        mut self,
+        rule: impl Fn(&FormContext<'_>) -> bool + Send + Sync + 'static,
+    ) -> Self {
+        self.read_only = Some(Arc::new(rule));
+        self
+    }
+
+    /// The line the form of a read-only record shows above its fields, such as "This post type
+    /// is defined in code by the theme. Change it there.", or none.
+    pub fn read_only_notice(
+        mut self,
+        notice: impl Fn(&FormContext<'_>) -> Option<String> + Send + Sync + 'static,
+    ) -> Self {
+        self.read_only_notice = Some(Arc::new(notice));
         self
     }
 
@@ -1204,6 +1248,23 @@ impl RegisteredResource {
     /// The settings of the form's repeaters and flexible content fields.
     pub fn repeaters(&self) -> &Repeaters {
         &self.resource.repeaters
+    }
+
+    /// Whether the record of the edit form `form` is read-only for its user
+    /// ([`RuntimeResource::read_only_when`]).
+    pub fn is_read_only(&self, form: &FormContext<'_>) -> bool {
+        self.resource
+            .read_only
+            .as_ref()
+            .is_some_and(|rule| rule(form))
+    }
+
+    /// The line the form of a read-only record shows, if any.
+    pub fn read_only_notice(&self, form: &FormContext<'_>) -> Option<String> {
+        self.resource
+            .read_only_notice
+            .as_ref()
+            .and_then(|notice| notice(form))
     }
 
     /// [`validate`](Self::validate) for a form whose fields `hidden` are hidden (see

@@ -892,6 +892,8 @@ pub(crate) struct ColumnHead {
 pub(crate) struct RowView {
     pub(crate) cells: Vec<CellView>,
     pub(crate) edit_url: String,
+    /// The Edit button's label: "Edit", or "View" for a record that is read-only for the user.
+    pub(crate) edit_label: &'static str,
     pub(crate) delete_url: String,
     /// Whether the record shows its Edit button: the user holds the ability and the
     /// resource's policy allows the update of this record.
@@ -1016,6 +1018,13 @@ pub(crate) struct FormPage {
     pub(crate) action: String,
     pub(crate) submit_label: &'static str,
     pub(crate) back_url: String,
+    /// The label of the link back to the list: "Cancel", or "Back" on a read-only record.
+    pub(crate) cancel_label: &'static str,
+    /// Whether the form shows a read-only record, as Filament's View page: its inputs are
+    /// disabled and it has no Save. Its line, if any, shows under the heading.
+    pub(crate) read_only: bool,
+    pub(crate) has_notice: bool,
+    pub(crate) notice: String,
     /// The fields, in display order, of a form without a layout. Empty with a layout: the
     /// fields are in `layout_columns`.
     pub(crate) fields: Vec<FieldView>,

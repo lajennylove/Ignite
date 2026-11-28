@@ -115,9 +115,19 @@ All notable changes to Ignite are listed here. The format follows
   refused ("Choose one of the options.", under the sub-field's input for a row). A lookup,
   post object, relationship, taxonomy, user or loaded checkbox list inside a repeater, group
   or flexible content now loads its choices per row and is checked against them.
+- Read-only records, as Filament's View page (a disabled form with the record's data):
+  `RuntimeResource::read_only_when(|form| ...)` makes the records for which the rule holds
+  read-only for the signed-in user (given the edit form's `FormContext`: record, user, stored
+  values), and `read_only_notice(|form| ...)` gives the line their form shows. The edit form
+  of such a record has the heading "View <Singular> #<id>", its inputs in a disabled
+  fieldset, no Save and a "Back" link; the list's button says "View"; its save and its live
+  URL answer 403 Forbidden. `ignite_core::FormRule` and `FormNotice` are the rules' types.
 
 ### Changed
 
+- A form's tabs (Added) are links (`<a role="tab">`), so a read-only form's disabled fieldset
+  leaves them working. The list's Edit button and the form's Cancel link read their labels
+  from the page values `row.edit_label` and `cancel_label`; their text is unchanged.
 - A repeater, group, flexible content or clone on a resource form renders as sub-fields (see Added), so its
   markup changed; a form
   with one loads the form script and `form.css`. A structured value's nested errors are all
